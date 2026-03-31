@@ -1,0 +1,146 @@
+import { useState, useEffect } from 'react';
+import { DEFAULT_LLM_TASK_PROMPT, DEFAULT_LLM_USER_MESSAGE } from '@/lib/llmPrompt';
+
+export type ModelMode = 'online' | 'local';
+
+interface ModelModeConfig {
+  mode: ModelMode;
+  localModelConfig: {
+    modelName: string;
+    systemPrompt: string;
+    userMessage: string;
+    temperature: number;
+    maxTokens: number;
+    topP: number;
+    topK: number;
+    repeatPenalty: number;
+    // 新增的优化配置选项
+    contextLength?: number;
+    memoryOptimization?: boolean;
+    timeout?: number;
+    retryAttempts?: number;
+    batchSize?: number;
+  };
+}
+
+const DEFAULT_LOCAL_CONFIG = {
+  modelName: 'minicpm-v:latest',
+  systemPrompt: DEFAULT_LLM_TASK_PROMPT,
+  userMessage: DEFAULT_LLM_USER_MESSAGE,
+  temperature: 0.7,
+  maxTokens: 1024,
+  topP: 0.9,
+  topK: 40,
+  repeatPenalty: 1.1,
+  // 性能优化参数默认值
+  contextLength: 32768,
+  timeout: 900000,
+  retryAttempts: 3,
+  memoryOptimization: false,
+  batchSize: 1
+};
+
+export const useModelMode = () => {
+  const [config, setConfig] = useState<ModelModeConfig>({
+    mode: 'online',
+    localModelConfig: DEFAULT_LOCAL_CONFIG
+  });
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 从localStorage加载配置
+  useEffect(() => {
+    try {
+      const savedConfig = localStorage.getItem('modelModeConfig');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        setConfig({
+          mode: parsed.mode || 'online',
+          localModelConfig: { ...DEFAULT_LOCAL_CONFIG, ...parsed.localModelConfig }
+        });
+      }
+    } catch (error) {
+      console.error('加载模型模式配置失败:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // 保存配置到localStorage
+  const saveConfig = (newConfig: Partial<ModelModeConfig>) => {
+    const updatedConfig = { ...config, ...newConfig };
+    setConfig(updatedConfig);
+    
+    try {
+      localStorage.setItem('modelModeConfig', JSON.stringify(updatedConfig));
+    } catch (error) {
+      console.error('保存模型模式配置失败:', error);
+    }
+  };
+
+  // 切换模型模式
+  const setMode = (mode: ModelMode) => {
+    // 立即更新状态，不等待localStorage保存
+    const updatedConfig = { ...config, mode };
+    setConfig(updatedConfig);
+    
+    // 异步保存到localStorage
+    try {
+      localStorage.setItem('modelModeConfig', JSON.stringify(updatedConfig));
+    } catch (error) {
+      console.error('保存模型模式配置失败:', error);
+    }
+  };
+
+  // 更新本地模型配置
+  const updateLocalModelConfig = (localConfig: Partial<typeof DEFAULT_LOCAL_CONFIG>) => {
+    const updatedLocalConfig = { ...config.localModelConfig, ...localConfig };
+    const updatedConfig = { ...config, localModelConfig: updatedLocalConfig };
+    
+    // 立即更新状态
+    setConfig(updatedConfig);
+    
+    // 异步保存到localStorage
+    try {
+      localStorage.setItem('modelModeConfig', JSON.stringify(updatedConfig));
+    } catch (error) {
+      console.error('保存本地模型配置失败:', error);
+    }
+  };
+
+  // 检查本地模型是否可用
+  const checkLocalModelAvailable = async (): Promise<boolean> => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+      
+      // 使用Node.js代理的端口11437
+      const response = await fetch('http://localhost:11437/api/tags', {
+        method: 'GET',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.models?.some((m: any) => m.name.includes('moondream')) || false;
+      }
+      return false;
+    } catch (error) {
+      console.error('检查本地模型失败:', error);
+      return false;
+    }
+  };
+
+  return {
+    mode: config.mode,
+    localModelConfig: config.localModelConfig,
+    isLoading,
+    setMode,
+    updateLocalModelConfig,
+    checkLocalModelAvailable,
+    isOnlineMode: config.mode === 'online',
+    isLocalMode: config.mode === 'local'
+  };
+};

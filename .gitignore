@@ -1,0 +1,150 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Production build
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Temporary folders
+tmp/
+temp/
+temp_clean/
+temp_live/
+
+# Python virtual environments
+venv/
+paddleocr_env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# AI Model files (too large for git)
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pb
+
+# SSL certificates
+*.crt
+*.key
+*.pem
+
+# Deployment files
+deployment_files/
+production/ssl/
+
+# Reports
+reports/
+
+# Test files
+test_files/
+
+# Playwright
+.playwright-mcp/
+.claude/
+
+# Vite cache
+.vite/
+
+# Large data files
+*.tar.gz
+*.zip
+*.msi
+
+# Application bundles
+*.app/
+
+# Desktop files
+*.desktop
+
+# 线下测试包（不提交到GitHub）
+线下测试包/
+
+# 模型备份文件（不提交到GitHub）
+model_backups/
+# 模型文件（太大，不提交到GitHub）
+models/*.pt
+models/*.weights
+#commdand文件苹果系统的不提交
+*.command
+
+# 视频文件（太大，不提交到GitHub）
+*.MOV
+*.mov
+*.mp4
+*.avi
+*.mkv
+*.flv
+# 临时备份目录
+INFO_TEMP_BACKUP/
+
+# Python / backend runtime
+backend/venv/
+backend/media/
+backend/models/easyocr/
+
+# Extra large local artifacts
+*.partial
+*.backup
+*.backup*
+*.wrong_model_backup
+*.bak
+本地大模型/

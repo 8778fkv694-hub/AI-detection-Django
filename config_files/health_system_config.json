@@ -1,0 +1,13 @@
+{
+  "health_system": {
+    "enabled": true,
+    "discovery": {
+      "enabled": false
+    },
+    "manual_config": {
+      "enabled": true,
+      "ip_address": "127.0.0.1",
+      "port": 4003
+    }
+  }
+}

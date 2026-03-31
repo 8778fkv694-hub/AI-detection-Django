@@ -1,0 +1,20 @@
+Django>=4.2,<5.0
+djangorestframework>=3.14
+django-cors-headers>=4.3
+Pillow>=10.0
+celery==5.3.6
+redis>=5.0
+gunicorn>=21.0
+whitenoise>=6.5
+requests>=2.31
+ultralytics>=8.3.0
+opencv-python-headless>=4.10.0.84
+numpy>=1.26
+torch>=2.2.0
+torchvision>=0.17.0
+# OCR 相关依赖
+paddleocr>=2.7.0.3
+paddlepaddle>=3.2.0
+# 微信二维码检测依赖
+opencv-contrib-python>=4.10.0.84
+  

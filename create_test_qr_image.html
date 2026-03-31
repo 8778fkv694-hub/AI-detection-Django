@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>创建多二维码测试图片</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script>
+        // 备用二维码生成方案
+        function generateQRCodeFallback(text, size = 150) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // 简单的二维码模拟（实际项目中应该使用真正的二维码库）
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, size, size);
+            
+            ctx.fillStyle = 'black';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('QR: ' + text, size/2, size/2);
+            
+            // 绘制简单的二维码图案
+            const blockSize = 8;
+            for (let i = 0; i < size; i += blockSize) {
+                for (let j = 0; j < size; j += blockSize) {
+                    if ((i + j) % (blockSize * 2) === 0) {
+                        ctx.fillRect(i, j, blockSize, blockSize);
+                    }
+                }
+            }
+            
+            return canvas;
+        }
+    </script>
+</head>
+<body>
+    <h1>多二维码测试图片生成器</h1>
+    <div id="canvas-container"></div>
+    <button onclick="generateQRImages()">生成测试图片</button>
+    <button onclick="downloadImage()">下载图片</button>
+    
+    <script>
+        function generateQRImages() {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '';
+            
+            // 创建主画布
+            const canvas = document.createElement('canvas');
+            canvas.width = 600;
+            canvas.height = 400;
+            canvas.style.border = '1px solid #ccc';
+            canvas.style.margin = '10px';
+            const ctx = canvas.getContext('2d');
+            
+            // 设置白色背景
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 检查QRCode库是否可用
+            if (typeof QRCode !== 'undefined') {
+                // 使用QRCode库生成第一个二维码 (左上角)
+                QRCode.toCanvas(canvas, 'PRODUCT_A_12345', {
+                    width: 150,
+                    margin: 1,
+                    color: {
+                        dark: '#000000',
+                        light: '#FFFFFF'
+                    }
+                }, function (error) {
+                    if (error) console.error(error);
+                    console.log('第一个二维码生成成功');
+                });
+                
+                // 等待第一个二维码生成完成后生成第二个
+                setTimeout(() => {
+                    // 在右上角生成第二个二维码
+                    const qrCanvas2 = document.createElement('canvas');
+                    QRCode.toCanvas(qrCanvas2, 'BATCH_B_67890', {
+                        width: 150,
+                        margin: 1,
+                        color: {
+                            dark: '#000000',
+                            light: '#FFFFFF'
+                        }
+                    }, function (error) {
+                        if (error) console.error(error);
+                        console.log('第二个二维码生成成功');
+                        
+                        // 将第二个二维码绘制到主画布的右上角
+                        ctx.drawImage(qrCanvas2, 450, 50);
+                        
+                        // 添加一些文字标识
+                        ctx.fillStyle = 'black';
+                        ctx.font = '16px Arial';
+                        ctx.fillText('QR Code A: PRODUCT_A_12345', 50, 220);
+                        ctx.fillText('QR Code B: BATCH_B_67890', 450, 220);
+                        
+                        // 添加分隔线
+                        ctx.strokeStyle = '#ccc';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(300, 50);
+                        ctx.lineTo(300, 350);
+                        ctx.stroke();
+                        
+                        // 保存到全局变量
+                        window.testCanvas = canvas;
+                    });
+                }, 1000);
+            } else {
+                // 使用备用方案生成二维码
+                console.log('使用备用二维码生成方案');
+                
+                // 生成第一个二维码
+                const qrCanvas1 = generateQRCodeFallback('PRODUCT_A_12345', 150);
+                ctx.drawImage(qrCanvas1, 50, 50);
+                
+                // 生成第二个二维码
+                const qrCanvas2 = generateQRCodeFallback('BATCH_B_67890', 150);
+                ctx.drawImage(qrCanvas2, 400, 50);
+                
+                // 添加一些文字标识
+                ctx.fillStyle = 'black';
+                ctx.font = '16px Arial';
+                ctx.fillText('QR Code A: PRODUCT_A_12345', 50, 220);
+                ctx.fillText('QR Code B: BATCH_B_67890', 400, 220);
+                
+                // 添加分隔线
+                ctx.strokeStyle = '#ccc';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(300, 50);
+                ctx.lineTo(300, 350);
+                ctx.stroke();
+                
+                // 保存到全局变量
+                window.testCanvas = canvas;
+            }
+            
+            container.appendChild(canvas);
+        }
+        
+        function downloadImage() {
+            if (window.testCanvas) {
+                const link = document.createElement('a');
+                link.download = 'test_multiple_qr_codes.png';
+                link.href = window.testCanvas.toDataURL();
+                link.click();
+            } else {
+                alert('请先生成测试图片');
+            }
+        }
+    </script>
+</body>
+</html>

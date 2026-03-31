@@ -1,0 +1,46 @@
+
+    @tailwind base;
+    @tailwind components;
+    @tailwind utilities;
+
+    @layer base {
+      :root {
+        /* Dark Theme Color Palette */
+        --background: 224 71% 4%;    /* Deep, dark blue */
+        --foreground: 210 40% 98%;  /* Bright, off-white text */
+
+        --card: 224 71% 4%;
+        --card-foreground: 210 40% 98%;
+
+        --popover: 224 71% 4%;
+        --popover-foreground: 210 40% 98%;
+
+        --muted: 215 28% 17%;       /* Muted background for secondary elements */
+        --muted-foreground: 215 20% 65%; /* Muted text */
+
+        --primary: 210 40% 98%;     /* Primary element color (e.g., bright text) */
+        --primary-foreground: 222.2 47.4% 11.2%; /* Text on primary elements */
+        
+        --accent: 260 100% 75%;     /* Accent color for buttons, highlights etc. */
+        --accent-foreground: 222.2 47.4% 11.2%;
+
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 210 40% 98%;
+
+        --border: 215 28% 17%;      /* Borders for cards and inputs */
+        --input: 215 28% 17%;       /* Input background */
+        --ring: 260 100% 75%;       /* Focus ring color */
+
+        --radius: 0.75rem;
+      }
+    }
+ 
+    @layer base {
+      * { @apply border-border; }
+      body {
+        @apply bg-background text-foreground antialiased;
+        font-feature-settings: "rlig" 1, "calt" 1;
+      }
+      html { font-size: 17px; }
+    }
+  

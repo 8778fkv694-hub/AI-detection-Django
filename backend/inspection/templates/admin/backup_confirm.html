@@ -1,0 +1,146 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .backup-container {
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 30px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .success-header {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #28a745;
+        border-bottom: 2px solid #28a745;
+        padding-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .success-icon {
+        font-size: 32px;
+    }
+    .success-info {
+        background: #d4edda;
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 30px;
+        border-left: 4px solid #28a745;
+    }
+    .success-info p {
+        margin: 10px 0;
+        line-height: 1.6;
+        color: #155724;
+    }
+    .next-steps {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+    }
+    .next-steps h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        color: #333;
+    }
+    .next-steps p {
+        margin: 10px 0;
+        line-height: 1.6;
+    }
+    .action-buttons {
+        display: flex;
+        gap: 15px;
+        margin-top: 30px;
+        flex-wrap: wrap;
+    }
+    .btn-clear {
+        background: #dc3545;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        text-decoration: none;
+        display: inline-block;
+        transition: background 0.3s;
+    }
+    .btn-clear:hover {
+        background: #c82333;
+        color: white;
+    }
+    .btn-back {
+        background: #417690;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        text-decoration: none;
+        display: inline-block;
+        transition: background 0.3s;
+    }
+    .btn-back:hover {
+        background: #2e5666;
+        color: white;
+    }
+    .warning-box {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin-top: 20px;
+        border-radius: 4px;
+    }
+    .warning-box p {
+        margin: 5px 0;
+        color: #856404;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="backup-container">
+    <h1 class="success-header">
+        <span class="success-icon">✓</span>
+        数据库备份成功！
+    </h1>
+
+    <div class="success-info">
+        <p><strong>备份已完成</strong></p>
+        <p>您的数据库已成功备份。备份文件已保存在 backend/backups 目录中。</p>
+    </div>
+
+    <div class="next-steps">
+        <h2>下一步操作</h2>
+        <p>现在数据库已经备份完成，您可以选择：</p>
+        <ul>
+            <li><strong>清除历史数据：</strong>删除检测结果、缺陷记录等历史数据，释放存储空间</li>
+            <li><strong>返回管理首页：</strong>继续使用系统，不进行任何更改</li>
+        </ul>
+    </div>
+
+    <div class="warning-box">
+        <p><strong>注意：</strong></p>
+        <p>清除历史数据的操作不可逆，请确保备份文件已妥善保存。清除操作将删除：</p>
+        <ul>
+            <li>所有检测结果记录</li>
+            <li>所有缺陷记录</li>
+            <li>所有模型性能记录</li>
+        </ul>
+        <p>配置数据（如标准、检测区域、模型版本等）不会被删除。</p>
+    </div>
+
+    <div class="action-buttons">
+        <a href="{% url 'admin_clear_history' %}" class="btn-clear">清除历史数据</a>
+        <a href="{% url 'admin:index' %}" class="btn-back">返回管理首页</a>
+    </div>
+</div>
+{% endblock %}

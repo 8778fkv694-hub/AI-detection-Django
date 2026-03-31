@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二维码重试机制测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .qr-info {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+        .retry-info {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 二维码重试机制测试</h1>
+        <p>此页面用于测试二维码检测的重试机制功能。上传包含多个二维码的图片，系统将自动进行重试检测。</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>📁 点击或拖拽图片到此处</p>
+            <p>支持格式: JPG, PNG, GIF</p>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        </div>
+        
+        <div id="result" class="result" style="display: none;"></div>
+        
+        <div style="margin-top: 20px;">
+            <h3>测试说明：</h3>
+            <ul>
+                <li>✅ 重试机制：最多5次重试</li>
+                <li>🎭 图片遮罩：已检测成功的二维码会被遮罩</li>
+                <li>🔒 锁定机制：已通过的二维码会被锁定，不再重复检测</li>
+                <li>📊 结果汇总：显示所有重试的统计信息</li>
+                <li>🎯 识别标准：识别1次即算通过</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // 模拟二维码检测器（简化版本）
+        class MockBarcodeDetector {
+            constructor() {
+                this.detectionCount = 0;
+            }
+
+            async detectWithRetry(imageFile, expectedBarcodes, options = {}) {
+                const { maxRetries = 5, enableMasking = true } = options;
+                
+                let allResults = [];
+                let matchResults = expectedBarcodes.map(config => ({
+                    expectedText: config.expectedText,
+                    matchMode: config.matchMode,
+                    matched: false,
+                    retryCount: 0
+                }));
+                
+                let totalRetries = 0;
+                let successfulDetections = 0;
+                let failedDetections = 0;
+
+                // 模拟检测过程
+                for (let retry = 0; retry <= maxRetries; retry++) {
+                    console.log(`🔄 二维码检测重试 ${retry + 1}/${maxRetries + 1}`);
+                    
+                    // 模拟检测结果（随机生成）
+                    const detectedBarcodes = this.simulateDetection(imageFile, retry);
+                    allResults.push(...detectedBarcodes);
+                    totalRetries++;
+                    
+                    console.log(`📊 第 ${retry + 1} 次检测到 ${detectedBarcodes.length} 个二维码`);
+                    
+                    // 检查匹配结果
+                    let hasNewMatches = false;
+                    matchResults.forEach(result => {
+                        if (result.matched) return;
+                        
+                        result.retryCount = retry + 1;
+                        
+                        // 模拟匹配逻辑
+                        for (const detected of detectedBarcodes) {
+                            if (this.validateBarcode(detected.data, result.expectedText, result.matchMode)) {
+                                result.matched = true;
+                                result.detectedData = detected.data;
+                                result.confidence = detected.confidence;
+                                result.location = detected.location;
+                                hasNewMatches = true;
+                                successfulDetections++;
+                                console.log(`✅ 匹配成功: ${result.expectedText} -> ${detected.data}`);
+                                break;
+                            }
+                        }
+                    });
+                    
+                    // 如果所有二维码都已匹配，提前结束
+                    const allMatched = matchResults.every(result => result.matched);
+                    if (allMatched) {
+                        console.log(`🎉 所有二维码检测完成，共重试 ${retry + 1} 次`);
+                        break;
+                    }
+                    
+                    // 模拟遮罩效果
+                    if (enableMasking && retry > 0) {
+                        const maskedCount = matchResults.filter(r => r.matched).length;
+                        if (maskedCount > 0) {
+                            console.log(`🎭 创建遮罩图片，隐藏 ${maskedCount} 个已检测区域`);
+                        }
+                    }
+                    
+                    if (!hasNewMatches && retry < maxRetries) {
+                        console.log(`⏳ 第 ${retry + 1} 次检测无新匹配，继续重试...`);
+                    }
+                }
+                
+                failedDetections = matchResults.filter(result => !result.matched).length;
+                
+                console.log(`📈 重试检测完成: 成功 ${successfulDetections} 个，失败 ${failedDetections} 个，总重试 ${totalRetries} 次`);
+                
+                return {
+                    allResults,
+                    matchResults,
+                    retrySummary: {
+                        totalRetries,
+                        successfulDetections,
+                        failedDetections
+                    }
+                };
+            }
+
+            simulateDetection(imageFile, retry) {
+                // 模拟检测结果，随着重试次数增加检测成功率
+                const results = [];
+                const successRate = Math.min(0.3 + retry * 0.15, 0.9); // 重试次数越多，成功率越高
+                
+                // 模拟检测到的二维码
+                const possibleCodes = [
+                    { data: "QR001", confidence: 0.95 },
+                    { data: "QR002", confidence: 0.88 },
+                    { data: "QR003", confidence: 0.92 },
+                    { data: "QR004", confidence: 0.85 }
+                ];
+                
+                possibleCodes.forEach((code, index) => {
+                    if (Math.random() < successRate) {
+                        results.push({
+                            type: 'qr',
+                            data: code.data,
+                            confidence: code.confidence,
+                            location: {
+                                x: 50 + index * 100,
+                                y: 50 + index * 50,
+                                width: 80,
+                                height: 80
+                            }
+                        });
+                    }
+                });
+                
+                return results;
+            }
+
+            validateBarcode(detectedData, expectedData, matchMode) {
+                if (matchMode === 'exact') {
+                    return detectedData === expectedData;
+                } else {
+                    return detectedData.includes(expectedData) || expectedData.includes(detectedData);
+                }
+            }
+        }
+
+        const detector = new MockBarcodeDetector();
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const resultDiv = document.getElementById('result');
+
+        // 文件上传处理
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#007bff';
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ccc';
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ccc';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        async function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showResult('请选择图片文件！', 'error');
+                return;
+            }
+
+            showResult('🔄 正在检测二维码...', 'info');
+
+            try {
+                // 模拟期望的二维码配置
+                const expectedBarcodes = [
+                    { expectedText: 'QR001', matchMode: 'exact' },
+                    { expectedText: 'QR002', matchMode: 'exact' },
+                    { expectedText: 'QR003', matchMode: 'exact' },
+                    { expectedText: 'QR004', matchMode: 'exact' }
+                ];
+
+                // 执行重试检测
+                const result = await detector.detectWithRetry(file, expectedBarcodes, {
+                    maxRetries: 5,
+                    enableMasking: true,
+                    maskColor: '#FFFFFF',
+                    maskPadding: 10
+                });
+
+                // 显示结果
+                displayResults(result);
+
+            } catch (error) {
+                showResult(`检测失败: ${error.message}`, 'error');
+            }
+        }
+
+        function displayResults(result) {
+            const { allResults, matchResults, retrySummary } = result;
+            
+            let html = '<h3>🎯 检测结果</h3>';
+            
+            // 重试摘要
+            html += `
+                <div class="retry-info">
+                    <h4>🔄 重试机制摘要</h4>
+                    <p><strong>总重试次数:</strong> ${retrySummary.totalRetries}</p>
+                    <p><strong>成功检测:</strong> ${retrySummary.successfulDetections} 个</p>
+                    <p><strong>失败检测:</strong> ${retrySummary.failedDetections} 个</p>
+                </div>
+            `;
+            
+            // 所有检测到的二维码
+            html += `
+                <div class="qr-info">
+                    <h4>📊 检测到的所有二维码 (${allResults.length} 个)</h4>
+            `;
+            
+            allResults.forEach((qr, index) => {
+                html += `
+                    <div style="margin: 5px 0; padding: 5px; background: #f8f9fa; border-radius: 3px;">
+                        <strong>#${index + 1}:</strong> ${qr.data} 
+                        <span style="color: #666;">(置信度: ${(qr.confidence * 100).toFixed(1)}%)</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            // 匹配结果
+            html += `
+                <div class="qr-info">
+                    <h4>🎯 匹配结果</h4>
+            `;
+            
+            matchResults.forEach((result, index) => {
+                const status = result.matched ? '✅ 匹配成功' : '❌ 未匹配';
+                const retryInfo = result.retryCount > 1 ? ` (重试 ${result.retryCount} 次)` : '';
+                
+                html += `
+                    <div style="margin: 5px 0; padding: 5px; background: ${result.matched ? '#d4edda' : '#f8d7da'}; border-radius: 3px;">
+                        <strong>期望:</strong> ${result.expectedText} → 
+                        <strong>检测:</strong> ${result.detectedData || '未检测到'} 
+                        <span style="color: ${result.matched ? '#155724' : '#721c24'};">${status}${retryInfo}</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            showResult(html, 'success');
+        }
+
+        function showResult(message, type) {
+            resultDiv.innerHTML = message;
+            resultDiv.className = `result ${type}`;
+            resultDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

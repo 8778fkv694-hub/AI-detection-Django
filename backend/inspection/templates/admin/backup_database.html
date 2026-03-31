@@ -1,0 +1,117 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .backup-container {
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 30px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .backup-header {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #333;
+        border-bottom: 2px solid #417690;
+        padding-bottom: 10px;
+    }
+    .backup-info {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+    }
+    .backup-info p {
+        margin: 10px 0;
+        line-height: 1.6;
+    }
+    .backup-warning {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+    }
+    .backup-actions {
+        display: flex;
+        gap: 15px;
+        margin-top: 30px;
+    }
+    .btn-backup {
+        background: #417690;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background 0.3s;
+    }
+    .btn-backup:hover {
+        background: #2e5666;
+    }
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        text-decoration: none;
+        display: inline-block;
+        transition: background 0.3s;
+    }
+    .btn-cancel:hover {
+        background: #5a6268;
+        color: white;
+    }
+    .db-type {
+        font-weight: bold;
+        color: #417690;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="backup-container">
+    <h1 class="backup-header">备份数据库</h1>
+
+    <div class="backup-info">
+        <p><strong>数据库类型：</strong> <span class="db-type">
+            {% if 'sqlite' in db_engine %}
+                SQLite
+            {% elif 'postgresql' in db_engine %}
+                PostgreSQL
+            {% else %}
+                {{ db_engine }}
+            {% endif %}
+        </span></p>
+        <p><strong>备份位置：</strong> backend/backups/ 目录</p>
+        <p><strong>文件命名：</strong> db_backup_<时间戳>.{{ 'sqlite3' if 'sqlite' in db_engine else 'sql' }}</p>
+    </div>
+
+    <div class="backup-warning">
+        <p><strong>提示：</strong></p>
+        <ul>
+            <li>备份过程可能需要几秒钟到几分钟，具体取决于数据库大小</li>
+            <li>建议在系统负载较低时进行备份</li>
+            <li>备份文件将保存在项目的 backend/backups 目录中</li>
+            <li>备份完成后，您可以选择清除历史数据以释放空间</li>
+        </ul>
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="backup-actions">
+            <button type="submit" class="btn-backup">开始备份</button>
+            <a href="{% url 'admin:index' %}" class="btn-cancel">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

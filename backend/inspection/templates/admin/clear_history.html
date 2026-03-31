@@ -1,0 +1,185 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .clear-container {
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 30px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .clear-header {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #dc3545;
+        border-bottom: 2px solid #dc3545;
+        padding-bottom: 10px;
+    }
+    .data-summary {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+    }
+    .data-summary h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 15px;
+        color: #333;
+    }
+    .data-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    .data-item:last-child {
+        border-bottom: none;
+    }
+    .data-label {
+        font-weight: 500;
+        color: #555;
+    }
+    .data-count {
+        font-weight: bold;
+        color: #dc3545;
+        font-size: 18px;
+    }
+    .warning-box {
+        background: #f8d7da;
+        border-left: 4px solid #dc3545;
+        padding: 20px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+    }
+    .warning-box h3 {
+        color: #721c24;
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 18px;
+    }
+    .warning-box p {
+        margin: 5px 0;
+        color: #721c24;
+        line-height: 1.6;
+    }
+    .warning-box ul {
+        margin: 10px 0;
+        padding-left: 20px;
+    }
+    .warning-box li {
+        margin: 5px 0;
+        color: #721c24;
+    }
+    .action-buttons {
+        display: flex;
+        gap: 15px;
+        margin-top: 30px;
+    }
+    .btn-danger {
+        background: #dc3545;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background 0.3s;
+    }
+    .btn-danger:hover {
+        background: #c82333;
+    }
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        text-decoration: none;
+        display: inline-block;
+        transition: background 0.3s;
+    }
+    .btn-cancel:hover {
+        background: #5a6268;
+        color: white;
+    }
+    .safe-info {
+        background: #d1ecf1;
+        border-left: 4px solid #17a2b8;
+        padding: 15px;
+        margin-top: 20px;
+        border-radius: 4px;
+    }
+    .safe-info p {
+        margin: 5px 0;
+        color: #0c5460;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="clear-container">
+    <h1 class="clear-header">清除历史数据</h1>
+
+    <div class="data-summary">
+        <h2>即将删除的数据统计</h2>
+        <div class="data-item">
+            <span class="data-label">检测结果记录：</span>
+            <span class="data-count">{{ inspection_count }} 条</span>
+        </div>
+        <div class="data-item">
+            <span class="data-label">缺陷记录：</span>
+            <span class="data-count">{{ defect_count }} 条</span>
+        </div>
+        <div class="data-item">
+            <span class="data-label">模型性能记录：</span>
+            <span class="data-count">{{ performance_count }} 条</span>
+        </div>
+    </div>
+
+    <div class="warning-box">
+        <h3>⚠️ 重要警告</h3>
+        <p><strong>此操作不可逆！请仔细阅读以下信息：</strong></p>
+        <ul>
+            <li>所有历史检测记录将被永久删除</li>
+            <li>所有相关的缺陷记录将被永久删除</li>
+            <li>所有模型性能记录将被永久删除</li>
+            <li>删除后无法恢复，除非从备份文件中恢复</li>
+        </ul>
+        <p><strong>请确保您已经：</strong></p>
+        <ul>
+            <li>完成了数据库备份</li>
+            <li>确认备份文件可以正常使用</li>
+            <li>确认要删除这些历史数据</li>
+        </ul>
+    </div>
+
+    <div class="safe-info">
+        <p><strong>保留的数据：</strong></p>
+        <p>以下数据不会被删除，系统配置将保持完整：</p>
+        <ul>
+            <li>AI配置</li>
+            <li>检测标准和检测区域</li>
+            <li>缺陷类型和严重程度</li>
+            <li>模型版本和配置</li>
+            <li>流媒体源配置</li>
+            <li>OCR模板配置</li>
+        </ul>
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="action-buttons">
+            <button type="submit" class="btn-danger" onclick="return confirm('您确定要删除所有历史数据吗？此操作不可逆！');">确认清除</button>
+            <a href="{% url 'admin:index' %}" class="btn-cancel">取消</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

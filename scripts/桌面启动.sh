@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# 桌面双击启动脚本
+# 自动启动AI检测项目的完整服务
+
+echo "🚀 AI检测项目 - 桌面启动器"
+echo "================================"
+echo ""
+
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "📁 项目目录: $SCRIPT_DIR"
+echo ""
+
+# 检查并设置权限
+echo "🔧 设置脚本权限..."
+chmod +x start_full_project.sh 2>/dev/null
+chmod +x stop_services.sh 2>/dev/null
+chmod +x 启动AI检测项目.sh 2>/dev/null
+
+# 检查启动脚本是否存在
+if [ ! -f "start_full_project.sh" ]; then
+    echo "❌ 找不到启动脚本 start_full_project.sh"
+    echo "请确保在正确的项目目录中运行此脚本"
+    read -p "按任意键退出..."
+    exit 1
+fi
+
+echo "🚀 正在启动完整项目..."
+echo ""
+
+# 直接启动完整项目
+./start_full_project.sh
+
+echo ""
+echo "✅ 启动完成！"
+echo ""
+echo "📱 访问地址："
+echo "   前端界面: http://localhost:3303"
+echo "   后端API:  http://localhost:8000/api/"
+echo "   管理后台: http://localhost:8000/admin"
+echo ""
+echo "🛑 停止服务: 运行 stop_services.sh"
+echo ""
+
+# 等待用户确认
+read -p "按任意键关闭此窗口..."
