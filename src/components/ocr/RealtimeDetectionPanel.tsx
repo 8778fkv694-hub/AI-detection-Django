@@ -125,7 +125,12 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
   loadModelConfig,
   onModelSwitch,
 }) => {
+  const selectedDevice = availableDevices.find((device) => device.deviceId === selectedDeviceId);
   const isVirtualStream = selectedDeviceId.startsWith('stream-');
+  const virtualStreamPlayMode = selectedDevice?.streamSource?.play_mode;
+  const isJpegVirtualStream = isVirtualStream && virtualStreamPlayMode === 'jpg';
+  const showVideoElement = isCameraOn && !isJpegVirtualStream;
+  const showPreviewCanvas = isCameraOn && isJpegVirtualStream;
 
   return (
     <div className="p-3 sm:p-4 bg-slate-800/50 rounded-lg border border-slate-600">
@@ -271,7 +276,7 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
           autoPlay
           playsInline
           muted
-          className={`w-full h-full object-contain ${!isCameraOn || isVirtualStream ? 'hidden' : ''}`}
+          className={`w-full h-full object-contain ${showVideoElement ? '' : 'hidden'}`}
           onLoadStart={() => console.log('视频开始加载')}
           onLoadedData={() => console.log('视频数据加载完成')}
           onLoadedMetadata={() => console.log('视频元数据加载完成')}
@@ -282,7 +287,7 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
         />
         <canvas
           ref={previewCanvasRef}
-          className={`absolute inset-0 w-full h-full object-contain z-10 ${!isCameraOn || !isVirtualStream ? 'hidden' : ''}`}
+          className={`absolute inset-0 w-full h-full object-contain z-10 ${showPreviewCanvas ? '' : 'hidden'}`}
         />
         <canvas
           ref={detectionCanvasRef}
