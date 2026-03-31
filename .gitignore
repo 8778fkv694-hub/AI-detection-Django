@@ -123,6 +123,9 @@ model_backups/
 # 模型文件（太大，不提交到GitHub）
 models/*.pt
 models/*.weights
+models/
+backend/models/
+django_deployment/static/models/
 #commdand文件苹果系统的不提交
 *.command
 
