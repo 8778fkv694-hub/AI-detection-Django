@@ -34,6 +34,36 @@ export const API_BASE_URL = (() => {
   }
 })();
 
+// Ollama 长请求绕过静态服务器代理，直接命中 Django 8000 端口
+export const DIRECT_BACKEND_API_BASE_URL = (() => {
+  if (window.location.port === '8000') {
+    return `${window.location.origin}/api`;
+  }
+
+  if (!API_BASE_URL.startsWith('http')) {
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    return `${protocol}//${host}:8000/api`;
+  }
+
+  return API_BASE_URL;
+})();
+
+export function buildApiUrl(endpoint: string, baseUrl: string = API_BASE_URL): string {
+  return endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+}
+
+export function buildDirectBackendApiUrl(endpoint: string): string {
+  return buildApiUrl(endpoint, DIRECT_BACKEND_API_BASE_URL);
+}
+
+export async function directBackendFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(buildDirectBackendApiUrl(endpoint), {
+    credentials: 'include',
+    ...options,
+  });
+}
+
 // 导出API配置
 export const API_CONFIG = {
   BASE_URL: API_BASE_URL,
@@ -113,7 +143,7 @@ function getCsrfTokenSync(): string | null {
 
 // 创建带基础URL的fetch函数
 export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+  const url = buildApiUrl(endpoint);
 
   // 判断是否需要CSRF保护的方法
   const needsCsrf = options.method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method.toUpperCase());

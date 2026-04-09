@@ -1,6 +1,6 @@
 
 import type { AIConfig, Standard, InspectionResult } from '@/types';
-import { apiRequest, apiFetch } from './config';
+import { apiRequest, apiFetch, directBackendFetch } from './config';
 import { composeInspectionSystemPrompt } from './llmPrompt';
 
 // 本地模型分析接口
@@ -43,11 +43,11 @@ export async function analyzeImageLocal(
             messages[1].content = `这是需要对比的"标准图"：\n\n标准图数据: data:image/jpeg;base64,${standardImagePureBase64}\n\n请检测这张待检图片。\n\n图片数据: data:image/jpeg;base64,${image}`;
         }
 
-        // 调用Ollama API（通过代理服务）
+        // 调用 Django 8000 的 Ollama API，绕过静态服务器代理
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 180000); // 3分钟超时（180秒）
 
-        const response = await apiFetch('/ollama/chat/', {
+        const response = await directBackendFetch('/ollama/chat/', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

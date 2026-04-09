@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import { MessageSquare, Copy, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvailableModels } from '@/lib/api';
+import { directBackendFetch } from '@/lib/config';
 import { useModelMode } from '@/hooks/useModelMode';
 import { saveLiveInspectionParams, type LiveInspectionParams } from '@/lib/paramPersistence';
 import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
@@ -197,11 +198,11 @@ const LiveInspectionScreen: React.FC = () => {
 
   // 测试本地模型连接
   const testLocalModelConnection = useCallback(async () => {
-    // 使用默认的本地模型地址
-    const localModelUrl = 'http://localhost:1234';
     try {
-      const response = await fetch(`${localModelUrl}/v1/models`);
-      if (response.ok) {
+      const response = await directBackendFetch('/ollama/status/');
+      const data = response.ok ? await response.json() : null;
+
+      if (response.ok && data?.success && data?.status === 'running') {
         toast.success('本地模型连接成功');
       } else {
         toast.error('本地模型连接失败');

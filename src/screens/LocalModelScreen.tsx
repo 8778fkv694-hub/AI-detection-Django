@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { HIGH_MEMORY_CONFIG, ULTRA_HIGH_MEMORY_CONFIG, FAST_MODE_CONFIG, HIGH_RESOLUTION_CONFIG, MOONDREAM_CONFIG, MOONDREAM_FAST_CONFIG, MOONDREAM_QUALITY_CONFIG, MOONDREAM3_CONFIG } from '@/lib/optimizedLocalAI';
+import { HIGH_MEMORY_CONFIG, ULTRA_HIGH_MEMORY_CONFIG, FAST_MODE_CONFIG, HIGH_RESOLUTION_CONFIG, GEMMA4_CONFIG } from '@/lib/optimizedLocalAI';
+import { directBackendFetch } from '@/lib/config';
 import { useModelMode } from '@/hooks/useModelMode';
 import { LLM_HANDSHAKE_SYSTEM_PROMPT } from '@/lib/llmPrompt';
 
@@ -68,8 +69,8 @@ const LocalModelScreen: React.FC = () => {
 
   const [config, setConfig] = useState<LocalModelConfig>(() => {
     // 如果localModelConfig是默认配置，则应用高内存模式
-    const isDefaultConfig = localModelConfig.modelName === 'moondream:latest' && 
-                           localModelConfig.maxTokens === 1024;
+    const isDefaultConfig = (localModelConfig.modelName === 'moondream:latest' || localModelConfig.modelName === 'gemma4:e4b') &&
+                           localModelConfig.maxTokens <= 1024;
     
     if (isDefaultConfig) {
       return { ...localModelConfig, ...HIGH_MEMORY_CONFIG };
@@ -104,8 +105,8 @@ const LocalModelScreen: React.FC = () => {
     setOllamaStatus(prev => ({ ...prev, isLoading: true, error: null }));
     
     try {
-      // 先通过后端API检查状态
-      const statusResponse = await fetch('/api/ollama/status/', {
+      // 直接请求 Django 8000 端口，避免经过静态服务器代理
+      const statusResponse = await directBackendFetch('/ollama/status/', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -365,7 +366,7 @@ const LocalModelScreen: React.FC = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
       
-      const response = await fetch('/api/ollama/chat/', {
+      const response = await directBackendFetch('/ollama/chat/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -378,7 +379,8 @@ const LocalModelScreen: React.FC = () => {
               content: '你好'
             }
           ],
-          stream: false
+          stream: false,
+          ...(config.modelName.includes('gemma4') || config.modelName.includes('qwq') ? { think: false } : {})
         }),
         signal: controller.signal
       });
@@ -607,6 +609,9 @@ const LocalModelScreen: React.FC = () => {
                 } else if (value.includes('qwen')) {
                   systemPrompt = '你是一个强大的多模态AI助手，可以理解和分析图像与文本内容，特别擅长视觉理解任务。请用中文回答用户的问题。';
                   userMessage = '请分析图片质量，返回JSON格式：{"overallQuality": "合格/存疑/需复检", "score": 85, "reason": "检测原因", "reasonKeywords": "关键词", "defects": []}';
+                } else if (value.includes('gemma')) {
+                  systemPrompt = GEMMA4_CONFIG.systemPrompt!;
+                  userMessage = GEMMA4_CONFIG.userMessage!;
                 }
                 
                 const newConfig = { 
@@ -677,6 +682,15 @@ const LocalModelScreen: React.FC = () => {
                       <div>
                         <div className="font-medium">Qwen2.5-VL-7B</div>
                         <div className="text-xs text-slate-500">高质量AI，8-12GB内存</div>
+                      </div>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="gemma4:e4b">
+                    <div className="flex items-center gap-2">
+                      <Target className="h-4 w-4" />
+                      <div>
+                        <div className="font-medium">Gemma 4</div>
+                        <div className="text-xs text-slate-500">Google多模态模型，9.6GB，支持图像理解</div>
                       </div>
                     </div>
                   </SelectItem>

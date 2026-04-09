@@ -274,7 +274,10 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
       let finalMatchStatus = currentMatchStatus;
       let aiResult: InspectionResult | null = null;
       if (fusionModeEnabled) {
-        console.log(`🔄 ${source === 'manual' ? '手动抓拍' : '实时检测'}：融合模式已启用，开始AI分析`);
+        // 融合模式下，先设置"等待LLM"状态，避免OCR结果提前显示为最终结果
+        setMatchStatus('none');
+        setFinalResult('none');
+        console.log(`🔄 ${source === 'manual' ? '手动抓拍' : '实时检测'}：融合模式已启用，等待LLM分析...`);
         console.log('🔄 base64Data长度:', base64Data.length);
         aiResult = await performFusionAIAnalysis(base64Data);
         if (aiResult) {

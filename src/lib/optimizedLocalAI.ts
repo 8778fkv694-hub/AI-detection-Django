@@ -1,6 +1,7 @@
 // 优化的本地AI调用方案
 import type { InspectionResult, Standard } from '@/types';
 import { DEFAULT_ACCURACY_CONFIG, applyAccuracyOptimization, determineQualityLevel, generateAnalysisReport } from './accuracyOptimization';
+import { buildDirectBackendApiUrl, directBackendFetch } from './config';
 import { composeInspectionSystemPrompt, DEFAULT_LLM_TASK_PROMPT, DEFAULT_LLM_USER_MESSAGE } from './llmPrompt';
 
 // 服务健康检查接口
@@ -29,19 +30,19 @@ interface OptimizedLocalConfig {
 }
 
 const DEFAULT_OPTIMIZED_CONFIG: OptimizedLocalConfig = {
-  modelName: 'minicpm-v:latest', // 使用更强大的 minicpm-v 模型
+  modelName: 'gemma4:e4b', // 默认使用 Gemma 4 模型
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
-  temperature: 0.1, // 更低温度，更稳定准确
-  maxTokens: 300, // 增加输出长度，提供更详细的分析
+  temperature: 0.2, // 低温度，稳定输出
+  maxTokens: 512, // 充足输出
   topP: 0.9,
   topK: 40,
   repeatPenalty: 1.1,
   batchSize: 1, // 单张处理
-  timeout: 60000, // 1分钟超时
+  timeout: 120000, // 2分钟超时（模型较大）
   retryAttempts: 3, // 增加重试次数
-  memoryOptimization: true, // 启用内存优化
-  contextLength: 2048 // 2K上下文长度
+  memoryOptimization: false, // 关闭内存优化，充分利用内存
+  contextLength: 8192 // 8K上下文长度
 };
 
 // 图片压缩函数已移除，使用实时检测页面的压缩函数
@@ -425,6 +426,22 @@ export const MOONDREAM3_QUALITY_CONFIG: Partial<OptimizedLocalConfig> = {
   retryAttempts: 3
 };
 
+// Gemma 4 专用配置预设（Google最新多模态模型，支持图像理解）
+export const GEMMA4_CONFIG: Partial<OptimizedLocalConfig> = {
+  modelName: 'gemma4:e4b',
+  systemPrompt: '你是一个专业的工业质检AI助手，擅长精确分析产品图像，识别缺陷和特征。请用专业、准确的中文回答。注意：defects数组中的severity字段只能是"轻微", "一般", "严重", "致命"四个值之一。',
+  userMessage: '请按照标准严格分析这张图，返回JSON格式：{"overallQuality": "合格/存疑/需复检", "score": 85, "reason": "检测原因", "reasonKeywords": "关键词1,关键词2,关键词3", "defects": [{"type": "缺陷类型", "description": "缺陷描述", "severity": "轻微/一般/严重/致命"}]}',
+  temperature: 0.2,     // 低温度，稳定输出
+  maxTokens: 512,       // 充足输出
+  topP: 0.9,
+  topK: 40,
+  repeatPenalty: 1.1,
+  contextLength: 8192,  // 8K上下文
+  timeout: 120000,      // 2分钟超时（模型较大）
+  retryAttempts: 3,
+  memoryOptimization: false
+};
+
 // 服务健康检查函数
 let healthCache: ServiceHealth | null = null;
 const HEALTH_CACHE_DURATION = 5000; // 5秒缓存
@@ -440,11 +457,11 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
   try {
     console.log('检查Ollama服务健康状态...');
 
-    // 直接检查Ollama API是否可用（跳过代理服务的健康检查）
+    // 直接检查 Django 8000 的 Ollama 状态接口，绕过静态服务器代理
     const ollamaController = new AbortController();
     const ollamaTimeoutId = setTimeout(() => ollamaController.abort(), 5000);
 
-    const ollamaResponse = await fetch('http://localhost:11434/api/tags', {
+    const ollamaResponse = await directBackendFetch('/ollama/status/', {
       method: 'GET',
       signal: ollamaController.signal
     });
@@ -452,93 +469,33 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
     clearTimeout(ollamaTimeoutId);
 
     if (!ollamaResponse.ok) {
-      console.warn(`Ollama API不可用 (状态码: ${ollamaResponse.status})，尝试通过代理服务检测...`);
-
-      // 如果Ollama API不可用，尝试通过代理服务进行检测
-      try {
-        const proxyController = new AbortController();
-        const proxyTimeoutId = setTimeout(() => proxyController.abort(), 3000);
-
-        const proxyResponse = await fetch('http://localhost:11437/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: proxyController.signal,
-          body: JSON.stringify({
-            model: 'minicpm-v:latest',
-            messages: [{ role: 'user', content: 'test' }],
-            stream: false
-          })
-        });
-
-        clearTimeout(proxyTimeoutId);
-
-        if (proxyResponse.ok) {
-          healthCache = {
-            isHealthy: true,
-            status: 'ready',
-            message: '通过代理服务检测到Ollama可用',
-            lastCheck: now
-          };
-          console.log('通过代理服务检测到Ollama可用');
-          return healthCache;
-        }
-      } catch (proxyError) {
-        console.warn('代理服务检测也失败:', proxyError);
-      }
-
-      // 如果Ollama API和代理服务都不可用，尝试直接进行简单的API调用
-      console.warn('所有健康检查方法都失败，尝试直接API调用...');
-
-      try {
-        const directController = new AbortController();
-        const directTimeoutId = setTimeout(() => directController.abort(), 5000);
-
-        const directResponse = await fetch('http://localhost:11437/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: directController.signal,
-          body: JSON.stringify({
-            model: 'minicpm-v:latest',
-            messages: [{ role: 'user', content: 'ping' }],
-            stream: false,
-            options: { num_predict: 1 }
-          })
-        });
-
-        clearTimeout(directTimeoutId);
-
-        if (directResponse.ok) {
-          healthCache = {
-            isHealthy: true,
-            status: 'ready',
-            message: '通过直接API调用检测到服务可用',
-            lastCheck: now
-          };
-          console.log('通过直接API调用检测到服务可用');
-          return healthCache;
-        }
-      } catch (directError) {
-        console.warn('直接API调用也失败:', directError);
-      }
-
       healthCache = {
         isHealthy: false,
         status: 'error',
-        message: `所有检测方法都失败，请检查Ollama服务是否正在运行`,
+        message: `状态检查失败，请检查 Django/Ollama 服务是否正在运行`,
         lastCheck: now
       };
       return healthCache;
     }
 
-    const models = await ollamaResponse.json();
-    const hasMoondream = models.models?.some((model: any) =>
-      model.name.includes('moondream') || model.name.includes('moondream:latest')
-    );
-    if (!hasMoondream) {
+    const statusData = await ollamaResponse.json();
+    const models = Array.isArray(statusData.models) ? statusData.models : [];
+
+    if (!statusData.success || statusData.status !== 'running') {
       healthCache = {
         isHealthy: false,
         status: 'error',
-        message: 'Moondream 模型未找到，请确保模型已正确安装',
+        message: statusData.message || 'Ollama 服务未就绪',
+        lastCheck: now
+      };
+      return healthCache;
+    }
+
+    if (models.length === 0) {
+      healthCache = {
+        isHealthy: false,
+        status: 'error',
+        message: 'Ollama 服务已运行，但没有可用模型',
         lastCheck: now
       };
       return healthCache;
@@ -547,7 +504,7 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
     healthCache = {
       isHealthy: true,
       status: 'ready',
-      message: 'Ollama服务运行正常，模型已就绪',
+      message: statusData.message || `Ollama服务运行正常，已发现 ${models.length} 个模型`,
       lastCheck: now
     };
 
@@ -568,20 +525,19 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
   }
 }
 
-// 简化的代理服务检查
+// 简化的 Ollama 状态检查
 export async function checkProxyService(): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:11437/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'minicpm-v:latest',
-        messages: [{ role: 'user', content: 'ping' }],
-        stream: false,
-        options: { num_predict: 1 }
-      })
+    const response = await directBackendFetch('/ollama/status/', {
+      method: 'GET',
     });
-    return response.ok;
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+    return data.success === true && data.status === 'running';
   } catch {
     return false;
   }
@@ -595,14 +551,14 @@ export async function waitForServiceReady(maxWaitTime: number = 30000): Promise<
   console.log('等待Ollama服务就绪...');
 
   while (Date.now() - startTime < maxWaitTime) {
-    // 首先尝试简单的代理服务检查
+    // 首先尝试轻量状态检查
     const proxyOk = await checkProxyService();
     if (proxyOk) {
-      console.log('代理服务已就绪');
+      console.log('Ollama状态接口已就绪');
       return true;
     }
 
-    // 如果代理服务检查失败，再进行完整的健康检查
+    // 如果轻量检查失败，再进行完整的健康检查
     const health = await checkOllamaHealth();
 
     if (health.isHealthy) {
@@ -685,33 +641,44 @@ export async function analyzeImageLocalOptimized(
 
     console.log('最终系统提示词:', systemPrompt.substring(0, 200) + '...');
 
-    // 3. 构建消息 - 使用配置的用户消息
+    // 3. 构建消息 - 使用 Ollama images 字段传递图片（不嵌入base64到文本）
     const userMessage = config.userMessage;
 
     console.log('使用的用户消息配置:', userMessage);
 
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: userMessage
-      }
-    ];
+    // 提取纯 base64 数据（去掉 data:image/... 前缀）
+    const pureBase64Image = compressedImage.startsWith('data:')
+      ? compressedImage.split(',')[1]
+      : compressedImage;
 
-    // 4. 如果有标准图片，添加到消息中
+    // 4. 构建图片列表（通过 Ollama images 字段传递，不占用 token 上下文）
+    const imageList: string[] = [];
+
     if (standard?.standardImage) {
       const standardImagePureBase64 = standard.standardImage.startsWith('data:')
         ? standard.standardImage.split(',')[1]
         : standard.standardImage;
-      messages[1].content = `标准图: data:image/jpeg;base64,${standardImagePureBase64}\n检测图: data:image/jpeg;base64,${compressedImage}`;
+      imageList.push(standardImagePureBase64); // 标准图
+      imageList.push(pureBase64Image);          // 检测图
     } else {
-      // 如果没有标准图片，添加检测图片到用户消息
-      // 恢复图片发送功能，使用配置的用户消息
-      messages[1].content = `${userMessage}\n\n检测图: data:image/jpeg;base64,${compressedImage}`;
+      imageList.push(pureBase64Image);           // 仅检测图
     }
 
-    // 构建完整的提示词用于显示（在添加图片数据后）
-    const fullPrompt = `系统提示词:\n${systemPrompt}\n\n用户消息:\n${messages[1].content}`;
+    const userContent = standard?.standardImage
+      ? `${userMessage}\n\n第一张是标准参考图，第二张是待检测图，请对比分析。`
+      : userMessage;
+
+    const messages: Array<{ role: string; content: string; images?: string[] }> = [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: userContent,
+        images: imageList
+      }
+    ];
+
+    // 构建完整的提示词用于显示
+    const fullPrompt = `系统提示词:\n${systemPrompt}\n\n用户消息:\n${userContent}\n\n[图片通过images字段传递，共${imageList.length}张]`;
 
     // 如果有回调函数，返回完整提示词
     if (onPromptGenerated) {
@@ -727,59 +694,35 @@ export async function analyzeImageLocalOptimized(
     console.log('调用Ollama API，模型:', config.modelName);
     console.log('消息数量:', messages.length);
     console.log('系统提示词长度:', systemPrompt.length, '字符');
-    console.log('用户消息长度:', messages[1].content.length, '字符');
-    console.log('图片数据长度:', compressedImage.length, '字符');
-    console.log('图片数据大小估算:', Math.round(compressedImage.length * 0.75 / 1024), 'KB');
-
-    // 检查图片大小是否过大 - 针对24GB内存优化
-    const imageSizeKB = Math.round(compressedImage.length * 0.75 / 1024);
-    if (imageSizeKB > 100) { // 约100KB，适合32K上下文
-      console.warn(`警告：图片数据较大 (${imageSizeKB}KB)，可能影响处理速度`);
-      console.warn('建议：如果处理缓慢，可考虑进一步压缩图片');
-    } else if (imageSizeKB > 200) { // 约200KB，超过推荐大小
-      console.warn(`警告：图片数据过大 (${imageSizeKB}KB)，可能导致请求失败`);
-      console.warn('建议：进一步压缩图片或减少图片尺寸');
-    }
-
-    // 计算总提示词长度
-    const totalPromptLength = systemPrompt.length + messages[1].content.length;
-    console.log('总提示词长度:', totalPromptLength, '字符');
-    console.log('提示词长度分析:');
-    console.log('  - 系统提示词:', systemPrompt.length, '字符');
-    console.log('  - 用户消息文本:', userMessage.length, '字符');
-    console.log('  - 图片base64数据:', compressedImage.length, '字符');
-
-    // 显示实际发送的提示词内容（前200字符）
+    console.log('用户消息文本长度:', userContent.length, '字符');
+    console.log('图片数量:', imageList.length, '张 (通过images字段传递)');
+    console.log('图片数据大小估算:', Math.round(pureBase64Image.length * 0.75 / 1024), 'KB');
     console.log('系统提示词内容:', systemPrompt);
-    console.log('用户消息内容（前200字符）:', messages[1].content.substring(0, 200));
-
-    const charLimit = Math.floor(config.contextLength * 0.75); // 75%安全阈值
-    if (totalPromptLength > charLimit) {
-      console.warn(`警告：提示词长度接近Ollama限制(${config.contextLength} tokens ≈ ${charLimit}字符)，可能被截断`);
-      console.warn('建议：减少图片大小或简化提示词');
-    }
+    console.log('用户消息内容:', userContent);
 
     // 检查请求体大小
-    const requestBody = {
+    // Gemma4 等支持 thinking 的模型：关闭 think 以提速（质检场景不需要推理链）
+    const isThinkingModel = config.modelName.includes('gemma4') || config.modelName.includes('qwq');
+    const requestBody: Record<string, any> = {
       model: config.modelName,
       messages,
       stream: false,
+      ...(isThinkingModel ? { think: false } : {}),
       options: {
         temperature: config.temperature,
         top_p: config.topP,
         top_k: config.topK,
         repeat_penalty: config.repeatPenalty,
         num_predict: config.maxTokens,
-        // Moondream 优化选项 - 针对 M2 芯片优化
-        num_ctx: config.contextLength, // 使用配置的上下文长度
-        num_gpu_layers: 999, // Moondream 推荐的最大 GPU 层数
-        num_thread: 4, // M2 性能核数量
-        f16_kv: true, // 使用半精度，节省内存
-        low_vram: false, // 关闭低显存模式
-        num_keep: 4, // 保留部分上下文，提高响应速度
-        use_mmap: true, // 启用内存映射
-        use_mlock: true, // 启用内存锁定
-        keep_alive: '2h' // Moondream 推荐保持活跃时间
+        num_ctx: config.contextLength,
+        num_gpu_layers: 999,
+        num_thread: 4,
+        f16_kv: true,
+        low_vram: false,
+        num_keep: 4,
+        use_mmap: true,
+        use_mlock: true,
+        keep_alive: '2h'
       }
     };
 
@@ -796,8 +739,8 @@ export async function analyzeImageLocalOptimized(
 
     for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
       try {
-        console.log(`发送请求到代理服务... (尝试 ${attempt}/${config.retryAttempts})`);
-        response = await fetch('http://localhost:11437/api/chat', {
+        console.log(`发送请求到 Django Ollama 接口... (尝试 ${attempt}/${config.retryAttempts})`);
+        response = await fetch(buildDirectBackendApiUrl('/ollama/chat/'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -805,7 +748,7 @@ export async function analyzeImageLocalOptimized(
           signal: controller.signal,
           body: requestBodyString
         });
-        console.log('收到代理服务响应，状态码:', response.status);
+        console.log('收到 Django Ollama 接口响应，状态码:', response.status);
         break; // 成功则跳出重试循环
       } catch (error) {
         lastError = error;

@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/Label';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import ModelModeSwitch from '@/components/ModelModeSwitch';
-import { apiFetch } from '@/lib/config';
+import { apiFetch, directBackendFetch } from '@/lib/config';
 
 interface Standard {
   id: string;
@@ -77,7 +77,7 @@ export const FusionModeSettingsPanel: React.FC<FusionModeSettingsPanelProps> = (
     try {
       if (isLocalMode) {
         console.log('🔗 测试本地模型连接...');
-        const response = await apiFetch('/ollama/status/');
+        const response = await directBackendFetch('/ollama/status/');
         if (response.ok) {
           const health = await response.json();
           console.log('✅ 本地模型连接正常:', health);

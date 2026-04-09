@@ -699,6 +699,8 @@ const OCRDetectionScreen: React.FC = () => {
     keywordConfigs,
     keywordMatchMode,
     requireQualifiedConfirmation,
+    fusionModeEnabled,
+    performFusionAIAnalysis,
     batchManager: { reset: () => batchManagerRef.current?.reset() },
     setOcrResult,
     setImagePreview,

@@ -22,6 +22,10 @@ export interface UseBatchResultHandlerOptions {
   keywordMatchMode: 'contains' | 'exact';
   requireQualifiedConfirmation: boolean;
 
+  // 融合模式
+  fusionModeEnabled: boolean;
+  performFusionAIAnalysis: (imageBase64: string) => Promise<any>;
+
   // 批处理管理器
   batchManager: { reset: () => void } | null;
 
@@ -91,6 +95,7 @@ const getMatchedBarcodeTextByRoi = (roi: any, config: any) => {
 export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => {
   const {
     enableKeywordAnalysis, enableBarcodeDetection, barcodeConfigs, keywordConfigs, keywordMatchMode, requireQualifiedConfirmation,
+    fusionModeEnabled, performFusionAIAnalysis,
     batchManager,
     setOcrResult, setImagePreview, setWorkflowState, setFinalResult,
     setMatchStatus, setIsWaitingForSpace, setWorkflowResult, setAiAnalysisResult,
@@ -279,19 +284,48 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
 
     console.log('🔄 切换UI状态: processing -> waiting_for_approval');
     setWorkflowState('waiting_for_approval');
-    setFinalResult(isQualified ? 'qualified' : 'unqualified');
-    setMatchStatus(isQualified ? 'qualified' : 'unqualified');
+
+    // 融合模式：等 LLM 分析完再设最终结果
+    let finalIsQualified = isQualified;
+    let aiResult: any = undefined;
+    if (fusionModeEnabled) {
+      // 先显示"等待LLM"状态
+      setFinalResult('none');
+      setMatchStatus('none');
+      console.log('🔄 融合模式：OCR完成，等待LLM分析...');
+
+      // 用拼接图或捕获帧给 LLM 分析
+      const imageForLLM = result.stitched_image || captureFrameData()?.base64 || '';
+      if (imageForLLM) {
+        try {
+          aiResult = await performFusionAIAnalysis(imageForLLM);
+          if (aiResult) {
+            console.log('✅ 融合模式LLM分析完成:', aiResult.overallQuality);
+            setAiAnalysisResult(aiResult);
+            const llmQualified = aiResult.overallQuality === '合格';
+            finalIsQualified = isQualified && llmQualified;
+          } else {
+            console.warn('⚠️ LLM分析返回null，仅使用OCR结果');
+          }
+        } catch (error) {
+          console.error('❌ 融合模式LLM分析失败:', error);
+        }
+      }
+    }
+
+    setFinalResult(finalIsQualified ? 'qualified' : 'unqualified');
+    setMatchStatus(finalIsQualified ? 'qualified' : 'unqualified');
 
     // 添加到历史记录
     try {
       const historyItem: DetectionHistoryItem = {
         id: Date.now().toString(),
         timestamp: new Date(),
-        matchStatus: isQualified ? 'qualified' : 'unqualified',
-        overallQuality: isQualified ? '合格' : '存疑',
+        matchStatus: finalIsQualified ? 'qualified' : 'unqualified',
+        overallQuality: finalIsQualified ? '合格' : '存疑',
         score: inspectionScore,
         ocrResult: ocrResultData,
-        aiResult: undefined,
+        aiResult,
         barcodeAnalysis: ocrResultData.barcode_analysis
       };
       addDetectionHistory(historyItem);

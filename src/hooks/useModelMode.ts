@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DEFAULT_LLM_TASK_PROMPT, DEFAULT_LLM_USER_MESSAGE } from '@/lib/llmPrompt';
+import { directBackendFetch } from '@/lib/config';
 
 export type ModelMode = 'online' | 'local';
 
@@ -24,17 +25,17 @@ interface ModelModeConfig {
 }
 
 const DEFAULT_LOCAL_CONFIG = {
-  modelName: 'minicpm-v:latest',
+  modelName: 'gemma4:e4b',
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
-  temperature: 0.7,
-  maxTokens: 1024,
+  temperature: 0.2,
+  maxTokens: 512,
   topP: 0.9,
   topK: 40,
   repeatPenalty: 1.1,
   // 性能优化参数默认值
-  contextLength: 32768,
-  timeout: 900000,
+  contextLength: 8192,
+  timeout: 120000,
   retryAttempts: 3,
   memoryOptimization: false,
   batchSize: 1
@@ -114,8 +115,7 @@ export const useModelMode = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
       
-      // 使用Node.js代理的端口11437
-      const response = await fetch('http://localhost:11437/api/tags', {
+      const response = await directBackendFetch('/ollama/status/', {
         method: 'GET',
         signal: controller.signal
       });
@@ -124,7 +124,7 @@ export const useModelMode = () => {
       
       if (response.ok) {
         const data = await response.json();
-        return data.models?.some((m: any) => m.name.includes('moondream')) || false;
+        return data.success === true && Array.isArray(data.models) && data.models.length > 0;
       }
       return false;
     } catch (error) {

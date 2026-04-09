@@ -1,7 +1,7 @@
 /**
  * 流媒体管理 API
  */
-import { apiRequest, apiFetch, API_BASE_URL } from '@/lib/config';
+import { apiRequest, apiFetch, API_BASE_URL, directBackendFetch } from '@/lib/config';
 import type {
   StreamSource,
   StreamSourceCreate,
@@ -16,6 +16,34 @@ import type {
  */
 export const getStreamSources = async (): Promise<StreamSource[]> => {
   return await apiRequest<StreamSource[]>('/streams/');
+};
+
+const directBackendApiRequest = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+  const response = await directBackendFetch(endpoint, options);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    try {
+      const errorJson = JSON.parse(errorText);
+      const message =
+        errorJson.message ||
+        errorJson.error ||
+        errorJson.detail ||
+        `请求失败，状态码: ${response.status}`;
+      throw new Error(message);
+    } catch (error) {
+      if (error instanceof Error && error.message) {
+        throw error;
+      }
+      throw new Error(errorText || `请求失败，状态码: ${response.status}`);
+    }
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    throw new Error('收到成功响应，但响应体不是有效的JSON格式');
+  }
 };
 
 /**
@@ -101,7 +129,7 @@ export const stopStream = async (id: string): Promise<{ message: string; stream:
  * 获取流媒体状态
  */
 export const getStreamStatus = async (id: string): Promise<StreamStatusResponse> => {
-  return await apiRequest<StreamStatusResponse>(`/streams/${id}/status/`);
+  return await directBackendApiRequest<StreamStatusResponse>(`/streams/${id}/status/`);
 };
 
 /**
@@ -119,21 +147,21 @@ export const getStreamFrame = async (
   }
 
   // 直接使用ViewSet action端点
-  return await apiRequest<StreamFrameResponse>(`/streams/${id}/frame/?${params.toString()}`);
+  return await directBackendApiRequest<StreamFrameResponse>(`/streams/${id}/frame/?${params.toString()}`);
 };
 
 /**
  * 获取所有激活的流媒体
  */
 export const getActiveStreams = async (): Promise<StreamSource[]> => {
-  return await apiRequest<StreamSource[]>('/streams/active_streams/');
+  return await directBackendApiRequest<StreamSource[]>('/streams/active_streams/');
 };
 
 /**
  * 获取流管理器状态
  */
 export const getStreamManagerStatus = async (): Promise<StreamManagerStatus> => {
-  return await apiRequest<StreamManagerStatus>('/streams/manager/status/');
+  return await directBackendApiRequest<StreamManagerStatus>('/streams/manager/status/');
 };
 
 /**
