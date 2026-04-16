@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import AIFeatureConfig from '@/components/AIFeatureConfig';
+import HomeDashboard from '@/components/HomeDashboard';
 import { Button } from '@/components/ui/Button';
 import {
   Camera,
@@ -7,11 +8,15 @@ import {
   FileText,
   Layers,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const HomeScreen: React.FC = () => {
   const navigate = useNavigate();
+  const [modelConfigCollapsed, setModelConfigCollapsed] = useState(false);
 
   // 快速导航模块数据
 
@@ -122,9 +127,36 @@ const HomeScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* 在这里植入全新的AI配置组件 */}
+      {/* Dashboard */}
+      <HomeDashboard />
+
+      {/* AI模型配置 - 可折叠 */}
       <div>
-        <AIFeatureConfig />
+        <button
+          className="flex w-full items-center justify-between p-2 text-left rounded-t-lg transition-colors hover:bg-accent/50 mb-2"
+          onClick={() => setModelConfigCollapsed(!modelConfigCollapsed)}
+          aria-expanded={!modelConfigCollapsed}
+        >
+          <div className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5 text-muted-foreground" />
+            <span className="text-lg font-semibold">AI 模型配置</span>
+          </div>
+          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+            {modelConfigCollapsed ? '展开' : '收起'}
+            {modelConfigCollapsed ? (
+              <ChevronDown className="h-5 w-5" />
+            ) : (
+              <ChevronUp className="h-5 w-5" />
+            )}
+          </div>
+        </button>
+        <div
+          className={`overflow-hidden transition-all duration-300 ease-in-out ${
+            modelConfigCollapsed ? 'max-h-0 opacity-0' : 'max-h-[8000px] opacity-100'
+          }`}
+        >
+          <AIFeatureConfig />
+        </div>
       </div>
     </div>
   );

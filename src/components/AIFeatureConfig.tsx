@@ -85,16 +85,16 @@ const AIFeatureConfig: React.FC = () => {
     const handleReset = () => {
         setConfig({
             apiKey: '',
-            apiBaseUrl: 'https://wcode.net/api/gpt/v1/chat/completions',
-            modelName: 'qwen2.5-vl-32b-instruct',
+            apiBaseUrl: '',
+            modelName: '',
             systemPrompt: DEFAULT_LLM_TASK_PROMPT,
             userMessage: DEFAULT_LLM_USER_MESSAGE,
             compressionEnabled: true,
-            compressionQuality: 0.8, // 24GB内存模式：高质量
-            imageWidth: 600, // 24GB内存模式：高分辨率
-            imageHeight: 600, // 24GB内存模式：高分辨率
+            compressionQuality: 0.8,
+            imageWidth: 600,
+            imageHeight: 600,
         });
-        toast.success('配置已重置为24GB高内存模式！');
+        toast.success('配置已重置！');
     };
 
     const handleClearCache = () => {
@@ -141,7 +141,7 @@ const AIFeatureConfig: React.FC = () => {
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><Label htmlFor="home-model-name">AI名称</Label><Input id="home-model-name" value={config.modelName} onChange={(e) => setConfig({ modelName: e.target.value })} placeholder="qwen2.5-vl-32b-instruct (在线) 或 moondream:latest (本地)" /></div>
+                    <div><Label htmlFor="home-model-name">AI名称</Label><Input id="home-model-name" value={config.modelName} onChange={(e) => setConfig({ modelName: e.target.value })} placeholder="如 gpt-4o 或 moondream:latest" /></div>
                     <div>
                         <Label htmlFor="home-api-key">API Key</Label>
                         <Input id="home-api-key" type="password" value={config.apiKey} onChange={(e) => setConfig({ apiKey: e.target.value })} placeholder="请输入您的API Key" />
@@ -157,7 +157,7 @@ const AIFeatureConfig: React.FC = () => {
                         )}
                     </div>
                 </div>
-                <div><Label htmlFor="home-api-base-url">API Base URL (可修改)</Label><Input id="home-api-base-url" value={config.apiBaseUrl} onChange={(e) => setConfig({ apiBaseUrl: e.target.value })} placeholder="https://wcode.net/api/gpt/v1/chat/completions" /></div>
+                <div><Label htmlFor="home-api-base-url">API Base URL (可修改)</Label><Input id="home-api-base-url" value={config.apiBaseUrl} onChange={(e) => setConfig({ apiBaseUrl: e.target.value })} placeholder="https://api.example.com/v1/chat/completions" /></div>
                 <div>
                     <Label htmlFor="home-handshake-prompt">固定握手提示词</Label>
                     <p className="text-sm text-muted-foreground mb-2">每次新的 LLM 请求开始时自动注入，定义模型职责、边界和回复要求。提示词来源文档：项目根目录 `AGENTS.md`。</p>
