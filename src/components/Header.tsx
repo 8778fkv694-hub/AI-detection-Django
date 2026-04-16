@@ -4,7 +4,7 @@
       const navLinkClass = ({ isActive }: { isActive: boolean }) => `flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5'}`;
       return (
         <header className="bg-card border-b sticky top-0 z-40"><div className="container mx-auto flex h-16 items-center justify-between px-4">
-            <Link to="/" className="flex items-center gap-2"><Aperture className="h-6 w-6 text-primary" /><span className="font-bold text-lg"><JSGCWYL></JSGCWYL> 视觉质检系统</span></Link>
+            <Link to="/" className="flex items-center gap-2"><Aperture className="h-6 w-6 text-primary" /><span className="font-bold text-lg">Web 检测终端</span></Link>
             <nav className="hidden md:flex items-center space-x-2 lg:space-x-4">
               <NavLink to="/" className={navLinkClass} end><Home className="mr-2 h-4 w-4" />主页</NavLink>
               <NavLink to="/standards" className={navLinkClass}><ClipboardList className="mr-2 h-4 w-4" />模板管理</NavLink>
