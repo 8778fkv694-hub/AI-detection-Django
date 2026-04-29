@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Detection Backend
+After=network.target
+
+[Service]
+WorkingDirectory=/home/wenyili/projects/AI-Detection/backend
+Environment="PATH=/home/wenyili/projects/AI-Detection/venv/bin:/usr/bin"
+Environment="PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True"
+Environment="HF_HUB_OFFLINE=1"
+ExecStart=/home/wenyili/projects/AI-Detection/venv/bin/python manage.py runserver 0.0.0.0:8000 --noreload
+Restart=always
+
+[Install]
+WantedBy=default.target

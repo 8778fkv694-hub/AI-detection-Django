@@ -1,0 +1,11 @@
+# YOLO训练配置文件
+# 数据集路径
+train: train/images
+val: val/images
+test: test/images
+
+# 类别数量
+nc: 4
+
+# 类别名称
+names: ['filter', 'filtername', 'nsplogo', 'qrcode']

@@ -99,7 +99,6 @@ test_files/
 
 # Playwright
 .playwright-mcp/
-.claude/
 
 # Vite cache
 .vite/
@@ -123,9 +122,6 @@ model_backups/
 # 模型文件（太大，不提交到GitHub）
 models/*.pt
 models/*.weights
-models/
-backend/models/
-django_deployment/static/models/
 #commdand文件苹果系统的不提交
 *.command
 
@@ -138,16 +134,29 @@ django_deployment/static/models/
 *.flv
 # 临时备份目录
 INFO_TEMP_BACKUP/
+# NVIDIA TensorRT Engine files
+*.engine
+# NVIDIA TensorRT Engine files
+*.engine
 
-# Python / backend runtime
-backend/venv/
-backend/media/
-backend/models/easyocr/
+# macOS metadata
+._*
+.DS_Store
 
-# Extra large local artifacts
-*.partial
+# Large files
+*.pt
 *.backup
-*.backup*
-*.wrong_model_backup
-*.bak
-本地大模型/
+model_backups/
+PPE_detection_YOLO/
+runs/
+*.onnx
+*.engine
+*.whl
+*.deb
+
+# Video files
+*.MOV
+*.mp4
+.claude/
+*.partial
+django.log*

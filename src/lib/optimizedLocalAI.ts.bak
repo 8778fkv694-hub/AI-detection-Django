@@ -1,0 +1,255 @@
+// 优化的本地AI调用方案
+import type { InspectionResult, Standard } from '@/types';
+
+interface OptimizedLocalConfig {
+  modelName: string;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  topP: number;
+  topK: number;
+  repeatPenalty: number;
+  // 新增优化参数
+  batchSize: number;
+  timeout: number;
+  retryAttempts: number;
+  memoryOptimization: boolean;
+}
+
+const DEFAULT_OPTIMIZED_CONFIG: OptimizedLocalConfig = {
+  modelName: 'minicpm-v',
+  systemPrompt: '你是一个专业的质量检测AI助手。请根据用户提供的描述进行质量分析，并返回JSON格式的结果。请用中文回答用户的问题。',
+  temperature: 0.7,
+  maxTokens: 1024, // 减少token数量
+  topP: 0.9,
+  topK: 40,
+  repeatPenalty: 1.1,
+  batchSize: 1, // 单张处理
+  timeout: 180000, // 3分钟超时（180秒）
+  retryAttempts: 2,
+  memoryOptimization: true
+};
+
+// 内存优化：图片压缩
+function compressImageForAI(base64Image: string, maxSize: number = 512): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      
+      // 计算压缩比例
+      const ratio = Math.min(maxSize / width, maxSize / height);
+      if (ratio < 1) {
+        width *= ratio;
+        height *= ratio;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      
+      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+      resolve(compressedBase64);
+    };
+    img.src = `data:image/jpeg;base64,${base64Image}`;
+  });
+}
+
+// 优化的本地模型分析
+export async function analyzeImageLocalOptimized(
+  image: string,
+  localConfig: Partial<OptimizedLocalConfig> = {},
+  standard?: Standard,
+  finalPrompt?: string
+): Promise<InspectionResult> {
+  const config = { ...DEFAULT_OPTIMIZED_CONFIG, ...localConfig };
+  
+  try {
+    // 1. 图片压缩优化
+    const compressedImage = await compressImageForAI(image, 512);
+    
+    // 2. 构建优化的提示词
+    const systemPrompt = finalPrompt || 
+      (standard?.overrideSystemPrompt ? 
+        standard.overrideSystemPrompt : 
+        config.systemPrompt + (standard ? buildStandardDetailsPrompt(standard) : ''));
+
+    // 3. 构建消息 - 使用更简洁的格式
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { 
+        role: 'user', 
+        content: `检测图片质量。图片: data:image/jpeg;base64,${compressedImage}`
+      }
+    ];
+
+    // 4. 如果有标准图片，添加到消息中
+    if (standard?.type === 'image_based' && standard.standardImage) {
+      const standardImagePureBase64 = standard.standardImage.startsWith('data:') 
+        ? standard.standardImage.split(',')[1] 
+        : standard.standardImage;
+      messages[1].content = `标准图: data:image/jpeg;base64,${standardImagePureBase64}\n检测图: data:image/jpeg;base64,${compressedImage}`;
+    }
+
+    // 5. 优化的API调用
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.timeout);
+    
+    const response = await fetch('http://localhost:11435/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: config.modelName,
+        messages,
+        stream: false,
+        options: {
+          temperature: config.temperature,
+          top_p: config.topP,
+          top_k: config.topK,
+          repeat_penalty: config.repeatPenalty,
+          num_predict: config.maxTokens,
+          // 内存优化选项
+          num_ctx: 4096, // 减少上下文长度
+          num_gpu: 0, // 强制使用CPU（如果GPU内存不足）
+          num_thread: 2, // 减少线程数
+          f16_kv: true, // 使用半精度
+          low_vram: true, // 低显存模式
+        }
+      })
+    });
+    
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Ollama API错误: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const content = data.message?.content;
+
+    if (!content) {
+      throw new Error('Ollama API返回空内容');
+    }
+
+    // 6. 解析JSON响应
+    let result: InspectionResult;
+    try {
+      result = JSON.parse(content);
+    } catch (parseError) {
+      // 如果不是JSON格式，尝试提取JSON部分
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        // 如果无法解析JSON，返回默认结果
+        result = {
+          overallQuality: '需复检',
+          score: 50,
+          reason: 'AI分析结果格式异常，需要人工复核',
+          reasonKeywords: '格式异常',
+          defects: []
+        };
+      }
+    }
+
+    return result;
+
+  } catch (error) {
+    console.error('优化本地模型分析失败:', error);
+    
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        throw new Error('本地模型分析超时，请检查模型状态');
+      } else if (error.message.includes('Failed to fetch')) {
+        throw new Error('无法连接到本地模型服务');
+      } else if (error.message.includes('Load failed')) {
+        throw new Error('模型加载失败，请重启Ollama服务');
+      } else {
+        throw new Error(`本地模型分析失败: ${error.message}`);
+      }
+    } else {
+      throw new Error('本地模型分析失败: 未知错误');
+    }
+  }
+}
+
+// 构建标准详情提示词的辅助函数
+function buildStandardDetailsPrompt(standard: Standard): string {
+  let prompt = `\n\n检测标准：\n`;
+  prompt += `名称: ${standard.name}\n`;
+  prompt += `类型: ${standard.type}\n`;
+  prompt += `要求: ${standard.requirements}\n`;
+  
+  if (standard.defectTypes && standard.defectTypes.length > 0) {
+    prompt += `缺陷类型: ${standard.defectTypes.join(', ')}\n`;
+  }
+  
+  return prompt;
+}
+
+// 内存监控和清理
+export function monitorMemoryUsage() {
+  if (performance.memory) {
+    const memory = performance.memory;
+    console.log('内存使用情况:', {
+      used: Math.round(memory.usedJSHeapSize / 1024 / 1024) + 'MB',
+      total: Math.round(memory.totalJSHeapSize / 1024 / 1024) + 'MB',
+      limit: Math.round(memory.jsHeapSizeLimit / 1024 / 1024) + 'MB'
+    });
+    
+    // 如果内存使用超过80%，触发垃圾回收
+    if (memory.usedJSHeapSize / memory.jsHeapSizeLimit > 0.8) {
+      console.warn('内存使用率过高，建议清理缓存');
+      return true;
+    }
+  }
+  return false;
+}
+
+// 批量处理优化
+export async function batchAnalyzeImages(
+  images: string[],
+  config: Partial<OptimizedLocalConfig> = {},
+  standard?: Standard
+): Promise<InspectionResult[]> {
+  const results: InspectionResult[] = [];
+  const batchSize = config.batchSize || 1;
+  
+  for (let i = 0; i < images.length; i += batchSize) {
+    const batch = images.slice(i, i + batchSize);
+    const batchPromises = batch.map(image => 
+      analyzeImageLocalOptimized(image, config, standard)
+    );
+    
+    try {
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+      
+      // 每处理一批后检查内存
+      if (monitorMemoryUsage()) {
+        // 强制垃圾回收
+        if (window.gc) {
+          window.gc();
+        }
+      }
+    } catch (error) {
+      console.error(`批量处理第${i + 1}批失败:`, error);
+      // 添加错误结果
+      results.push({
+        overallQuality: '需复检',
+        score: 0,
+        reason: '批量处理失败',
+        reasonKeywords: '处理失败',
+        defects: []
+      });
+    }
+  }
+  
+  return results;
+}

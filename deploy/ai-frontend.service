@@ -1,0 +1,12 @@
+[Unit]
+Description=AI Detection Frontend
+After=network.target
+
+[Service]
+WorkingDirectory=/home/wenyili/projects/AI-Detection
+Environment="PATH=/home/wenyili/node-v18/bin:/usr/bin"
+ExecStart=/home/wenyili/node-v18/bin/npm run dev -- --host
+Restart=always
+
+[Install]
+WantedBy=default.target

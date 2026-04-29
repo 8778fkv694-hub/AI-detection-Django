@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Detection Frontend
+After=network.target
+
+[Service]
+WorkingDirectory=/home/wenyili/projects/AI-Detection
+Environment="PATH=/home/wenyili/node-v18/bin:/home/wenyili/projects/AI-Detection/venv/bin:/usr/bin:/bin"
+ExecStartPre=-/usr/bin/pkill -f node.*vite
+ExecStartPre=-/usr/bin/pkill -f node.*nodemon
+ExecStartPre=-/usr/bin/pkill -f node\ rpa-server.js
+ExecStartPre=-/usr/bin/pkill -f npm\ run\ dev
+ExecStart=/home/wenyili/node-v18/bin/node /home/wenyili/projects/AI-Detection/deploy_production.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

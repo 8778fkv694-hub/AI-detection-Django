@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Detection Frontend SPA (Port 3005)
+After=network.target graphical-session.target ai-backend.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wenyili/projects/AI-Detection
+ExecStartPre=-/usr/bin/pkill -f "serve_spa.py --port 3005"
+ExecStart=/usr/bin/python3 /home/wenyili/projects/AI-Detection/serve_spa.py --port 3005 --dir /home/wenyili/projects/AI-Detection/dist
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

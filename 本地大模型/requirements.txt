@@ -1,0 +1,11 @@
+# 本地大模型项目依赖
+vllm>=0.6.0
+torch>=2.0.0
+transformers>=4.40.0
+accelerate>=0.20.0
+requests>=2.31.0
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+Pillow>=10.0.0
+modelscope>=1.9.0
