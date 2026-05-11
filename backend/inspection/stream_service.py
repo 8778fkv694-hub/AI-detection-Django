@@ -160,6 +160,7 @@ class StreamReader:
                     self.is_connected = True
                     self.last_frame_time = datetime.now()
                     self.error_message = ""
+                    self.frame_version += 1
 
                 logger.info(
                     "Successfully connected to stream %s via %s (%sx%s @ %sfps)",
@@ -259,6 +260,7 @@ class StreamReader:
                     self.current_frame = frame
                     self.last_frame_time = datetime.now()
                     self.error_count = 0
+                    self.frame_version += 1
                 
                 # 控制读取频率
                 if self.low_latency:
