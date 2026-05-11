@@ -477,7 +477,8 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
                 stream_id=stream_id,
                 url=url,
                 auto_reconnect=stream.auto_reconnect,
-                reconnect_interval=stream.reconnect_interval
+                reconnect_interval=stream.reconnect_interval,
+                low_latency=True
             )
             return success
         except Exception as e:
@@ -554,7 +555,8 @@ def restart_all_streams(request):
                 stream_id=stream_id,
                 url=url,
                 auto_reconnect=stream.auto_reconnect,
-                reconnect_interval=stream.reconnect_interval
+                reconnect_interval=stream.reconnect_interval,
+                low_latency=True
             )
             
             if success:

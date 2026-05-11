@@ -30,6 +30,7 @@ from inspection.anomaly_views import AnomalyRuleViewSet, AnomalyRecordViewSet
 from inspection import preprocessing_urls
 # 流媒体功能
 from inspection.stream_api import StreamSourceViewSet, stream_manager_status, stop_all_streams, restart_all_streams
+from inspection.mjpeg_view import mjpeg_stream
 # Admin自定义视图
 from inspection.admin import backup_database_view, backup_confirm_view, clear_history_view
 from django.conf import settings
@@ -112,6 +113,7 @@ urlpatterns = [
     path('api/streams/manager/status/', stream_manager_status, name='stream_manager_status'),
     path('api/streams/manager/stop-all/', stop_all_streams, name='stop_all_streams'),
     path('api/streams/manager/restart-all/', restart_all_streams, name='restart_all_streams'),
+    path('api/streams/<str:stream_id>/mjpeg/', mjpeg_stream, name='mjpeg_stream'),
     
     path('api/', include(router.urls)),
     

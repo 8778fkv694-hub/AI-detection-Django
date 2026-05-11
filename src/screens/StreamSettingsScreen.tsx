@@ -182,9 +182,9 @@ const StreamSettingsScreen: React.FC = () => {
 
   const [isLivePreview, setIsLivePreview] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
-  const windowId = useMemo(() => `stream_admin_${Math.random().toString(36).substr(2, 9)}`, []);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -333,11 +333,14 @@ const StreamSettingsScreen: React.FC = () => {
       streamPlayerRef.current.destroy();
       streamPlayerRef.current = null;
     }
+    if (imgRef.current) {
+      imgRef.current.src = '';
+    }
     setIsLivePreview(false);
   }, []);
 
   const startLivePreview = async () => {
-    if (!selectedStreamId || !videoRef.current) return;
+    if (!selectedStreamId) return;
 
     // 先停止旧的
     stopLivePreview();
@@ -347,6 +350,7 @@ const StreamSettingsScreen: React.FC = () => {
 
     try {
       if (mode === 'ffmpeg') {
+        if (!videoRef.current) return;
         const hlsUrl = getHLSPlaylistUrl(selectedStreamId);
         const player = new HLSPlayer({
           videoElement: videoRef.current,
@@ -359,28 +363,34 @@ const StreamSettingsScreen: React.FC = () => {
         });
         await player.start();
         hlsPlayerRef.current = player;
+        setIsLivePreview(true);
       } else {
-        const player = new StreamPlayer({
-          videoElement: videoRef.current,
-          streamId: selectedStreamId,
-          fps: 15,
-          quality: 80,
-          targetWidth: 1280,
-          windowId: windowId,
-          onError: (err) => {
-            console.error('JPG 预览失败:', err);
-            toast.error('JPG 流预览失败');
-            setIsLivePreview(false);
-          },
-          onStreamTaken: () => {
-            toast.error('实时预览已被其他窗口占用');
-            setIsLivePreview(false);
-          },
+        // JPG 模式：直接用 <img> 标签直连后端 MJPEG 流，零中转、最低延迟
+        if (!imgRef.current) return;
+        const protocol = window.location.protocol;
+        const host = window.location.hostname;
+        const mjpegUrl = `${protocol}//${host}:8000/api/streams/${selectedStreamId}/mjpeg/?quality=95&width=0`;
+        console.log(`[StreamSettings] MJPEG 直连: ${mjpegUrl}`);
+
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(() => {
+            reject(new Error('MJPEG 流连接超时'));
+          }, 10000);
+
+          const img = imgRef.current!;
+          img.onload = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
+          img.onerror = () => {
+            window.clearTimeout(timeout);
+            reject(new Error('MJPEG 流连接失败'));
+          };
+          img.src = mjpegUrl;
         });
-        await player.start();
-        streamPlayerRef.current = player;
+
+        setIsLivePreview(true);
       }
-      setIsLivePreview(true);
     } catch (error) {
       console.error('启动预览失败:', error);
       toast.error('无法开启实时预览');
@@ -1094,17 +1104,25 @@ const StreamSettingsScreen: React.FC = () => {
                           className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/70 group"
                         >
                           <div className={`relative aspect-video w-full bg-black ${isLivePreview ? 'flex items-center justify-center' : 'hidden'}`}>
-                            <video
-                              ref={videoRef}
-                              className="h-full w-full object-contain"
-                              autoPlay
-                              muted
-                              playsInline
-                            />
+                            {selectedStream?.play_mode === 'ffmpeg' ? (
+                              <video
+                                ref={videoRef}
+                                className="h-full w-full object-contain"
+                                autoPlay
+                                muted
+                                playsInline
+                              />
+                            ) : (
+                              <img
+                                ref={imgRef}
+                                className="h-full w-full object-contain"
+                                alt="实时预览"
+                              />
+                            )}
                             <div className="absolute left-4 top-4 flex items-center gap-2">
                               <Badge className="bg-rose-500 text-white animate-pulse">LIVE</Badge>
                               <span className="rounded bg-black/50 px-2 py-0.5 text-[10px] text-white backdrop-blur">
-                                {selectedStream.play_mode === 'ffmpeg' ? 'HLS' : 'JPG STREAM'}
+                                {selectedStream?.play_mode === 'ffmpeg' ? 'HLS' : 'MJPEG 直连'}
                               </span>
                             </div>
                           </div>

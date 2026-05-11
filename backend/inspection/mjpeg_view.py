@@ -81,6 +81,7 @@ def mjpeg_stream(request, stream_id):
                 url=url,
                 auto_reconnect=source.auto_reconnect,
                 reconnect_interval=source.reconnect_interval,
+                low_latency=True,
             )
             reader = stream_manager.get_stream(stream_id)
         except Exception as e:
@@ -89,11 +90,11 @@ def mjpeg_stream(request, stream_id):
     if reader is None or not reader.is_running:
         return JsonResponse({'error': '流媒体未运行'}, status=503)
 
-    quality = int(request.GET.get('quality', 85))
+    quality = int(request.GET.get('quality', 95))
     quality = max(1, min(100, quality))
-    width = int(request.GET.get('width', 1280))
-    fps = int(request.GET.get('fps', 20))
-    fps = max(1, min(30, fps))
+    width = int(request.GET.get('width', 0))
+    fps = int(request.GET.get('fps', 25))
+    fps = max(1, min(60, fps))
 
     response = StreamingHttpResponse(
         _mjpeg_generator(stream_id, quality, width, fps),

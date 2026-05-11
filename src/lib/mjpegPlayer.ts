@@ -1,7 +1,7 @@
 /**
- * MJPEG 流媒体播放器
- * 使用 <img> 标签直连后端 MJPEG 流（不受 CORS 限制）
- * 通过 canvas 将帧渲染到 video 元素
+ * MJPEG 流媒体播放器 — 真正直连版
+ * 直接把 <img> 标签插入到 video 的父容器里显示，
+ * 跳过 canvas + captureStream + video 的中转，延迟最低。
  */
 
 export interface MJPEGPlayerOptions {
@@ -23,77 +23,57 @@ export class MJPEGPlayer {
   private onError?: (error: Error) => void;
   private onFrame?: (frameData: string) => void;
 
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
   private isPlaying = false;
-  private captureTrack: CanvasCaptureMediaStreamTrack | null = null;
   private frameCount = 0;
   private lastFrameTime = 0;
-  private renderIntervalId: number | null = null;
 
-  // <img> 标签直连 MJPEG 流
+  // <img> 标签直接显示 MJPEG 流
   private mjpegImg: HTMLImageElement;
+  private boundOnLoad: (() => void) | null = null;
+  private boundOnError: (() => void) | null = null;
+
+  // 用于截图/回调的隐藏 canvas
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
 
   constructor(options: MJPEGPlayerOptions) {
     this.videoElement = options.videoElement;
     this.streamId = options.streamId;
-    this.fps = options.fps || 20;
+    this.fps = options.fps || 25;
     this.quality = options.quality || 95;
-    this.targetWidth = options.targetWidth ?? 1280;
+    this.targetWidth = options.targetWidth ?? 0;
     this.onError = options.onError;
     this.onFrame = options.onFrame;
 
-    // 创建 canvas
+    // 创建隐藏的 canvas（仅用于 onFrame 截图回调）
     this.canvas = document.createElement('canvas');
-    this.canvas.setAttribute('aria-hidden', 'true');
-    this.canvas.style.position = 'fixed';
-    this.canvas.style.left = '-99999px';
-    this.canvas.style.top = '-99999px';
-    this.canvas.style.width = '1px';
-    this.canvas.style.height = '1px';
-    this.canvas.style.opacity = '0';
-    this.canvas.style.pointerEvents = 'none';
+    this.canvas.style.display = 'none';
     document.body.appendChild(this.canvas);
-
-    const ctx = this.canvas.getContext('2d', {
-      alpha: false,
-      desynchronized: true,
-    });
-    if (!ctx) {
-      throw new Error('无法创建 canvas context');
-    }
+    const ctx = this.canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('无法创建 canvas context');
     this.ctx = ctx;
 
-    // 创建 <img> 标签用于接收 MJPEG 流
-    // crossOrigin="anonymous" 使浏览器发送 CORS 请求，避免 canvas 被污染
+    // 创建 <img> 标签
     this.mjpegImg = document.createElement('img');
     this.mjpegImg.crossOrigin = 'anonymous';
-    this.mjpegImg.setAttribute('aria-hidden', 'true');
+    this.mjpegImg.alt = 'MJPEG 实时流';
+    // 默认放在 body 里隐藏，start 时再移到容器
     this.mjpegImg.style.position = 'fixed';
     this.mjpegImg.style.left = '-99999px';
-    this.mjpegImg.style.top = '-99999px';
-    this.mjpegImg.style.width = '1px';
-    this.mjpegImg.style.height = '1px';
     this.mjpegImg.style.opacity = '0';
-    this.mjpegImg.style.pointerEvents = 'none';
     document.body.appendChild(this.mjpegImg);
   }
 
-  /**
-   * 构建 MJPEG 直连 URL（直连后端 8000 端口，<img> 不受 CORS 限制）
-   */
   private buildDirectMjpegUrl(): string {
     const protocol = window.location.protocol;
     const host = window.location.hostname;
     const params = new URLSearchParams();
     params.set('quality', this.quality.toString());
     params.set('width', this.targetWidth.toString());
+    params.set('fps', this.fps.toString());
     return `${protocol}//${host}:8000/api/streams/${this.streamId}/mjpeg/?${params.toString()}`;
   }
 
-  /**
-   * 开始播放 MJPEG 流
-   */
   async start(): Promise<void> {
     if (this.isPlaying) {
       console.warn('MJPEGPlayer: 已经在播放中');
@@ -105,142 +85,104 @@ export class MJPEGPlayer {
     this.lastFrameTime = Date.now();
 
     const mjpegUrl = this.buildDirectMjpegUrl();
-    console.log(`MJPEGPlayer: 开始播放 MJPEG 流 (直连): ${mjpegUrl}`);
+    console.log(`MJPEGPlayer: 开始播放 MJPEG 流 (真正直连): ${mjpegUrl}`);
 
-    // 等待第一帧加载
+    // 等待第一帧
     await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error('MJPEG 流连接超时（10秒）'));
-      }, 10000);
+      const timeoutId = setTimeout(() => reject(new Error('MJPEG 流连接超时（10秒）')), 10000);
 
       this.mjpegImg.onload = () => {
         clearTimeout(timeoutId);
-        // 初始化 canvas 尺寸
-        if (this.mjpegImg.naturalWidth > 0 && this.mjpegImg.naturalHeight > 0) {
-          this.canvas.width = this.mjpegImg.naturalWidth;
-          this.canvas.height = this.mjpegImg.naturalHeight;
-        }
         resolve();
       };
-
       this.mjpegImg.onerror = () => {
         clearTimeout(timeoutId);
         reject(new Error('MJPEG 流连接失败'));
       };
-
-      // 设置 src 触发加载
       this.mjpegImg.src = mjpegUrl;
     }).catch((error) => {
       this.stop();
-      if (this.onError) {
-        this.onError(error instanceof Error ? error : new Error('播放失败'));
-      }
+      if (this.onError) this.onError(error instanceof Error ? error : new Error('播放失败'));
       throw error;
     });
 
-    // 绘制第一帧到 canvas
-    this.renderFrame();
+    // ✅ 关键：把 <img> 插入到 video 的父容器，直接显示，隐藏 video
+    const container = this.videoElement.parentElement;
+    if (container) {
+      // 保存 video 原来的 display 样式
+      (this.videoElement as any).__originalDisplay = this.videoElement.style.display;
+      this.videoElement.style.display = 'none';
 
-    // 创建 captureStream 并赋值给 video
-    const stream = this.canvas.captureStream(this.fps);
-    const [track] = stream.getVideoTracks();
-    this.captureTrack = (track as CanvasCaptureMediaStreamTrack) || null;
-    this.videoElement.srcObject = stream;
-    this.captureTrack?.requestFrame?.();
-
-    try {
-      await this.videoElement.play();
-    } catch (playError) {
-      console.warn('MJPEGPlayer: video.play() 被中断（正常，继续）');
+      // 设置 img 为容器大小
+      this.mjpegImg.style.position = 'absolute';
+      this.mjpegImg.style.inset = '0';
+      this.mjpegImg.style.width = '100%';
+      this.mjpegImg.style.height = '100%';
+      this.mjpegImg.style.objectFit = 'contain';
+      this.mjpegImg.style.opacity = '1';
+      this.mjpegImg.style.left = '0';
+      this.mjpegImg.style.top = '0';
+      container.appendChild(this.mjpegImg);
     }
 
-    // 定时从 img 绘制到 canvas
-    const frameInterval = 1000 / this.fps;
-    this.renderIntervalId = window.setInterval(() => {
-      this.renderFrame();
-    }, frameInterval);
-  }
-
-  /**
-   * 将当前 img 帧渲染到 canvas
-   */
-  private renderFrame(): void {
-    if (!this.isPlaying) return;
-
-    const img = this.mjpegImg;
-    if (!img.naturalWidth || !img.naturalHeight) return;
-
-    // 更新 canvas 尺寸
-    if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
-      this.canvas.width = img.naturalWidth;
-      this.canvas.height = img.naturalHeight;
-    }
-
-    // 绘制帧
-    this.ctx.drawImage(img, 0, 0);
-    this.captureTrack?.requestFrame?.();
-
-    // 统计 FPS
-    this.frameCount++;
-    const now = Date.now();
-    if (now - this.lastFrameTime >= 1000) {
-      const actualFps = this.frameCount / ((now - this.lastFrameTime) / 1000);
-      console.log(`MJPEGPlayer: 实际FPS: ${actualFps.toFixed(2)}, 已播放: ${this.frameCount} 帧`);
-      this.frameCount = 0;
-      this.lastFrameTime = now;
-    }
-
-    // 回调
-    if (this.onFrame) {
-      this.canvas.toBlob((blob) => {
-        if (blob) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            this.onFrame?.(reader.result as string);
-          };
-          reader.readAsDataURL(blob);
+    // 事件驱动：每次收到新帧立即回调
+    this.boundOnLoad = () => {
+      if (!this.isPlaying) return;
+      this.frameCount++;
+      const now = Date.now();
+      if (now - this.lastFrameTime >= 1000) {
+        console.log(`MJPEGPlayer: 实际FPS: ${this.frameCount}, 已渲染: ${this.frameCount} 帧`);
+        this.frameCount = 0;
+        this.lastFrameTime = now;
+      }
+      // onFrame 回调（用于 AI 截图等）
+      if (this.onFrame) {
+        const img = this.mjpegImg;
+        if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
+          this.canvas.width = img.naturalWidth;
+          this.canvas.height = img.naturalHeight;
         }
-      }, 'image/jpeg', 0.9);
-    }
+        this.ctx.drawImage(img, 0, 0);
+        this.canvas.toBlob((blob) => {
+          if (blob) {
+            const reader = new FileReader();
+            reader.onload = () => this.onFrame?.(reader.result as string);
+            reader.readAsDataURL(blob);
+          }
+        }, 'image/jpeg', 0.9);
+      }
+    };
+    this.mjpegImg.onload = this.boundOnLoad;
   }
 
-  /**
-   * 停止播放
-   */
   stop(): void {
     if (!this.isPlaying) return;
-
-    console.log('MJPEGPlayer: 停止播放');
     this.isPlaying = false;
 
-    if (this.renderIntervalId !== null) {
-      clearInterval(this.renderIntervalId);
-      this.renderIntervalId = null;
+    console.log('MJPEGPlayer: 停止播放');
+
+    // 解绑
+    if (this.boundOnLoad) {
+      this.mjpegImg.onload = null;
+      this.boundOnLoad = null;
     }
 
-    // 停止 img 的 MJPEG 流
+    // 停止流
     this.mjpegImg.src = '';
 
-    // 停止 video 的流
-    if (this.videoElement.srcObject) {
-      const stream = this.videoElement.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      this.videoElement.srcObject = null;
+    // 把 img 从容器移除，恢复 video 显示
+    if (this.mjpegImg.parentElement) {
+      this.mjpegImg.parentElement.removeChild(this.mjpegImg);
     }
-    this.captureTrack = null;
+    // 恢复 video
+    const orig = (this.videoElement as any).__originalDisplay;
+    this.videoElement.style.display = orig ?? '';
   }
 
-  /**
-   * 销毁播放器
-   */
   destroy(): void {
     this.stop();
-    if (this.canvas.parentNode) {
-      this.canvas.parentNode.removeChild(this.canvas);
-    }
-    if (this.mjpegImg.parentNode) {
-      this.mjpegImg.parentNode.removeChild(this.mjpegImg);
-    }
+    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+    if (this.mjpegImg.parentNode) this.mjpegImg.parentNode.removeChild(this.mjpegImg);
   }
 
   getIsPlaying(): boolean {

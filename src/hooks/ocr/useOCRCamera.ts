@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
 import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
+import { MJPEGPlayer } from '@/lib/mjpegPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
 import toast from 'react-hot-toast';
 
@@ -29,7 +30,7 @@ interface UseOCRCameraOptions {
 export const useOCRCamera = ({
   windowId,
   videoRef,
-  previewCanvasRef,
+  previewCanvasRef: _previewCanvasRef,
   isCameraOn,
   setIsCameraOn,
   setIsRealtimeActive,
@@ -40,10 +41,17 @@ export const useOCRCamera = ({
 }: UseOCRCameraOptions) => {
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
+  const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
 
   // 启动摄像头
   const startCamera = useCallback(async (preferredDeviceId?: string) => {
     try {
+      // 先停止 MJPEG 播放器（如果有）
+      if (mjpegPlayerRef.current) {
+        mjpegPlayerRef.current.destroy();
+        mjpegPlayerRef.current = null;
+      }
+
       // 先停止之前的流媒体播放器（如果有）
       if (streamPlayerRef.current) {
         streamPlayerRef.current.destroy();
@@ -125,37 +133,28 @@ export const useOCRCamera = ({
           }
         }
 
-        // 使用 JPEG 方案（JPG模式或FFmpeg失败时的回退）
-        console.log(`[${windowId}] 使用JPEG流（无压缩画质方案）`);
-        // 创建并启动流媒体播放器
-        const player = new StreamPlayer({
+        // 使用 MJPEG 直连方案（最低延迟、最高清晰度）
+        console.log(`[${windowId}] 使用 MJPEG 直连（零中转低延迟）`);
+        const player = new MJPEGPlayer({
           videoElement: videoRef.current,
-          displayCanvas: previewCanvasRef?.current ?? null,
           streamId: streamId,
-          fps: 20, // 20帧/秒（平衡流畅度和性能）
-          quality: 100, // JPEG质量100%（最高质量）
-          targetWidth: 1920, // 1080p分辨率（平衡清晰度和传输速度）
-          windowId: windowId,
+          fps: 25,
+          quality: 95,
+          targetWidth: 0, // 0 = 不缩放，保持原生分辨率
           onError: (error) => {
-            console.error('StreamPlayer错误:', error);
-            toast.error(`流媒体播放失败: ${error.message}`);
-            streamPlayerRef.current?.destroy();
-            streamPlayerRef.current = null;
+            console.error('MJPEGPlayer 错误:', error);
+            toast.error(`MJPEG 流播放失败: ${error.message}`);
+            mjpegPlayerRef.current?.destroy();
+            mjpegPlayerRef.current = null;
             setIsCameraOn(false);
             setIsRealtimeActive(false);
           },
-          onStreamTaken: () => {
-            console.log(`[${windowId}] 流媒体被其他窗口占用`);
-            toast.error(`无法访问摄像头: 流媒体被占用\n\n如果另一个窗口正在使用摄像头，请在该窗口中选择不同的摄像头设备。`);
-            setIsCameraOn(false);
-            setIsRealtimeActive(false);
-          }
         });
 
-        streamPlayerRef.current = player;
+        mjpegPlayerRef.current = player;
         await player.start();
         setIsCameraOn(true);
-        console.log(`[${windowId}] 流媒体摄像头启动成功`);
+        console.log(`[${windowId}] MJPEG 直连摄像头启动成功`);
         return;
       }
 
@@ -238,6 +237,12 @@ export const useOCRCamera = ({
     if (isCameraOn) {
       console.log(`[${windowId}] 关闭摄像头`);
 
+      // 停止 MJPEG 播放器（如果有）
+      if (mjpegPlayerRef.current) {
+        mjpegPlayerRef.current.destroy();
+        mjpegPlayerRef.current = null;
+      }
+
       // 停止流媒体播放器（如果有）
       if (streamPlayerRef.current) {
         streamPlayerRef.current.destroy();
@@ -273,6 +278,11 @@ export const useOCRCamera = ({
       const stream = videoRef.current?.srcObject as MediaStream;
       stream?.getTracks().forEach(track => track.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
+      // 停止 MJPEG 播放器
+      if (mjpegPlayerRef.current) {
+        mjpegPlayerRef.current.destroy();
+        mjpegPlayerRef.current = null;
+      }
       setIsCameraOn(false);
 
       // 启动新摄像头（指定设备ID）
@@ -414,5 +424,6 @@ export const useOCRCamera = ({
     getAvailableDevices,
     streamPlayerRef,
     hlsPlayerRef,
+    mjpegPlayerRef,
   };
 };

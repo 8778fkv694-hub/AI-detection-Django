@@ -2,6 +2,15 @@
 流媒体拉流服务
 使用 OpenCV 从各种流媒体源读取视频帧
 """
+import os
+
+# 强制 OpenCV FFmpeg 使用 TCP 传输 RTSP，并启用低延迟选项（nobuffer + low_delay）
+# 注意：本地摄像头通常使用 V4L2 backend，不受 FFmpeg 选项影响
+os.environ.setdefault(
+    'OPENCV_FFMPEG_CAPTURE_OPTIONS',
+    'rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;500000'
+)
+
 import cv2
 import numpy as np
 import threading
@@ -17,11 +26,12 @@ logger = logging.getLogger(__name__)
 class StreamReader:
     """流媒体读取器"""
     
-    def __init__(self, stream_id: str, url: str, auto_reconnect: bool = True, reconnect_interval: int = 5):
+    def __init__(self, stream_id: str, url: str, auto_reconnect: bool = True, reconnect_interval: int = 5, low_latency: bool = False):
         self.stream_id = stream_id
         self.url = url
         self.auto_reconnect = auto_reconnect
         self.reconnect_interval = reconnect_interval
+        self.low_latency = low_latency
         
         self.cap: Optional[cv2.VideoCapture] = None
         self.current_frame: Optional[np.ndarray] = None
@@ -30,6 +40,7 @@ class StreamReader:
         self.last_frame_time: Optional[datetime] = None
         self.error_message = ""
         self.error_count = 0
+        self.frame_version: int = 0  # 帧版本计数器，用于 MJPEG 去重
         
         self.lock = threading.Lock()
         self.thread: Optional[threading.Thread] = None
@@ -76,9 +87,16 @@ class StreamReader:
                 (self.url, cv2.CAP_ANY, 'opencv-device-path'),
             ]
 
-        return [
+        candidates = [
             (self.url, cv2.CAP_ANY, 'opencv-default'),
         ]
+
+        # RTSP 流强制 TCP 传输，避免 UDP 认证失败
+        if isinstance(self.url, str) and self.url.startswith('rtsp://'):
+            tcp_url = f"{self.url}?rtsp_transport=tcp"
+            candidates.insert(0, (tcp_url, cv2.CAP_FFMPEG, 'opencv-ffmpeg-tcp'))
+
+        return candidates
 
     def _configure_capture(self, cap: cv2.VideoCapture, source_label: str):
         """按候选源配置分辨率与编码格式。"""
@@ -207,7 +225,24 @@ class StreamReader:
             
             # 读取帧
             try:
-                ret, frame = self.cap.read()
+                if self.low_latency:
+                    # 低延迟模式：快速消费 FFmpeg / OpenCV 内部缓冲区，只保留最新帧
+                    latest_frame = None
+                    empty_streak = 0
+                    for _ in range(50):   # 最多连续读 50 帧，清空深层缓冲
+                        ret, f = self.cap.read()
+                        if not ret or f is None:
+                            empty_streak += 1
+                            if empty_streak >= 3:
+                                break
+                            continue
+                        empty_streak = 0
+                        latest_frame = f
+                    ret = latest_frame is not None
+                    frame = latest_frame
+                else:
+                    ret, frame = self.cap.read()
+
                 if not ret or frame is None:
                     logger.warning(f"Failed to read frame from stream {self.stream_id}")
                     self.error_count += 1
@@ -225,8 +260,11 @@ class StreamReader:
                     self.last_frame_time = datetime.now()
                     self.error_count = 0
                 
-                # 控制帧率，避免过度占用CPU
-                time.sleep(0.033)  # 约30 FPS
+                # 控制读取频率
+                if self.low_latency:
+                    time.sleep(0.002)   # 低延迟模式：约 500fps 读取上限，快速清空缓冲
+                else:
+                    time.sleep(0.033)   # 普通模式：约 30 FPS
                 
             except Exception as e:
                 logger.error(f"Exception while reading from stream {self.stream_id}: {e}")
@@ -327,14 +365,14 @@ class StreamManager:
             logger.info("StreamManager initialized")
     
     def add_stream(self, stream_id: str, url: str, auto_reconnect: bool = True, 
-                   reconnect_interval: int = 5) -> bool:
+                   reconnect_interval: int = 5, low_latency: bool = False) -> bool:
         """添加并启动流媒体源"""
         # 如果已存在，先停止旧的
         if stream_id in self.streams:
             self.remove_stream(stream_id)
         
         # 创建新的流读取器
-        reader = StreamReader(stream_id, url, auto_reconnect, reconnect_interval)
+        reader = StreamReader(stream_id, url, auto_reconnect, reconnect_interval, low_latency)
         success = reader.start()
         
         if success:
