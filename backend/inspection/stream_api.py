@@ -502,9 +502,10 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
 def stream_manager_status(request):
     """获取流管理器状态"""
     all_status = stream_manager.get_all_streams_status()
+    streams = {str(stream_id): status for stream_id, status in all_status.items()}
     return Response({
-        'total_streams': len(all_status),
-        'streams': all_status
+        'total_streams': len(streams),
+        'streams': streams,
     })
 
 

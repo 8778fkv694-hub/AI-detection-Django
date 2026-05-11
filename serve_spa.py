@@ -139,7 +139,8 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
         """自定义日志格式"""
         print(f"[SPA Server] {self.address_string()} - {format % args}")
 
-def run_server(port: int = 3005, directory: str = "./dist"):
+def run_server(port: int = 3005, directory: str = "./dist",
+               certfile: str = None, keyfile: str = None):
     """启动 SPA 服务器"""
     # 切换到指定目录
     if not os.path.isdir(directory):
@@ -159,33 +160,49 @@ def run_server(port: int = 3005, directory: str = "./dist"):
     
     # 允许地址重用
     socketserver.TCPServer.allow_reuse_address = True
-    
+
+    scheme = 'https' if (certfile and keyfile) else 'http'
     print(f"""
 ╔════════════════════════════════════════════════════════╗
 ║       🚀 Jetson SPA Server (Production Mode)           ║
 ╠════════════════════════════════════════════════════════╣
 ║  静态目录: {directory.ljust(43)} ║
-║  访问地址: http://0.0.0.0:{str(port).ljust(30)} ║
-║  后端地址: http://localhost:8000/api                   ║
+║  访问地址: {scheme}://0.0.0.0:{str(port).ljust(28)}║
+║  后端地址: {BACKEND_URL.ljust(43)} ║
 ╠════════════════════════════════════════════════════════╣
 ║  按 Ctrl+C 停止服务器                                   ║
 ╚════════════════════════════════════════════════════════╝
 """)
-    
-    with socketserver.TCPServer(("0.0.0.0", port), handler) as httpd:
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\n👋 服务器已停止")
-            sys.exit(0)
+
+    httpd = socketserver.TCPServer(("0.0.0.0", port), handler)
+    if certfile and keyfile:
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 服务器已停止")
+    finally:
+        httpd.server_close()
+
 
 def main():
     parser = argparse.ArgumentParser(description='Python SPA Server for Jetson Nano')
     parser.add_argument('--port', '-p', type=int, default=3005, help='服务器端口 (默认: 3005)')
     parser.add_argument('--dir', '-d', type=str, default='./dist', help='静态文件目录 (默认: ./dist)')
-    
+    parser.add_argument('--cert', type=str, default=None, help='SSL 证书 (.crt/.pem)')
+    parser.add_argument('--key', type=str, default=None, help='SSL 私钥 (.key)')
+    parser.add_argument('--backend', type=str, default=None,
+                        help='后端 URL，覆盖默认 http://localhost:8000')
+
     args = parser.parse_args()
-    run_server(port=args.port, directory=args.dir)
+    if args.backend:
+        global BACKEND_URL
+        BACKEND_URL = args.backend.rstrip('/')
+    run_server(port=args.port, directory=args.dir,
+               certfile=args.cert, keyfile=args.key)
 
 if __name__ == '__main__':
     main()
