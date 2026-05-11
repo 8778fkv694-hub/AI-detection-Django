@@ -34,8 +34,6 @@ def main() -> None:
         _run_wsgiref_fallback(args.host, args.port)
         return
 
-    from config.wsgi import application
-
     options = {
         "bind": f"{args.host}:{args.port}",
         "workers": args.workers,
@@ -58,6 +56,9 @@ def main() -> None:
                 self.cfg.set(k, v)
 
         def load(self):
+            # 关键：在 worker 进程里 import，避免 master 加载 TensorRT/CUDA
+            # 后 fork 给 worker 导致 CUDA context 失效（worker 会卡死 100% CPU）
+            from config.wsgi import application
             return application
 
     print(f"[serve_production] gunicorn on {args.host}:{args.port} "
