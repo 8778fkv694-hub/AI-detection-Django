@@ -222,91 +222,100 @@ export const useLiveYoloDetection = ({
         if (now - lastCaptureTime > autoCaptureDelay) {
           
           const processCapture = async () => {
-            let processedImage: string = '';
-            
-            // 获取图像进行处理
-            if (useBackendDetection && streamId) {
-              const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-              try {
-                const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
-                if (res.ok) {
-                  const blob = await res.blob();
-                  const objectUrl = URL.createObjectURL(blob);
-                  
-                  // 将 blob 转换为 base64 以兼容现有处理函数
-                  const reader = new FileReader();
-                  const base64Promise = new Promise<string>((resolve) => {
-                    reader.onloadend = () => {
-                      const result = reader.result as string;
-                      resolve(result.split(',')[1] || '');
-                    };
-                  });
-                  reader.readAsDataURL(blob);
-                  const base64Img = await base64Promise;
-                  
-                  if (imageSaveMode === 'roi') {
-                    processedImage = await cropImageToROI(base64Img, targetDetections);
-                  } else {
-                    processedImage = await compressImage(base64Img);
+            try {
+              let processedImage: string = '';
+
+              // 获取图像进行处理
+              if (useBackendDetection && streamId) {
+                const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+                try {
+                  const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+                  if (res.ok) {
+                    const blob = await res.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+
+                    // 将 blob 转换为 base64 以兼容现有处理函数
+                    const reader = new FileReader();
+                    const base64Promise = new Promise<string>((resolve) => {
+                      reader.onloadend = () => {
+                        const result = reader.result as string;
+                        resolve(result.split(',')[1] || '');
+                      };
+                    });
+                    reader.readAsDataURL(blob);
+                    const base64Img = await base64Promise;
+
+                    if (imageSaveMode === 'roi') {
+                      processedImage = await cropImageToROI(base64Img, targetDetections);
+                    } else {
+                      processedImage = await compressImage(base64Img);
+                    }
+
+                    URL.revokeObjectURL(objectUrl);
                   }
-                  
-                  URL.revokeObjectURL(objectUrl);
+                } catch (e) {
+                  console.error('获取后端抓拍图像失败:', e);
                 }
-              } catch (e) {
-                console.error('获取后端抓拍图像失败:', e);
               }
-            }
-            
-            // 如果后端获取失败或使用传统模式，从前端 video 获取
-            if (!processedImage) {
-              const canvas = document.createElement('canvas');
-              canvas.width = videoRef.current!.videoWidth;
-              canvas.height = videoRef.current!.videoHeight;
-              const ctx = canvas.getContext('2d');
-              ctx?.drawImage(videoRef.current!, 0, 0, canvas.width, canvas.height);
-              const fallbackBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
-              
-              if (imageSaveMode === 'roi') {
-                processedImage = await cropImageToROI(fallbackBase64, targetDetections);
+
+              // 如果后端获取失败或使用传统模式，从前端 video 获取
+              if (!processedImage && videoRef.current) {
+                const canvas = document.createElement('canvas');
+                canvas.width = videoRef.current.videoWidth;
+                canvas.height = videoRef.current.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                const fallbackBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
+
+                if (imageSaveMode === 'roi') {
+                  processedImage = await cropImageToROI(fallbackBase64, targetDetections);
+                } else {
+                  processedImage = await compressImage(fallbackBase64);
+                }
+              }
+
+              if (!processedImage) {
+                return;
+              }
+
+              setHasCapturedForDetection(true);
+              setIsWaitingForAIResult(true);
+              setLastCaptureTime(now);
+
+              if (yoloDetectionMode === 'and') {
+                setDetectedElements([]);
+                setElementDetectionStartTime(null);
+              }
+
+              if (autoAIDetectionEnabled) {
+                const modeText = imageSaveMode === 'roi' ? 'ROI截图' : '全画面';
+                const detectedText =
+                  detectedLabels.length > 0 ? detectedLabels.map((l) => getTargetChineseName(l)).join(', ') : '目标';
+                toast.success(`检测到${detectedText}，已自动抓拍1张${modeText}！正在自动上传AI分析...`);
+
+                setTimeout(() => {
+                  addCapturedImage(processedImage);
+                  handleDirectAIDetection(processedImage);
+                }, 1000);
               } else {
-                processedImage = await compressImage(fallbackBase64);
-              }
-            }
-
-            setHasCapturedForDetection(true);
-            setIsWaitingForAIResult(true);
-            setLastCaptureTime(now);
-
-            if (yoloDetectionMode === 'and') {
-              setDetectedElements([]);
-              setElementDetectionStartTime(null);
-            }
-
-            if (autoAIDetectionEnabled) {
-              const modeText = imageSaveMode === 'roi' ? 'ROI截图' : '全画面';
-              const detectedText =
-                detectedLabels.length > 0 ? detectedLabels.map((l) => getTargetChineseName(l)).join(', ') : '目标';
-              toast.success(`检测到${detectedText}，已自动抓拍1张${modeText}！正在自动上传AI分析...`);
-
-              setTimeout(() => {
+                const modeText = imageSaveMode === 'roi' ? 'ROI截图' : '全画面';
+                const detectedText =
+                  detectedLabels.length > 0 ? detectedLabels.map((l) => getTargetChineseName(l)).join(', ') : '目标';
+                toast.success(`检测到${detectedText}，已自动抓拍1张${modeText}！`);
                 addCapturedImage(processedImage);
-                handleDirectAIDetection(processedImage);
-              }, 1000);
-            } else {
-              const modeText = imageSaveMode === 'roi' ? 'ROI截图' : '全画面';
-              const detectedText =
-                detectedLabels.length > 0 ? detectedLabels.map((l) => getTargetChineseName(l)).join(', ') : '目标';
-              toast.success(`检测到${detectedText}，已自动抓拍1张${modeText}！`);
-              addCapturedImage(processedImage);
-              
-              setTimeout(() => {
-                setHasCapturedForDetection(false);
-              }, 2000);
+
+                setTimeout(() => {
+                  setHasCapturedForDetection(false);
+                }, 2000);
+              }
+            } catch (e) {
+              console.error('自动抓拍异常:', e);
+              setHasCapturedForDetection(false);
+              setIsWaitingForAIResult(false);
             }
           };
-          
-          // 异步执行抓拍处理
-          processCapture();
+
+          processCapture().catch((e) => console.error('抓拍未捕获异常:', e));
         }
       }
 

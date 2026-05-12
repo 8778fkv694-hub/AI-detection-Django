@@ -199,6 +199,7 @@ class DetectionLoopManager:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._loops: Dict[str, DetectionLoop] = {}
+                    cls._instance._ref_counts: Dict[str, int] = {}
                     cls._instance._lock = threading.Lock()
         return cls._instance
 
@@ -208,9 +209,12 @@ class DetectionLoopManager:
         model_id: str,
         conf_threshold: float = 0.5,
     ) -> Dict[str, Any]:
-        """启动指定流的检测循环"""
+        """启动指定流的检测循环（引用计数，支持多消费者）"""
         with self._lock:
-            # 如果已有循环在跑，先停掉
+            # 递增引用计数
+            self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
+
+            # 如果已有循环在跑
             if stream_id in self._loops and self._loops[stream_id].is_running:
                 old_loop = self._loops[stream_id]
                 # 如果配置没变，直接返回
@@ -254,12 +258,26 @@ class DetectionLoopManager:
             }
 
     def stop_loop(self, stream_id: str) -> Dict[str, Any]:
-        """停止指定流的检测循环"""
+        """停止指定流的检测循环（引用计数归零才真停）"""
         with self._lock:
-            if stream_id not in self._loops:
+            current = self._ref_counts.get(stream_id, 0)
+            if current <= 0:
                 return {
                     'success': False,
-                    'message': f'未找到检测循环: stream={stream_id}',
+                    'message': f'未找到检测循环引用: stream={stream_id}',
+                }
+
+            self._ref_counts[stream_id] = current - 1
+            if self._ref_counts[stream_id] > 0:
+                return {
+                    'success': True,
+                    'message': f'检测循环仍有其他消费者 ({self._ref_counts[stream_id]}), 不停止: stream={stream_id}',
+                }
+
+            if stream_id not in self._loops:
+                return {
+                    'success': True,
+                    'message': f'检测循环引用已清零: stream={stream_id}',
                 }
             loop = self._loops[stream_id]
             loop.stop()
@@ -311,6 +329,7 @@ class DetectionLoopManager:
             for stream_id, loop in list(self._loops.items()):
                 loop.stop()
             self._loops.clear()
+            self._ref_counts.clear()
         logger.info("🛑 All detection loops stopped")
 
 
