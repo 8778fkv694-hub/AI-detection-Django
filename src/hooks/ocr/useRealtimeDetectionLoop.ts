@@ -963,11 +963,16 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   }, [handleCaptureWorkflow]);
 
   // 实时检测循环
+  // 注意：workflowState 故意不放进 deps —— 否则 workflow 状态一变化就 clearInterval，
+  // 等到 workflow 回 idle 时 effect 重启可能漏掉 idle 窗口（特别是 workflow 卡在
+  // waiting_for_approval / completed 这类需要外部驱动才能回 idle 的状态时，循环就死了）。
+  // performRealtimeDetectionRef.current 内部第 268 行已经做了 workflowState !== 'idle'
+  // 的早返回，busy 时跳过当次检测即可，workflow 回 idle 后自然恢复滴答。
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
     let isRunning = true;
 
-    if (isRealtimeActive && isCameraOn && workflowState === 'idle') {
+    if (isRealtimeActive && isCameraOn) {
       if (detectionInterval === 0) {
         const runAdaptive = async () => {
           if (!isRunning) return;
@@ -988,7 +993,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       isRunning = false;
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isRealtimeActive, isCameraOn, workflowState, detectionInterval]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRealtimeActive, isCameraOn, detectionInterval]);
 
   // 帧采集清理
   useEffect(() => {
