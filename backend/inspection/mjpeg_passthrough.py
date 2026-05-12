@@ -41,6 +41,52 @@ _ACTIVE_PROCS: dict[str, subprocess.Popen] = {}
 _REGISTRY_GUARD = threading.Lock()
 
 
+# Linux prctl 常量（不同 libc 都是这个值）
+_PR_SET_PDEATHSIG = 1
+
+
+def _set_pdeathsig() -> None:
+    """preexec_fn：在 fork-exec 之间运行，告诉内核「我父进程死了请也杀我」。
+    这是处理孤儿 ffmpeg 的最后防线——Django worker 崩了，
+    ffmpeg 不会被 init 收养继续占摄像头。
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL('libc.so.6', use_errno=True)
+        libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+    except Exception:
+        # 非 Linux 或 libc 找不到时静默失败——主流程仍能跑
+        pass
+
+
+def _reap_orphans_at_startup() -> None:
+    """模块加载时清扫前一个 worker 实例遗留的 ffmpeg。
+
+    匹配规则严格——必须是「ffmpeg ... -f mpjpeg ... pipe:1」这种形式
+    （我们这个模块特有的命令模式），避免误杀用户自己启的 ffmpeg。
+    """
+    try:
+        out = subprocess.run(
+            ['pgrep', '-af', 'ffmpeg.*-i /dev/video.*-f mpjpeg.*pipe:1'],
+            capture_output=True, text=True, timeout=2,
+        )
+    except Exception:
+        return
+    for line in out.stdout.splitlines():
+        try:
+            pid = int(line.split(None, 1)[0])
+        except (ValueError, IndexError):
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            logger.warning("Reaped orphan ffmpeg pid=%d at startup", pid)
+        except ProcessLookupError:
+            pass
+
+
+_reap_orphans_at_startup()
+
+
 def _kill_proc_tree(proc: subprocess.Popen, timeout: float = 2.0) -> None:
     """杀进程组（不仅是 ffmpeg 自己，连同它的所有子孙）。"""
     if proc.poll() is not None:
@@ -192,12 +238,15 @@ def mjpeg_passthrough_view(request, stream_id):
 
     try:
         # start_new_session=True：让 ffmpeg 成为新进程组组长，便于 killpg 整组
+        # preexec_fn=_set_pdeathsig：父进程（Django worker）一旦死掉，
+        # 内核立刻给 ffmpeg 发 SIGTERM，避免变成 init 收养的孤儿
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             bufsize=0,
             start_new_session=True,
+            preexec_fn=_set_pdeathsig,
         )
     except FileNotFoundError:
         if cv2_was_running:
