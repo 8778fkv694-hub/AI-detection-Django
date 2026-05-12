@@ -58,6 +58,7 @@ const LiveInspectionScreen: React.FC = () => {
   const [isYoloActive, setIsYoloActive] = useState(false);
   const [availableDevices, setAvailableDevices] = useState<CameraDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const backendStreamId = selectedDeviceId?.startsWith('stream-') ? selectedDeviceId.replace('stream-', '') : null;
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
   const [actualPrompt, setActualPrompt] = useState<string>('');
@@ -163,6 +164,7 @@ const LiveInspectionScreen: React.FC = () => {
   });
 
   const { performYoloDetection: _performYoloDetection, toggleYoloDetection } = useLiveYoloDetection({
+    streamId: backendStreamId,
     videoRef,
     canvasRef,
     isCameraOn,

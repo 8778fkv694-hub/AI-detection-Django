@@ -243,8 +243,10 @@ export const useROIProcessor = ({
               sharpness: sharpness,
               fullImageDataUrl: dataUrl
             });
-            // const roiArea = roiWidth * roiHeight;
-            // console.log(`📸 更新ROI ${detection.label} 的最佳照片，面积: ${roiArea.toFixed(0)}px², 清晰度: ${sharpness.toFixed(2)}`);
+            const roiArea = roiWidth * roiHeight;
+            console.log(`📸 ROI ${detection.label} 更新: 清晰度=${sharpness.toFixed(1)}, 面积=${roiArea.toFixed(0)}px²`);
+          } else if (existing) {
+            console.log(`⏭️ ROI ${detection.label} 跳过: 当前清晰度=${sharpness.toFixed(1)} <= 已有=${existing.sharpness.toFixed(1)}`);
           }
 
           resolve();
@@ -337,7 +339,10 @@ export const useROIProcessor = ({
                 sharpness: sharpness,
                 fullImageDataUrl: frameDataUrl
               });
-              // console.log(`📸 更新ROI ${detection.label} 的最佳照片，面积: ${roiArea.toFixed(0)}px², 清晰度: ${sharpness.toFixed(2)}`);
+              const roiArea = roiWidth * roiHeight;
+              console.log(`📸 延时ROI ${detection.label}: 清晰度=${sharpness.toFixed(1)}, 面积=${roiArea.toFixed(0)}px²`);
+            } else if (existing) {
+              console.log(`⏭️ 延时ROI ${detection.label} 跳过: 清晰度=${sharpness.toFixed(1)} <= 已有=${existing.sharpness.toFixed(1)}`);
             }
 
             resolve();

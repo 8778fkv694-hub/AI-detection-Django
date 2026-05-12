@@ -20,6 +20,8 @@ export interface UseModelConfigOptions {
   persistedModelId: string | null;
   /** 设置持久化的模型ID（保存到Store） */
   setPersistedModelId: (modelId: string | null) => void;
+  /** 配方应用期间抑制自动选择目标（配方自己会设） */
+  suppressAutoSelectRef?: React.MutableRefObject<boolean>;
 }
 
 export interface UseModelConfigResult {
@@ -48,6 +50,7 @@ export const useModelConfig = ({
   setSelectedTargets,
   persistedModelId,
   setPersistedModelId,
+  suppressAutoSelectRef,
 }: UseModelConfigOptions): UseModelConfigResult => {
   // 使用 useCurrentModel hook（获取后端的当前模型，作为备用）
   const {
@@ -266,33 +269,26 @@ export const useModelConfig = ({
     ) {
       previousModelRef.current = currentModel;
       previousModelConfigRef.current = modelConfig;
+
+      // 配方应用期间跳过自动选择（配方自己设目标）
+      if (suppressAutoSelectRef?.current) {
+        suppressAutoSelectRef.current = false;
+        console.log('🔧 配方应用：跳过模型切换时的自动目标选择');
+        return;
+      }
+
       console.log('✅ 模型切换完成，modelConfig已更新');
       console.log('当前模型ID:', currentModel);
       const availableTargets = getAvailableTargets();
       console.log('可用目标:', availableTargets);
-      console.log('当前选择的目标:', selectedTargets);
 
-      // 如果当前选择的目标不在新模型的可用目标中，则自动选择第一个可用目标
-      const validTargets = selectedTargets.filter(
-        (target) => target && target.trim() && availableTargets.includes(target)
-      );
-      if (validTargets.length === 0 && availableTargets.length > 0) {
-        // 如果当前没有有效目标，且可用目标不为空，选择第一个可用目标
-        setSelectedTargets([availableTargets[0]]);
+      if (availableTargets.length > 0) {
+        // 模型切换：全选新模型的所有可用目标
+        setSelectedTargets(availableTargets);
         console.log(
-          `模型切换到 ${currentModel}，自动选择检测目标: ${availableTargets[0]}`
+          `模型切换到 ${currentModel}，自动全选 ${availableTargets.length} 个目标: ${availableTargets.join(', ')}`
         );
-      } else if (
-        validTargets.length > 0 &&
-        validTargets.length !== selectedTargets.length
-      ) {
-        // 只有在有无效目标时才更新（避免无限循环）
-        setSelectedTargets(validTargets);
-        console.log(
-          `模型切换到 ${currentModel}，过滤无效目标，保留: ${validTargets.join(', ')}`
-        );
-      } else if (validTargets.length === 0 && availableTargets.length === 0) {
-        // 如果没有可用目标，清空选择
+      } else {
         setSelectedTargets([]);
         console.log(`模型切换到 ${currentModel}，没有可用目标，清空选择`);
       }
@@ -301,9 +297,9 @@ export const useModelConfig = ({
     currentModel,
     modelConfig,
     isLoadingConfig,
-    selectedTargets,
     getAvailableTargets,
     setSelectedTargets,
+    suppressAutoSelectRef,
   ]);
 
   return {

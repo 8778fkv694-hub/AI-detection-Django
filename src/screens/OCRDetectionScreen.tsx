@@ -155,6 +155,9 @@ const OCRDetectionScreen: React.FC = () => {
   const processStageName = urlParams.get('stage_name')?.trim() || processStageCode;
   const pageInstanceId = urlParams.get('page_instance_id')?.trim() || windowId;
   const cameraId = urlParams.get('camera_id')?.trim() || selectedDeviceId || '';
+  // 后端检测循环需要的是 StreamSource 的 DB 主键，不是浏览器 deviceId
+  // 虚拟摄像头 selectedDeviceId = "stream-<id>"，物理摄像头 = 浏览器 UUID
+  const backendStreamId = selectedDeviceId?.startsWith('stream-') ? selectedDeviceId.replace('stream-', '') : null;
   const fixtureQr = urlParams.get('fixture_qr')?.trim() || '';
   const fixtureQrSourceParam = urlParams.get('fixture_source')?.trim();
   const fixtureQrPrefixes = (urlParams.get('fixture_qr_prefixes') || urlParams.get('fixture_qr_prefix') || '')
@@ -238,10 +241,12 @@ const OCRDetectionScreen: React.FC = () => {
   const [appliedRecipeSnapshot, setAppliedRecipeSnapshot] = useState<StageRecipe | null>(null);
 
   // 3. 模型配置 Hook
+  const suppressAutoSelectRef = useRef(false);
   const { currentModel, getTargetChineseName, getAvailableTargets, modelConfig, modelName, modelLoading, refreshModel, loadModelConfig } = useModelConfig({
     selectedTargets, setSelectedTargets,
     persistedModelId: currentModelId,
     setPersistedModelId: setCurrentModelId,
+    suppressAutoSelectRef,
   });
 
   // 4. 其它全局 Store/Mode
@@ -463,7 +468,8 @@ const OCRDetectionScreen: React.FC = () => {
     // OCR 引擎
     setOcrEngineModel(recipe.ocrEngineModel);
     setDetectionConfidence(recipe.detectionConfidence);
-    // 模型与目标同步
+    // 模型与目标同步（抑制 useModelConfig 的自动全选，由配方指定目标）
+    suppressAutoSelectRef.current = true;
     if (recipe.currentModelId) {
       setCurrentModelId(recipe.currentModelId);
     }
@@ -957,6 +963,7 @@ const OCRDetectionScreen: React.FC = () => {
     evaluateDetections, evaluateDebounce, batchManager: batchManager as any,
     stitchROISnapshots, stitchMultipleROIs, captureFrameData, processCapturedImage: processCapturedImage as any,
     detectedElements, elementDetectionStartTime, detectionStats, nonGridTargets,
+    streamId: backendStreamId,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
     setDetectionStats, setCurrentSharpness, setIsInPostDetectionDelay,
     setWorkflowState: setWorkflowState as any, setSelectedImage, setImagePreview, setIsWaitingForSpace,

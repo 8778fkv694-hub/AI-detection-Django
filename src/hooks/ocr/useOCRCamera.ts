@@ -11,6 +11,7 @@ import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
 import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
 import { MJPEGPlayer } from '@/lib/mjpegPlayer';
+import { useStreamSettingsStore } from '@/state/streamSettingsStore';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
 import toast from 'react-hot-toast';
 
@@ -42,6 +43,11 @@ export const useOCRCamera = ({
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
   const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
+
+  // 全局视频流显示设置（仅影响浏览器渲染，不影响 YOLO 检测）
+  const globalFps = useStreamSettingsStore((s) => s.fps);
+  const globalQuality = useStreamSettingsStore((s) => s.quality);
+  const globalWidth = useStreamSettingsStore((s) => s.targetWidth);
 
   // 启动摄像头
   const startCamera = useCallback(async (preferredDeviceId?: string) => {
@@ -134,13 +140,13 @@ export const useOCRCamera = ({
         }
 
         // 使用 MJPEG 直连方案（最低延迟、最高清晰度）
-        console.log(`[${windowId}] 使用 MJPEG 直连（零中转低延迟）`);
+        console.log(`[${windowId}] 使用 MJPEG 直连（fps=${globalFps}, q=${globalQuality}, w=${globalWidth}）`);
         const player = new MJPEGPlayer({
           videoElement: videoRef.current,
           streamId: streamId,
-          fps: 12,
-          quality: 75,
-          targetWidth: 960,
+          fps: globalFps,
+          quality: globalQuality,
+          targetWidth: globalWidth,
           onError: (error) => {
             console.error('MJPEGPlayer 错误:', error);
             toast.error(`MJPEG 流播放失败: ${error.message}`);
@@ -230,7 +236,7 @@ export const useOCRCamera = ({
       console.error('启动摄像头失败:', err);
       toast.error(msg);
     }
-  }, [selectedDeviceId, availableDevices, windowId, videoRef, setIsCameraOn, setIsRealtimeActive, setSelectedDeviceId]);
+  }, [selectedDeviceId, availableDevices, windowId, videoRef, setIsCameraOn, setIsRealtimeActive, setSelectedDeviceId, globalFps, globalQuality, globalWidth]);
 
   // 摄像头控制函数
   const toggleCamera = useCallback(async () => {

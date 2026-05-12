@@ -12,6 +12,7 @@ import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
 import type { CameraDevice } from '@/lib/cameraUtils';
+import { useStreamSettingsStore } from '@/state/streamSettingsStore';
 
 export interface UseLiveCameraOptions {
   /** 窗口ID */
@@ -58,6 +59,11 @@ export const useLiveCamera = ({
 }: UseLiveCameraOptions): UseLiveCameraResult => {
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
+
+  // 全局视频流显示设置（仅影响浏览器渲染，不影响 YOLO 检测）
+  const globalFps = useStreamSettingsStore((s) => s.fps);
+  const globalQuality = useStreamSettingsStore((s) => s.quality);
+  const globalWidth = useStreamSettingsStore((s) => s.targetWidth);
 
   // 切换摄像头
   const toggleCamera = useCallback(async () => {
@@ -110,10 +116,10 @@ export const useLiveCamera = ({
 
           if (playMode === 'ffmpeg') {
             try {
-              console.log(`[${windowId}] 使用FFmpeg/HLS流`);
+              console.log(`[${windowId}] 使用FFmpeg/HLS流 (fps=${globalFps}, w=${globalWidth})`);
               await startHLSStream(streamId, {
-                fps: 15,
-                width: 1280,
+                fps: globalFps,
+                width: globalWidth,
                 crf: 26,
                 preset: 'ultrafast',
                 threads: 2,
@@ -148,13 +154,13 @@ export const useLiveCamera = ({
           }
 
           // 使用 JPEG 方案
-          console.log(`[${windowId}] 使用JPEG流`);
+          console.log(`[${windowId}] 使用JPEG流 (fps=${globalFps}, q=${globalQuality}, w=${globalWidth})`);
           const player = new StreamPlayer({
             videoElement: videoRef.current,
             streamId: streamId,
-            fps: 20,
-            quality: 100,
-            targetWidth: 1920,
+            fps: globalFps,
+            quality: globalQuality,
+            targetWidth: globalWidth,
             windowId: windowId,
             onError: (error) => {
               toast.error(`流媒体播放失败: ${error.message}`);
@@ -220,7 +226,7 @@ export const useLiveCamera = ({
         }
       }
     }
-  }, [isCameraOn, selectedDeviceId, windowId, videoRef, availableDevices, setIsCameraOn, setIsYoloActive]);
+  }, [isCameraOn, selectedDeviceId, windowId, videoRef, availableDevices, setIsCameraOn, setIsYoloActive, globalFps, globalQuality, globalWidth]);
 
   // 手动抓拍
   const handleCapture = useCallback(async () => {

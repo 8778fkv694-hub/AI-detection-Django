@@ -6,6 +6,7 @@ import { Home, Camera, Layers, BarChart2, Shield, FileText, Eye, ExternalLink, H
 import { useAppStore } from '@/state/appStore';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
+import { StreamSettingsPopover } from '@/components/StreamSettingsPopover';
 import { cn } from '@/lib/utils';
 import { initCsrfToken } from '@/lib/config';
 
@@ -144,6 +145,11 @@ const App: React.FC = () => {
                   )}
                 </div>
               ))}
+            </div>
+
+            {/* 全局视频流设置（底部固定） */}
+            <div className="px-4 pb-4 border-t border-border/50 pt-3">
+              <StreamSettingsPopover />
             </div>
           </div>
         </nav>

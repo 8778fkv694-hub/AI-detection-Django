@@ -114,6 +114,14 @@ urlpatterns = [
     path('api/streams/manager/status/', stream_manager_status, name='stream_manager_status'),
     path('api/streams/manager/stop-all/', stop_all_streams, name='stop_all_streams'),
     path('api/streams/manager/restart-all/', restart_all_streams, name='restart_all_streams'),
+    
+    # 持续检测循环API
+    path('api/streams/<str:stream_id>/detections/', __import__('inspection.detection_api', fromlist=['']).detection_latest_view, name='detection_latest'),
+    path('api/streams/<str:stream_id>/snapshot/', __import__('inspection.detection_api', fromlist=['']).detection_snapshot_view, name='detection_snapshot'),
+    path('api/streams/<str:stream_id>/detection-loop/start/', __import__('inspection.detection_api', fromlist=['']).detection_loop_start, name='detection_loop_start'),
+    path('api/streams/<str:stream_id>/detection-loop/stop/', __import__('inspection.detection_api', fromlist=['']).detection_loop_stop, name='detection_loop_stop'),
+    path('api/streams/detection-loop/status/', __import__('inspection.detection_api', fromlist=['']).detection_loop_status, name='detection_loop_status_all'),
+
     # MJPEG 直推：本地 USB 摄像头走 ffmpeg passthrough 零编解码；其他源 fallback 到 cv2 重编码
     path('api/streams/<str:stream_id>/mjpeg/', mjpeg_passthrough_view, name='mjpeg_stream'),
     path('api/streams/<str:stream_id>/mjpeg-cv2/', mjpeg_stream, name='mjpeg_stream_cv2'),

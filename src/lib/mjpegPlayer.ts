@@ -36,6 +36,12 @@ export class MJPEGPlayer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
 
+  // 重连机制
+  private reconnectAttempts = 0;
+  private maxReconnects = 3;
+  private reconnectDelay = 1000; // 重连间隔 ms
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(options: MJPEGPlayerOptions) {
     this.videoElement = options.videoElement;
     this.streamId = options.streamId;
@@ -64,6 +70,29 @@ export class MJPEGPlayer {
     document.body.appendChild(this.mjpegImg);
   }
 
+  private _handleStreamError(): void {
+    if (!this.isPlaying) return;
+
+    this.reconnectAttempts++;
+    console.warn(
+      `MJPEGPlayer: 流连接断开，尝试重连 (${this.reconnectAttempts}/${this.maxReconnects})`
+    );
+
+    if (this.reconnectAttempts <= this.maxReconnects) {
+      // 重置 img.src 触发重新连接（MJPEG 的 multipart 流会重新握手）
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.isPlaying) return;
+        const url = this.buildDirectMjpegUrl();
+        console.log(`MJPEGPlayer: 重连中... ${url}`);
+        this.mjpegImg.src = url;
+      }, this.reconnectDelay * this.reconnectAttempts);  // 递增延迟：1s, 2s, 3s
+    } else {
+      console.error(`MJPEGPlayer: 重连 ${this.maxReconnects} 次失败，停止播放`);
+      this.stop();
+      this.onError?.(new Error('MJPEG 流连接失败，已重试 3 次'));
+    }
+  }
+
   private buildDirectMjpegUrl(): string {
     const protocol = window.location.protocol;
     const host = window.location.hostname;
@@ -83,6 +112,7 @@ export class MJPEGPlayer {
     this.isPlaying = true;
     this.frameCount = 0;
     this.lastFrameTime = Date.now();
+    this.reconnectAttempts = 0;  // 重置重连计数
 
     const mjpegUrl = this.buildDirectMjpegUrl();
     console.log(`MJPEGPlayer: 开始播放 MJPEG 流 (真正直连): ${mjpegUrl}`);
@@ -175,7 +205,9 @@ export class MJPEGPlayer {
         }, 'image/jpeg', 0.9);
       }
     };
+    this.boundOnError = () => this._handleStreamError();
     this.mjpegImg.onload = this.boundOnLoad;
+    this.mjpegImg.onerror = this.boundOnError;
   }
 
   stop(): void {
@@ -184,10 +216,20 @@ export class MJPEGPlayer {
 
     console.log('MJPEGPlayer: 停止播放');
 
+    // 清除重连定时器
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     // 解绑
     if (this.boundOnLoad) {
       this.mjpegImg.onload = null;
       this.boundOnLoad = null;
+    }
+    if (this.boundOnError) {
+      this.mjpegImg.onerror = null;
+      this.boundOnError = null;
     }
 
     // 停止流

@@ -103,6 +103,7 @@ export interface UseRealtimeDetectionLoopOptions {
   fixtureQrPrefixes?: string[];
   fixtureQrPattern?: string;
   onFixtureQrDetected?: (qrCode: string) => void;
+  streamId?: string;
 
   // State setters
   setIsDetecting: (value: boolean) => void;
@@ -134,15 +135,17 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     evaluateDetections, evaluateDebounce,
     batchManager,
     stitchROISnapshots, stitchMultipleROIs, captureFrameData, processCapturedImage,
-    detectedElements, elementDetectionStartTime, detectionStats, nonGridTargets,
+    detectedElements, elementDetectionStartTime, nonGridTargets,
     enableParallelQrDetection, qrDetectIntervalMs, fixtureQrInput, fixtureQrPrefixes, fixtureQrPattern,
-    onFixtureQrDetected,
+    onFixtureQrDetected, streamId,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
     setDetectionStats, setCurrentSharpness, setIsInPostDetectionDelay,
     setWorkflowState, setSelectedImage, setImagePreview,
     setIsWaitingForSpace, setMatchStatus, setWorkflowResult,
     setAiAnalysisResult, setFinalResult,
   } = options;
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
   // P0修复：使用ref保存performRealtimeDetection函数，避免setInterval闭包问题
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
@@ -185,16 +188,51 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       const validTargets = selectedTargets.filter(target => target != null && typeof target === 'string');
       if (validTargets.length === 0) return;
 
-      const frameCanvas = document.createElement('canvas');
-      frameCanvas.width = videoRef.current.videoWidth;
-      frameCanvas.height = videoRef.current.videoHeight;
-      const frameCtx = frameCanvas.getContext('2d');
-      if (!frameCtx || !videoRef.current) return;
+      const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
 
-      frameCtx.drawImage(videoRef.current, 0, 0, frameCanvas.width, frameCanvas.height);
-      const frameDataUrl = frameCanvas.toDataURL('image/jpeg', 0.95);
+      const collectFrame = async () => {
+        try {
+          if (useBackendDetection && streamId) {
+            // 解耦模式：从后端获取与检测框完全匹配的高清原图
+            const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+            if (!res.ok) return;
+            const blob = await res.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            
+            const img = new Image();
+            img.onload = () => {
+              const frameCanvas = document.createElement('canvas');
+              frameCanvas.width = img.width;
+              frameCanvas.height = img.height;
+              const frameCtx = frameCanvas.getContext('2d');
+              if (frameCtx) {
+                frameCtx.drawImage(img, 0, 0);
+                const frameDataUrl = frameCanvas.toDataURL('image/jpeg', 0.95);
+                batchExtractROIs(detections, frameDataUrl, validTargets);
+              }
+              // 关键修复：使用完后必须释放 Blob URL，防止 Jetson 浏览器内存溢出崩溃
+              URL.revokeObjectURL(objectUrl);
+            };
+            img.onerror = () => URL.revokeObjectURL(objectUrl);
+            img.src = objectUrl;
+          } else {
+            // 传统模式：从前端 video 元素直接截图
+            const frameCanvas = document.createElement('canvas');
+            frameCanvas.width = videoRef.current!.videoWidth;
+            frameCanvas.height = videoRef.current!.videoHeight;
+            const frameCtx = frameCanvas.getContext('2d');
+            if (!frameCtx || !videoRef.current) return;
 
-      batchExtractROIs(detections, frameDataUrl, validTargets);
+            frameCtx.drawImage(videoRef.current, 0, 0, frameCanvas.width, frameCanvas.height);
+            const frameDataUrl = frameCanvas.toDataURL('image/jpeg', 0.95);
+            batchExtractROIs(detections, frameDataUrl, validTargets);
+          }
+        } catch (err) {
+          console.error("Frame collection error:", err);
+        }
+      };
+
+      collectFrame();
 
       if (Math.random() < 0.1) {
         console.log('📸 独立帧采集中...（复用检测框位置）');
@@ -292,36 +330,85 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
         const validSelectedTargets = selectedTargets.filter(target => target != null && typeof target === 'string');
 
-        const canvas = document.createElement('canvas');
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
-        const ctx = canvas.getContext('2d');
+        // 检查是否启用后端持续检测
+        const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+        
+        let detections: any[] = [];
+        let base64DataForQr = '';
+        let dataUrl = '';
+        let base64Data = '';
 
-        if (!ctx) {
-          isDetectingRef.current = false;
-          setIsDetecting(false);
-          return;
+        if (useBackendDetection && streamId) {
+          // ====== 解耦模式：拉取后端最新 JSON 结果（<1KB） ======
+          try {
+            const response = await fetch(`${apiBaseUrl}/streams/${streamId}/detections/`);
+            if (response.ok) {
+              const result = await response.json();
+              detections = result.boxes || [];
+              
+              // 同步更新后端的 FPS 统计
+              if (result.detect_fps) {
+                // 将后端真实 FPS 更新到统计中
+                setDetectionStats((prev: any) => ({
+                  ...prev,
+                  fps: result.detect_fps,
+                }));
+              }
+            }
+          } catch (e) {
+            console.error('拉取后端检测结果失败:', e);
+          }
+
+          // 仅在需要触发并行二维码识别时，按需截图（降低 CPU 消耗）
+          if (enableParallelQrDetection && !fixtureQrInputRef.current && 
+              (Date.now() - lastQrDetectTimeRef.current >= effectiveQrInterval)) {
+            const canvas = document.createElement('canvas');
+            canvas.width = videoRef.current.videoWidth;
+            canvas.height = videoRef.current.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+              base64DataForQr = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+            }
+          }
+
+        } else {
+          // ====== 传统模式：前端高频截图并上传 Base64 (100-500KB) ======
+          const canvas = document.createElement('canvas');
+          canvas.width = videoRef.current.videoWidth;
+          canvas.height = videoRef.current.videoHeight;
+          const ctx = canvas.getContext('2d');
+
+          if (!ctx) {
+            isDetectingRef.current = false;
+            setIsDetecting(false);
+            return;
+          }
+
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+          base64Data = dataUrl.split(',')[1];
+
+          if (!base64Data) {
+            isDetectingRef.current = false;
+            setIsDetecting(false);
+            return;
+          }
+          
+          base64DataForQr = base64Data;
+
+          // 执行YOLO检测
+          const detectionType = (modelConfig?.detection_type as 'cleanroom_ppe' | 'kit_matching' | 'ocr_inspection' | 'ocr_fusion_inspection' | 'general_quality' | undefined) || 'ocr_inspection';
+          detections = await yoloDetectBackend(base64Data, detectionConfidence, {
+            model_id: currentModelId || undefined,
+            detection_type: detectionType,
+          });
         }
 
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-        const base64Data = dataUrl.split(',')[1];
-
-        if (!base64Data) {
-          isDetectingRef.current = false;
-          setIsDetecting(false);
-          return;
+        // 并行触发工装码识别（如果本帧有图）
+        if (base64DataForQr) {
+          fireParallelQrDetection(base64DataForQr);
         }
-
-        // 并行触发工装码识别（不阻塞YOLO）
-        fireParallelQrDetection(base64Data);
-
-        // 执行YOLO检测
-        const detectionType = (modelConfig?.detection_type as 'cleanroom_ppe' | 'kit_matching' | 'ocr_inspection' | 'ocr_fusion_inspection' | 'general_quality' | undefined) || 'ocr_inspection';
-        const detections = await yoloDetectBackend(base64Data, detectionConfidence, {
-          model_id: currentModelId || undefined,
-          detection_type: detectionType,
-        });
 
         // 保存检测结果供帧采集使用
         lastDetectionsRef.current = detections.filter(d =>
@@ -331,14 +418,13 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         // 更新检测统计
         const personDetections = detections.filter(d => d.label === 'person').length;
         const equipmentDetections = detections.filter(d => d.label !== 'person').length;
-        setDetectionStats({
+        setDetectionStats((prev: any) => ({
+          ...prev,
           totalDetections: detections.length,
-          qualifiedCount: detectionStats.qualifiedCount,
-          unqualifiedCount: detectionStats.unqualifiedCount,
           personDetections,
           equipmentDetections,
-          lastDetectionTime: detectionStats.lastDetectionTime
-        });
+          lastDetectionTime: Date.now()
+        }));
 
         // 绘制检测结果到画布上
         if (detectionCanvasRef.current && videoRef.current) {
@@ -358,8 +444,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
         }
 
-        // ROI模式累积保存
-        if (imageSaveMode === 'roi') {
+        // ROI模式累积保存（有本地截图数据时每帧提取ROI，不论后端/传统模式）
+        if (imageSaveMode === 'roi' && dataUrl) {
           batchExtractROIs(detections, dataUrl, validSelectedTargets);
         }
 
@@ -431,9 +517,44 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           stopFrameCollection();
           console.log(`🎯 防抖完成，开始工作流`);
 
+          let finalDataUrl = dataUrl;
+          let finalBase64 = base64Data;
+          
+          if (useBackendDetection && streamId && !finalDataUrl) {
+            try {
+              const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+              if (res.ok) {
+                const blob = await res.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                const reader = new FileReader();
+                finalDataUrl = await new Promise<string>((resolve) => {
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.readAsDataURL(blob);
+                });
+                finalBase64 = finalDataUrl.split(',')[1] || '';
+                URL.revokeObjectURL(objectUrl);
+              }
+            } catch (e) {
+              console.error('抓拍后端原图失败:', e);
+            }
+            
+            // fallback如果后端快照失败
+            if (!finalDataUrl && videoRef.current) {
+              const canvas = document.createElement('canvas');
+              canvas.width = videoRef.current.videoWidth;
+              canvas.height = videoRef.current.videoHeight;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                finalBase64 = finalDataUrl.split(',')[1] || '';
+              }
+            }
+          }
+
           // ========== 抓拍与图像处理 ==========
           await handleCaptureWorkflowRef.current?.(
-            validSelectedTargets, dataUrl, base64Data
+            validSelectedTargets, finalDataUrl, finalBase64
           );
         }
 
@@ -476,7 +597,6 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     detectionCanvasRef,
     detectionConfidence,
     detectionQueueRef,
-    detectionStats,
     detectedElementsRef,
     elementDetectionStartTimeRef,
     evaluateDebounce,
@@ -617,6 +737,16 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
       const roiCount = imageSaveMode === 'roi' ? bestROIs.size : (bestROIs.has('full_image') ? 1 : 0);
       console.log(`✅ 延时结束，已捕获 ${capturedFrames} 帧，找到 ${roiCount} 个最清晰${imageSaveMode === 'roi' ? 'ROI' : '全画面'}`);
+      // 检查最佳ROI的清晰度是否达标，帮助判断是算法问题还是源画面问题
+      if (bestROIs.size > 0) {
+        const sharpnessValues = Array.from(bestROIs.values()).map(r => r.sharpness);
+        const minSharpness = Math.min(...sharpnessValues);
+        const avgSharpness = sharpnessValues.reduce((a, b) => a + b, 0) / sharpnessValues.length;
+        console.log(`📊 清晰度统计: 最低=${minSharpness.toFixed(1)}, 平均=${avgSharpness.toFixed(1)}, 各ROI=${sharpnessValues.map(s => s.toFixed(1)).join(', ')}`);
+        if (avgSharpness < 10) {
+          console.warn(`⚠️ 所有ROI平均清晰度仅 ${avgSharpness.toFixed(1)}，源画面可能模糊、光线不足或对焦不准`);
+        }
+      }
       setIsInPostDetectionDelay(false);
 
       if (workflowState !== 'idle' || !videoRef.current) {
@@ -826,7 +956,13 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       } else {
         processedDataUrl = captureDataUrl;
         processedImageBase64 = captureBase64Data;
-        console.log('✅ 全画面模式保存完成，统一压缩将在后续处理中进行');
+        // 计算全画面清晰度，确认抓拍质量
+        try {
+          const fullImageData = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
+          calculateSharpnessAsync(fullImageData).then(s => {
+            console.log(`📷 全画面抓拍清晰度: ${s.toFixed(1)} ${s < 10 ? '⚠️ 模糊!' : s < 30 ? '⚡ 一般' : '✅ 清晰'}`);
+          });
+        } catch { /* 清晰度计算不影响主流程 */ }
       }
     }
 
@@ -961,6 +1097,41 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   useEffect(() => {
     handleCaptureWorkflowRef.current = handleCaptureWorkflow;
   }, [handleCaptureWorkflow]);
+
+  // ====== 后端检测循环生命周期管理 ======
+  useEffect(() => {
+    const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+    if (!useBackendDetection || !streamId) return;
+
+    if (isRealtimeActive && isCameraOn && !isPaused) {
+      // 启动后端检测循环
+      const detectionType = (modelConfig?.detection_type as string) || 'ocr_inspection';
+      console.log(`🚀 正在请求后端启动检测循环: stream=${streamId}, model=${currentModelId || 'default'}`);
+      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/start/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_id: currentModelId || undefined,
+          conf_threshold: detectionConfidence,
+        }),
+      }).catch(e => console.error('启动后端检测循环失败:', e));
+    } else {
+      // 暂停或停止时关闭后端检测循环
+      console.log(`🛑 正在请求后端停止检测循环: stream=${streamId}`);
+      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+        method: 'POST',
+      }).catch(e => console.error('停止后端检测循环失败:', e));
+    }
+    
+    return () => {
+      // 卸载组件时停止检测循环
+      if (useBackendDetection && streamId) {
+        fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+          method: 'POST',
+        }).catch(e => console.error('卸载时停止后端检测循环失败:', e));
+      }
+    };
+  }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, detectionConfidence, modelConfig, apiBaseUrl]);
 
   // 实时检测循环
   // 注意：workflowState 故意不放进 deps —— 否则 workflow 状态一变化就 clearInterval，
