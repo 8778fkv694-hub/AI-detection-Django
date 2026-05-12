@@ -391,6 +391,8 @@ export const useROIProcessor = ({
   // 重置ROI状态
   const resetROIs = useCallback(() => {
     bestROIsRef.current.clear();
+    // M11: 同时重置面积历史，避免后期ROI评分偏差累积
+    labelMaxAreaRef.current.clear();
   }, []);
 
   return {

@@ -16,6 +16,7 @@ from .stream_models import StreamSource
 from .stream_serializers import StreamSourceSerializer, StreamSourceListSerializer
 from .stream_service import stream_manager
 from .stream_hls import hls_stream_manager
+from .detection_loop import detection_loop_manager
 
 logger = logging.getLogger(__name__)
 
@@ -227,19 +228,22 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
         stream_status = stream_manager.get_stream_status(stream_id)
         
         if stream_status:
-            # 更新数据库中的状态
-            if stream_status['is_connected']:
-                stream.status = 'active'
-            elif stream_status['is_running']:
-                stream.status = 'connecting'
-            else:
-                stream.status = 'inactive'
+            # 仅在状态变化时写DB，避免高频轮询造成不必要的DB写入
+            new_status = 'active' if stream_status['is_connected'] else ('connecting' if stream_status['is_running'] else 'inactive')
+            new_error = stream_status.get('error_message', '')
+            new_error_count = stream_status.get('error_count', 0)
             
-            if stream_status['error_message']:
-                stream.last_error = stream_status['error_message']
-                stream.error_count = stream_status['error_count']
-            
-            stream.save(update_fields=['status', 'last_error', 'error_count'])
+            status_changed = (
+                stream.status != new_status or
+                stream.last_error != new_error or
+                stream.error_count != new_error_count
+            )
+            if status_changed:
+                stream.status = new_status
+                if new_error:
+                    stream.last_error = new_error
+                    stream.error_count = new_error_count
+                stream.save(update_fields=['status', 'last_error', 'error_count'])
         
         return Response({
             'stream': StreamSourceSerializer(stream).data,
@@ -280,9 +284,6 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
                 stream.last_connected_at = timezone.now()
                 stream.save(update_fields=['status', 'last_connected_at'])
                 logger.info(f'流启动成功: stream_id={stream_id}')
-                # 等待一小段时间让流建立连接
-                import time
-                time.sleep(0.5)
             else:
                 logger.error(f'流启动失败: stream_id={stream_id}')
                 return Response(
@@ -441,7 +442,12 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
         
         # 移除filename末尾可能的斜杠
         filename = filename.rstrip('/')
-        file_path = base_dir / filename
+        
+        # 路径穿越防护：resolve 消除 .. 后验证仍在允许目录内
+        allowed_root = base_dir.resolve()
+        file_path = (base_dir / filename).resolve()
+        if not str(file_path).startswith(str(allowed_root) + os.sep) and file_path != allowed_root:
+            raise Http404(f"HLS file not found: {filename}")
         
         if not file_path.exists():
             raise Http404(f"HLS file not found: {filename}")
@@ -493,6 +499,7 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
         stream_id = str(stream.id)
         try:
             stream_manager.remove_stream(stream_id)
+            detection_loop_manager.stop_loop(stream_id)
         except Exception as e:
             logger.error(f"Failed to stop stream {stream_id}: {e}")
 

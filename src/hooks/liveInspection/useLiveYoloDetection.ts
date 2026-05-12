@@ -14,6 +14,8 @@ import type { BackendYoloDetection } from '@/types';
 export interface UseLiveYoloDetectionOptions {
   /** 视频流ID */
   streamId?: string;
+  /** YOLO模型ID（可选，不传则后端使用默认模型） */
+  modelId?: string;
   /** 视频元素引用 */
   videoRef: React.RefObject<HTMLVideoElement>;
   /** 画布元素引用 */
@@ -87,6 +89,7 @@ export interface UseLiveYoloDetectionResult {
 
 export const useLiveYoloDetection = ({
   streamId,
+  modelId,
   videoRef,
   canvasRef,
   isCameraOn,
@@ -379,6 +382,7 @@ export const useLiveYoloDetection = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conf_threshold: detectionConfidence,
+          ...(modelId ? { model_id: modelId } : {}),
         }),
       }).catch(e => console.error('启动后端Live YOLO检测循环失败:', e));
     } else {

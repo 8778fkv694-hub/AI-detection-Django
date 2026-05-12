@@ -202,12 +202,12 @@ def mjpeg_passthrough_view(request, stream_id):
     Query:
         width  (默认 1280)
         height (默认 720)
-        fps    (默认 25)
+        fps    (默认 10, 前端显示用低帧率减轻 Jetson 负担)
     """
     # USB 摄像头 MJPG 必须给 ffmpeg 一个具体分辨率，width=0 当作"用默认"
     width = int(request.GET.get('width', 1280)) or 1280
     height = int(request.GET.get('height', 720)) or 720
-    fps = max(1, min(60, int(request.GET.get('fps', 25))))
+    fps = max(1, min(30, int(request.GET.get('fps', 10))))  # 默认10fps，前端显示不需要高帧率
     # 摄像头原生支持的分辨率档（USB cam）：3840x2160 / 2560x1440 / 1920x1080 / 1280x720 / 640x480
     # 如果传进来一个非标准宽度，强制对齐到 720p（最稳）
     if width not in (640, 1280, 1920, 2560, 3840):
@@ -223,12 +223,12 @@ def mjpeg_passthrough_view(request, stream_id):
         return mjpeg_stream(request, stream_id)
 
     # 关键：清掉任何旧 ffmpeg（这就是 409 bug 的根本修复）
-    # 等 200ms 让内核完成 v4l2 解绑，否则新 ffmpeg open 设备会 EBUSY
+    # 等 50ms 让内核完成 v4l2 解绑，否则新 ffmpeg open 设备会 EBUSY
     _evict_holder(device)
-    time.sleep(0.2)
+    time.sleep(0.05)
 
     # 暂停 cv2 reader（如果存在），让出设备
-    cv2_was_running = stream_id in stream_manager.streams
+    cv2_was_running = stream_manager.get_stream(stream_id) is not None
     if cv2_was_running:
         logger.info("Pausing cv2 reader on %s for ffmpeg passthrough", device)
         stream_manager.remove_stream(stream_id)
@@ -253,8 +253,8 @@ def mjpeg_passthrough_view(request, stream_id):
             _restart_cv2_reader(stream_id, device, meta)
         return JsonResponse({'error': 'ffmpeg 未安装'}, status=500)
 
-    # 等 0.5s 看 ffmpeg 是否立刻挂掉（设备被占、参数错等）
-    time.sleep(0.5)
+    # 等 200ms 看 ffmpeg 是否立刻挂掉（设备被占、参数错等）
+    time.sleep(0.2)
     if proc.poll() is not None:
         if cv2_was_running:
             _restart_cv2_reader(stream_id, device, meta)
@@ -287,12 +287,14 @@ def mjpeg_passthrough_view(request, stream_id):
 def _restart_cv2_reader(stream_id, device, meta):
     """ffmpeg 透传结束后，重新拉起 cv2 reader 给 AI 推理用。"""
     try:
+        # 恢复原始 low_latency 配置（默认 True，与 _start_stream 一致）
+        original_low_latency = meta.get('low_latency', True)
         stream_manager.add_stream(
             stream_id=stream_id,
             url=device,
             auto_reconnect=meta.get('auto_reconnect', True),
             reconnect_interval=meta.get('reconnect_interval', 5),
-            low_latency=False,
+            low_latency=original_low_latency,
         )
     except Exception as e:
         logger.warning("Failed to restart cv2 reader for %s: %s", device, e)

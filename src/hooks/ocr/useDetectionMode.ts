@@ -107,6 +107,16 @@ export const useDetectionMode = ({
     let updatedDetectedElements = currentDetectedElements;
     let updatedStartTime = elementDetectionStartTime;
 
+    // 守卫：没有选择任何目标时，AND模式不应触发抓拍
+    if (validSelectedTargets.length === 0) {
+      return {
+        shouldTriggerCapture: false,
+        shouldResetDetection: false,
+        updatedDetectedElements: currentDetectedElements,
+        updatedStartTime: elementDetectionStartTime,
+      };
+    }
+
     // 累积检测到的元素
     if (detectedLabels.length > 0) {
       updatedDetectedElements = [...new Set([...currentDetectedElements, ...detectedLabels])];

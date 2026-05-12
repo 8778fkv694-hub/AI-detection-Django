@@ -10,8 +10,14 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_url(url: str) -> str:
+    """脱敏URL中的密码，防止明文凭据写入日志。"""
+    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', url)
 
 
 class HLSStreamGenerator:
@@ -57,6 +63,9 @@ class HLSStreamGenerator:
         if self.is_running:
             logger.warning(f"HLS stream {self.stream_id} is already running")
             return True
+        
+        # B1修复：启动时清理上次异常退出残留的旧文件
+        self._cleanup_files()
         
         try:
             logger.info(f"Starting HLS stream {self.stream_id} from {self.source_url}")
@@ -167,7 +176,8 @@ class HLSStreamGenerator:
             ])
             
             # 启动FFmpeg进程
-            logger.info(f"Executing FFmpeg command: {' '.join(cmd)}")
+            sanitized_cmd = [_sanitize_url(str(arg)) for arg in cmd]
+            logger.info(f"Executing FFmpeg command: {' '.join(sanitized_cmd)}")
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -243,29 +253,33 @@ class HLSStreamGenerator:
             finally:
                 self.process = None
         
-        # 清理HLS文件（可选）
-        # self._cleanup_files()
+        # 清理HLS文件
+        self._cleanup_files()
         
         logger.info(f"HLS stream {self.stream_id} stopped")
     
     def _monitor_process(self):
-        """监控FFmpeg进程"""
+        """监控FFmpeg进程（使用select避免readline永久阻塞）"""
         if not self.process:
             return
         
+        import select
+        
         while self.is_running and self.process:
             try:
-                # 读取stderr输出
+                # 使用select给stderr读取加超时，防止ffmpeg不输出时永久挂起
                 if self.process.stderr:
-                    line = self.process.stderr.readline()
-                    if line:
-                        # FFmpeg 错误/警告信息
-                        if 'error' in line.lower() or 'failed' in line.lower():
-                            logger.warning(f"FFmpeg: {line.strip()}")
+                    ready, _, _ = select.select([self.process.stderr], [], [], 1.0)
+                    if ready:
+                        line = self.process.stderr.readline()
+                        if line:
+                            if 'error' in line.lower() or 'failed' in line.lower():
+                                logger.warning(f"FFmpeg: {line.strip()}")
                 
                 # 检查进程是否退出
                 if self.process.poll() is not None:
-                    logger.warning(f"FFmpeg process for stream {self.stream_id} exited")
+                    logger.warning(f"FFmpeg process for stream {self.stream_id} exited unexpectedly")
+                    self._cleanup_files()
                     self.is_running = False
                     break
                 
@@ -276,13 +290,23 @@ class HLSStreamGenerator:
                 break
     
     def _cleanup_files(self):
-        """清理HLS文件"""
+        """清理HLS文件（保留最近5分钟内的文件，防止异常退出后的磁盘堆积）"""
         try:
-            if self.output_dir.exists():
-                for file in self.output_dir.glob("*"):
-                    if file.is_file():
+            if not self.output_dir.exists():
+                return
+            now = time.time()
+            ttl_seconds = 300  # 5分钟TTL
+            deleted = 0
+            for file in self.output_dir.glob("*"):
+                if file.is_file():
+                    age = now - file.stat().st_mtime
+                    if age > ttl_seconds:
                         file.unlink()
-                logger.info(f"Cleaned up HLS files for stream {self.stream_id}")
+                        deleted += 1
+            if deleted > 0:
+                logger.info(
+                    f"Cleaned up {deleted} stale HLS files for stream {self.stream_id}"
+                )
         except Exception as e:
             logger.error(f"Error cleaning up files: {e}")
     

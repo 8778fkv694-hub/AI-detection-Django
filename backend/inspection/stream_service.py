@@ -19,8 +19,14 @@ import base64
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_url(url: str) -> str:
+    """脱敏URL中的密码，防止明文凭据写入日志。"""
+    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', url)
 
 
 class StreamReader:
@@ -70,7 +76,13 @@ class StreamReader:
         """停止流媒体读取"""
         self.is_running = False
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=5.0)
+            if self.thread.is_alive():
+                logger.warning(
+                    "StreamReader %s: thread did not stop within 5s, "
+                    "forcing capture release (thread may linger)",
+                    self.stream_id,
+                )
         self._release_capture()
 
     def _build_capture_candidates(self):
@@ -135,7 +147,7 @@ class StreamReader:
                     "Connecting to stream %s via %s: %s",
                     self.stream_id,
                     source_label,
-                    source if isinstance(source, str) and not source.startswith('v4l2src') else self.url,
+                    _sanitize_url(source if isinstance(source, str) and not source.startswith('v4l2src') else self.url),
                 )
                 cap = cv2.VideoCapture(source, backend)
                 self._configure_capture(cap, source_label)
@@ -211,15 +223,22 @@ class StreamReader:
     
     def _read_loop(self):
         """读取循环（在后台线程中运行）"""
+        reconnect_delay = self.reconnect_interval  # B6: 动态退避延迟
         while self.is_running:
             # 如果未连接，尝试连接
             if not self.is_connected:
                 if self._connect():
                     self.error_count = 0  # 重置错误计数
+                    reconnect_delay = self.reconnect_interval  # B6: 成功后重置退避
                 else:
                     if self.auto_reconnect:
-                        logger.info(f"Retrying connection to stream {self.stream_id} in {self.reconnect_interval}s")
-                        time.sleep(self.reconnect_interval)
+                        logger.info(
+                            "Retrying connection to stream %s in %.1fs (backoff)",
+                            self.stream_id, reconnect_delay,
+                        )
+                        time.sleep(reconnect_delay)
+                        # B6修复：指数退避，1s→2s→4s→...→封顶30s
+                        reconnect_delay = min(reconnect_delay * 2, 30)
                         continue
                     else:
                         break
@@ -227,10 +246,11 @@ class StreamReader:
             # 读取帧
             try:
                 if self.low_latency:
-                    # 低延迟模式：快速消费 FFmpeg / OpenCV 内部缓冲区，只保留最新帧
+                    # 低延迟模式：快速消费缓冲区，只保留最新帧
+                    # B9修复：从50帧降到10帧，减少单次阻塞时间
                     latest_frame = None
                     empty_streak = 0
-                    for _ in range(50):   # 最多连续读 50 帧，清空深层缓冲
+                    for _ in range(10):   # 最多连续读 10 帧
                         ret, f = self.cap.read()
                         if not ret or f is None:
                             empty_streak += 1
@@ -357,7 +377,11 @@ class StreamReader:
 
 
 class StreamManager:
-    """流媒体管理器 - 单例"""
+    """流媒体管理器
+    
+    进程级单例。若使用 gunicorn --workers > 1，每个 worker 有独立实例，
+    会导致多 reader 竞争同一设备。Jetson 部署强制 --workers 1。
+    """
     
     _instance = None
     _lock = threading.Lock()
@@ -372,38 +396,41 @@ class StreamManager:
     def __init__(self):
         if not hasattr(self, 'initialized'):
             self.streams: Dict[str, StreamReader] = {}
+            self._streams_lock = threading.Lock()
             self.initialized = True
             logger.info("StreamManager initialized")
     
     def add_stream(self, stream_id: str, url: str, auto_reconnect: bool = True, 
                    reconnect_interval: int = 5, low_latency: bool = False) -> bool:
         """添加并启动流媒体源"""
-        # 如果已存在，先停止旧的
-        if stream_id in self.streams:
-            self.remove_stream(stream_id)
+        # 总是先清理旧流（remove_stream 对不存在的 key 安全，pop 返回 None）
+        self.remove_stream(stream_id)
         
         # 创建新的流读取器
         reader = StreamReader(stream_id, url, auto_reconnect, reconnect_interval, low_latency)
         success = reader.start()
         
-        if success:
-            self.streams[stream_id] = reader
-            logger.info(f"Stream {stream_id} added and started")
-        else:
-            logger.error(f"Failed to start stream {stream_id}")
+        with self._streams_lock:
+            if success:
+                self.streams[stream_id] = reader
+                logger.info(f"Stream {stream_id} added and started")
+            else:
+                logger.error(f"Failed to start stream {stream_id}")
         
         return success
     
     def remove_stream(self, stream_id: str):
-        """移除流媒体源"""
-        if stream_id in self.streams:
-            self.streams[stream_id].stop()
-            del self.streams[stream_id]
+        """移除流媒体源（stop 在锁外执行，避免 join 阻塞其他线程）"""
+        with self._streams_lock:
+            reader = self.streams.pop(stream_id, None)
+        if reader is not None:
+            reader.stop()
             logger.info(f"Stream {stream_id} removed")
     
     def get_stream(self, stream_id: str) -> Optional[StreamReader]:
         """获取流读取器"""
-        return self.streams.get(stream_id)
+        with self._streams_lock:
+            return self.streams.get(stream_id)
     
     def get_frame(self, stream_id: str) -> Optional[np.ndarray]:
         """获取指定流的当前帧"""
@@ -422,14 +449,17 @@ class StreamManager:
     
     def get_all_streams_status(self) -> Dict[str, Dict[str, Any]]:
         """获取所有流的状态"""
-        return {
-            stream_id: reader.get_status()
-            for stream_id, reader in self.streams.items()
-        }
+        with self._streams_lock:
+            return {
+                stream_id: reader.get_status()
+                for stream_id, reader in self.streams.items()
+            }
     
     def stop_all_streams(self):
         """停止所有流"""
-        for stream_id in list(self.streams.keys()):
+        with self._streams_lock:
+            stream_ids = list(self.streams.keys())
+        for stream_id in stream_ids:
             self.remove_stream(stream_id)
         logger.info("All streams stopped")
 

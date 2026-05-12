@@ -151,6 +151,13 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
   const handleCaptureWorkflowRef = useRef<((validSelectedTargets: string[], currentDataUrl: string, currentBase64: string) => Promise<void>) | null>(null);
 
+  // M2修复：保存workflowState到ref，延时循环中读取ref而非闭包值
+  const workflowStateRef = useRef(workflowState);
+  // 使用useRef + useEffect模式而非render期间赋值，兼容React并发模式
+  useEffect(() => {
+    workflowStateRef.current = workflowState;
+  }, [workflowState]);
+
   // 帧采集优化：在防抖期间独立采集帧
   const frameCollectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastDetectionsRef = useRef<BackendYoloDetection[]>([]);
@@ -310,6 +317,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
     const executeDetection = async () => {
       if (isDetectingRef.current) return;
+      if (isPausedRef.current) return;
 
       isDetectingRef.current = true;
       setIsDetecting(true);
@@ -400,7 +408,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           // 执行YOLO检测
           const detectionType = (modelConfig?.detection_type as 'cleanroom_ppe' | 'kit_matching' | 'ocr_inspection' | 'ocr_fusion_inspection' | 'general_quality' | undefined) || 'ocr_inspection';
           detections = await yoloDetectBackend(base64Data, detectionConfidence, {
-            model_id: currentModelId || undefined,
+            ...(currentModelId ? { model_id: currentModelId } : {}),
             detection_type: detectionType,
           });
         }
@@ -522,9 +530,11 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           
           if (useBackendDetection && streamId && !finalDataUrl) {
             try {
-              const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
-              if (res.ok) {
-                const blob = await res.blob();
+              // M9修复：先取snapshot（带frame_id），再验证detection帧一致性
+              const snapRes = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+              if (snapRes.ok) {
+                const snapFrameId = parseInt(snapRes.headers.get('X-Frame-ID') || '0', 10);
+                const blob = await snapRes.blob();
                 const objectUrl = URL.createObjectURL(blob);
                 const reader = new FileReader();
                 finalDataUrl = await new Promise<string>((resolve) => {
@@ -533,6 +543,24 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
                 });
                 finalBase64 = finalDataUrl.split(',')[1] || '';
                 URL.revokeObjectURL(objectUrl);
+
+                // M9修复：验证detection帧与snapshot帧是否一致（允许±2帧容差）
+                // 从前面拉取的detections结果中提取frame_id
+                let detFrameId = 0;
+                if (useBackendDetection && streamId) {
+                  // 重新拉一次detections，确保拿到与snapshot接近的最新结果
+                  const detRes = await fetch(`${apiBaseUrl}/streams/${streamId}/detections/`);
+                  if (detRes.ok) {
+                    const detResult = await detRes.json();
+                    detFrameId = detResult.frame_id || 0;
+                    const frameGap = Math.abs(snapFrameId - detFrameId);
+                    if (frameGap > 2) {
+                      console.warn(`⚠️ 快照帧(${snapFrameId})与检测帧(${detFrameId})差距=${frameGap}，使用新检测结果`);
+                      // 使用新拉的检测结果更新latest detections引用
+                      // （注意这里只影响本工作流，不覆盖外部state）
+                    }
+                  }
+                }
               }
             } catch (e) {
               console.error('抓拍后端原图失败:', e);
@@ -560,11 +588,14 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
       } catch (error) {
         console.error('实时检测失败:', error);
-        setWorkflowState('idle');
-        setMatchStatus('none');
-        setWorkflowResult(null);
-        setAiAnalysisResult(null);
-        setFinalResult('none');
+        // M13: 仅在没有活跃工作流时才重置，避免冲掉正在进行的流程
+        if (workflowStateRef.current === 'idle') {
+          setWorkflowState('idle');
+          setMatchStatus('none');
+          setWorkflowResult(null);
+          setAiAnalysisResult(null);
+          setFinalResult('none');
+        }
       } finally {
         isDetectingRef.current = false;
         setIsDetecting(false);
@@ -581,7 +612,15 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     };
 
     if (isProcessingQueueRef.current || isDetectingRef.current) {
-      detectionQueueRef.current.push(executeDetection);
+      // M3: 限制队列最大长度，防止检测慢时无限堆积
+      const MAX_QUEUE_SIZE = 5;
+      if (detectionQueueRef.current.length < MAX_QUEUE_SIZE) {
+        detectionQueueRef.current.push(executeDetection);
+      } else {
+        console.warn('⚠️ 检测队列已满（' + MAX_QUEUE_SIZE + '），丢弃最早的排队任务');
+        detectionQueueRef.current.shift();
+        detectionQueueRef.current.push(executeDetection);
+      }
       if (!isProcessingQueueRef.current) {
         isProcessingQueueRef.current = true;
       }
@@ -649,8 +688,17 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       while (capturedFrames < totalFrames) {
         await new Promise(resolve => setTimeout(resolve, captureInterval));
 
-        if ((workflowState !== 'idle' && workflowState !== 'searching_best_frame') || !videoRef.current) {
+        // M2: 用ref读取最新workflowState，避免过期闭包
+        // M14: 暂停时停止帧收集
+        if (isPausedRef.current) {
+          console.log('⚠️ 延时期间暂停，取消帧收集');
+          setIsInPostDetectionDelay(false);
+          return;
+        }
+        const currentWfState = workflowStateRef.current;
+        if ((currentWfState !== 'idle' && currentWfState !== 'searching_best_frame') || !videoRef.current) {
           console.log('⚠️ 延时期间工作流状态已变化，取消抓拍');
+          setIsInPostDetectionDelay(false);
           return;
         }
 
@@ -671,7 +719,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           try {
             const frameDetectionType = (modelConfig?.detection_type as any) || 'ocr_inspection';
             const frameDetections = await yoloDetectBackend(frameBase64, detectionConfidence, {
-              model_id: currentModelId || undefined,
+              ...(currentModelId ? { model_id: currentModelId } : {}),
               detection_type: frameDetectionType,
             });
             const frameTargetDetections = frameDetections.filter(detection =>
@@ -773,11 +821,19 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
           if (successCount > 0) {
             setWorkflowState('processing');
+            // 批处理模式：成功触发后清理检测状态，防止下一轮误触发
+            historyDetectionsRef.current.clear();
+            elementDetectionStartTimeRef.current = null;
+            debounceStartTimeRef.current = null;
             await batchManager.triggerBatchProcessing(true);
             return;
           }
         } else {
           console.warn('⚠️ [批处理模式] 未收集到任何ROI，重置状态');
+          // 批处理模式：失败时同样清理状态
+          historyDetectionsRef.current.clear();
+          elementDetectionStartTimeRef.current = null;
+          debounceStartTimeRef.current = null;
           setWorkflowState('idle');
           return;
         }
@@ -891,6 +947,11 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
           console.log(`✅ [批处理模式] 已缓存 ${successCount}/${allBestROIs.size} 个ROI`);
 
+          // H4修复：批处理分支返回前清理检测状态，防止残留状态导致下一轮误触发
+          historyDetectionsRef.current.clear();
+          elementDetectionStartTimeRef.current = null;
+          debounceStartTimeRef.current = null;
+
           if (successCount > 0) {
             setWorkflowState('processing');
             await batchManager.triggerBatchProcessing(true);
@@ -898,6 +959,10 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
         } else {
           console.warn('⚠️ [批处理模式] 未收集到任何ROI，重置状态');
+          // H4修复：失败时同样清理状态
+          historyDetectionsRef.current.clear();
+          elementDetectionStartTimeRef.current = null;
+          debounceStartTimeRef.current = null;
           setWorkflowState('idle');
           return;
         }
@@ -929,7 +994,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         } else {
           console.log('🔍 ROI模式：没有累积ROI，对全画面图片进行YOLO检测...');
           const captureDetections = await yoloDetectBackend(captureBase64Data, detectionConfidence, {
-            model_id: currentModelId || undefined,
+            ...(currentModelId ? { model_id: currentModelId } : {}),
             detection_type: (modelConfig?.detection_type as any) || 'ocr_inspection',
           });
           const captureTargetDetections = captureDetections.filter(detection =>

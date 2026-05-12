@@ -4,8 +4,18 @@ import sys
 import threading
 
 from django.apps import AppConfig
+from django.db.backends.signals import connection_created
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_sqlite(sender, connection, **kwargs):
+    """B3修复：SQLite 启用 WAL 模式 + busy_timeout，解决并发写入 database is locked。"""
+    if connection.vendor == 'sqlite':
+        cursor = connection.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
+        cursor.execute('PRAGMA busy_timeout=10000;')
+        cursor.close()
 
 
 class InspectionConfig(AppConfig):
@@ -13,6 +23,9 @@ class InspectionConfig(AppConfig):
     name = 'inspection'
 
     def ready(self):
+        # B3: 注册 SQLite WAL 模式（每次新连接自动执行）
+        connection_created.connect(_configure_sqlite)
+        
         # 跑迁移、shell、collectstatic 等管理命令时不预热，避免拖慢命令
         if os.environ.get('DJANGO_SKIP_WARMUP') == '1':
             return

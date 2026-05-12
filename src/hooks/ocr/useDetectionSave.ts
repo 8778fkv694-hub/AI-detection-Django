@@ -10,6 +10,7 @@
  */
 
 import { useCallback } from 'react';
+import toast from 'react-hot-toast';
 import type { InspectionResult } from '@/types';
 
 export interface DetectionSaveOptions {
@@ -232,7 +233,8 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
         await refreshHistory?.();
       }
     } catch (error) {
-      console.error('❌ 保存检测结果到本地历史记录失败:', error);
+      console.error('❌ 保存检测结果失败:', error);
+      toast.error('保存检测结果失败，请检查网络后重试');
     }
   }, [fusionModeEnabled, selectedStandardId, addAppResult, clearOldDetectionHistory, addDetectionHistory, refreshHistory, onSaveComplete, traceContext]);
 

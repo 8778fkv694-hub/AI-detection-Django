@@ -15,7 +15,8 @@ _model_pool: Dict[str, Any] = OrderedDict()  # {model_id: model_instance}
 _model_last_used: Dict[str, datetime] = {}  # {model_id: last_used_time}
 _current_model_id = None  # 记录最近使用的模型（用于兼容旧接口）
 _lock = threading.Lock()
-MAX_MODEL_POOL_SIZE = 3  # 最大同时加载3个模型
+# B5修复：Jetson 8GB 共享内存，2 个 YOLO 模型即可（3 个会 OOM）
+MAX_MODEL_POOL_SIZE = 2 if os.path.exists('/etc/nv_tegra_release') else 3
 
 
 def load_model(model_id: Optional[str] = None):

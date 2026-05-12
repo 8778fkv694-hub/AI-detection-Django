@@ -710,9 +710,16 @@ class InspectionResultViewSet(viewsets.ModelViewSet):
         支持按日期范围查询
         """
         try:
-            # 获取查询参数
+            from datetime import datetime, timedelta
+            
+            # 获取查询参数，默认最近30天
             date_from = request.query_params.get('date_from')
             date_to = request.query_params.get('date_to')
+            
+            # B4修复：未指定日期时默认最近30天，避免全表扫描
+            if not date_from and not date_to:
+                date_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+                date_to = datetime.now().strftime('%Y-%m-%d')
             
             # 构建查询条件
             queryset = InspectionResult.objects.all()
@@ -722,7 +729,24 @@ class InspectionResultViewSet(viewsets.ModelViewSet):
             if date_to:
                 queryset = queryset.filter(timestamp__date__lte=date_to)
             
-            # 按日期分组统计
+            # B4修复：使用单次聚合查询取代多次 count()，减少全表扫描
+            from django.db.models import Count, Q, Sum
+            agg = queryset.aggregate(
+                total=Count('id'),
+                qualified=Count('id', filter=Q(overall_quality='合格')),
+                unqualified=Count('id', filter=Q(overall_quality='不合格')),
+                recheck=Count('id', filter=Q(overall_quality='需复检')),
+            )
+            
+            overall_stats = {
+                'total': agg['total'],
+                'qualified': agg['qualified'],
+                'unqualified': agg['unqualified'],
+                'recheck': agg['recheck'],
+                'qualified_rate': (agg['qualified'] / agg['total'] * 100) if agg['total'] > 0 else 0
+            }
+            
+            # 按日期分组统计（限制返回行数）
             daily_stats = queryset.extra(
                 select={'date': 'DATE(timestamp)'}
             ).values('date').annotate(
@@ -730,21 +754,7 @@ class InspectionResultViewSet(viewsets.ModelViewSet):
                 qualified=Count('id', filter=Q(overall_quality='合格')),
                 unqualified=Count('id', filter=Q(overall_quality='不合格')),
                 recheck=Count('id', filter=Q(overall_quality='需复检'))
-            ).order_by('date')
-            
-            # 计算总体统计
-            total_results = queryset.count()
-            qualified_count = queryset.filter(overall_quality='合格').count()
-            unqualified_count = queryset.filter(overall_quality='不合格').count()
-            recheck_count = queryset.filter(overall_quality='需复检').count()
-            
-            overall_stats = {
-                'total': total_results,
-                'qualified': qualified_count,
-                'unqualified': unqualified_count,
-                'recheck': recheck_count,
-                'qualified_rate': (qualified_count / total_results * 100) if total_results > 0 else 0
-            }
+            ).order_by('-date')[:90]  # 最多90天
             
             return Response({
                 'overall_stats': overall_stats,
