@@ -122,6 +122,13 @@ def load_model(model_id: Optional[str] = None):
         if not os.path.exists(model_path):
             raise Exception(f"PPE模型文件不存在: {model_path}")
 
+        # TensorRT .engine 优先加载：如果存在同名 .engine 文件，优先使用
+        # 在 Jetson 上可通过 convert_to_tensorrt.py 生成，推理速度提升 3-5x
+        engine_path = model_path.replace('.pt', '.engine')
+        if os.path.exists(engine_path):
+            logger.info(f"🚀 发现 TensorRT 引擎，优先加载: {engine_path}")
+            model_path = engine_path
+
         logger.info(f"正在加载PPE模型: {model_path}")
 
         try:

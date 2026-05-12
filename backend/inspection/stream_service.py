@@ -284,9 +284,18 @@ class StreamReader:
         logger.info(f"Stream reader {self.stream_id} stopped")
     
     def get_frame(self) -> Optional[np.ndarray]:
-        """获取当前帧"""
+        """获取当前帧（返回副本，可安全修改）"""
         with self.lock:
             return self.current_frame.copy() if self.current_frame is not None else None
+
+    def get_frame_ref(self) -> Optional[np.ndarray]:
+        """获取当前帧引用（零拷贝，仅供只读消费者使用）。
+
+        _read_loop 写入时是 self.current_frame = frame（整体替换引用），
+        读线程拿到的引用指向的旧数组不会被修改，因此只读场景下线程安全。
+        """
+        with self.lock:
+            return self.current_frame
     
     def get_frame_base64(self, quality: int = 100, target_width: int = 1920) -> Optional[str]:
         """获取当前帧的 Base64 编码（JPEG格式，无压缩），支持高质量缩放

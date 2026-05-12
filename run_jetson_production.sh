@@ -23,7 +23,10 @@ echo -e "${NC}"
 
 # 设置环境变量
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
+export VITE_BACKEND_DETECTION=true
+export VITE_API_BASE_URL="http://192.168.55.1:8000/api"
 
 # 检查 dist 目录是否存在
 if [ ! -d "dist" ] || [ ! -f "dist/index.html" ]; then
@@ -49,7 +52,7 @@ cd ..
 sleep 3
 
 # 启动 Python SPA 静态服务器
-echo -e "${GREEN}启动 Python SPA 服务器 (:3001)...${NC}"
+echo -e "${GREEN}启动 Python SPA 服务器 (:3005)...${NC}"
 venv/bin/python3 serve_spa.py --port 3005 --dir ./dist &
 SPA_PID=$!
 echo "SPA Server PID: $SPA_PID"
@@ -61,7 +64,7 @@ echo -e "${GREEN}"
 echo "╔════════════════════════════════════════════════════════╗"
 echo "║     ✅ 服务启动成功                                     ║"
 echo "╠════════════════════════════════════════════════════════╣"
-echo "║  前端访问: http://${IP}:3001                            "
+echo "║  前端访问: http://${IP}:3005                            "
 echo "║  后端 API: http://${IP}:8000/api                        "
 echo "╠════════════════════════════════════════════════════════╣"
 echo "║  Django PID: $DJANGO_PID                                "

@@ -122,6 +122,10 @@ export default defineConfig({
         },
       }
     },
+    // Jetson inotify 优化：忽略大目录防止 ENOSPC
+    watch: {
+      ignored: ['**/venv/**', '**/node_modules/**', '**/.git/**']
+    },
     // 添加开发服务器配置
     open: false, // 不自动打开浏览器
     hmr: {
