@@ -10,14 +10,22 @@
 兼容性：
     - 仅适用于本地 /dev/video* 设备（USB 摄像头硬件 MJPG 输出）
     - RTSP / RTMP / 其他源仍走原 cv2 编码路径
-    - 一台摄像头同一时刻只能被一个 ffmpeg 进程持有，因此进入透传时会
-      暂停 stream_service 的 cv2 reader，断开时再恢复
+
+并发与资源回收：
+    - 每个 device 同时只能被一个 ffmpeg 持有；新请求来直接驱逐旧 ffmpeg
+      （单用户 kiosk「后来者覆盖」语义：浏览器刷新就该恢复，不应 409）
+    - ffmpeg 放在新进程组（start_new_session=True），用 killpg 整组干掉，
+      杜绝僵尸/孤儿（之前的 bug 根因：StreamingHttpResponse 生成器没被 GC
+      → finally 不跑 → ffmpeg 永远活着 → /dev/video0 一直被占）
 """
 import logging
+import os
 import shlex
+import signal
 import subprocess
 import threading
 import time
+from typing import Optional
 
 from django.http import StreamingHttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -28,19 +36,63 @@ from .stream_models import StreamSource
 logger = logging.getLogger(__name__)
 
 
-# 一台摄像头一把锁，避免两个 ffmpeg 同时抢 /dev/videoX
-_DEVICE_LOCKS: dict[str, threading.Lock] = {}
-_DEVICE_LOCKS_GUARD = threading.Lock()
+# device -> 当前持有该 v4l2 设备的 ffmpeg Popen
+_ACTIVE_PROCS: dict[str, subprocess.Popen] = {}
+_REGISTRY_GUARD = threading.Lock()
 
 
-def _device_lock(device: str) -> threading.Lock:
-    with _DEVICE_LOCKS_GUARD:
-        if device not in _DEVICE_LOCKS:
-            _DEVICE_LOCKS[device] = threading.Lock()
-        return _DEVICE_LOCKS[device]
+def _kill_proc_tree(proc: subprocess.Popen, timeout: float = 2.0) -> None:
+    """杀进程组（不仅是 ffmpeg 自己，连同它的所有子孙）。"""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
 
 
-def _resolve_device(stream_id: str) -> tuple[str | None, dict | None]:
+def _evict_holder(device: str) -> None:
+    """新请求进来前先清掉这个 device 上的旧 ffmpeg（活的或死的）。"""
+    with _REGISTRY_GUARD:
+        old = _ACTIVE_PROCS.pop(device, None)
+    if old is None:
+        return
+    if old.poll() is None:
+        logger.warning("Evicting active ffmpeg pid=%d for %s", old.pid, device)
+        _kill_proc_tree(old)
+    else:
+        logger.info("Reaping dead ffmpeg pid=%d for %s (exit=%d)",
+                    old.pid, device, old.returncode)
+
+
+def _release_holder(device: str, proc: subprocess.Popen) -> None:
+    """流自然结束 / 客户端断连后调用。仅在我们仍是登记者时移除。"""
+    with _REGISTRY_GUARD:
+        if _ACTIVE_PROCS.get(device) is proc:
+            _ACTIVE_PROCS.pop(device, None)
+
+
+def _resolve_device(stream_id: str) -> tuple[Optional[str], Optional[dict]]:
     """根据 stream_id 找出底层设备路径与流元数据。"""
     try:
         src = StreamSource.objects.get(id=stream_id, enabled=True)
@@ -62,7 +114,7 @@ def _build_ffmpeg_cmd(device: str, width: int, height: int, fps: int) -> list[st
         -f mpjpeg           : 输出 multipart/x-mixed-replace 容器，浏览器 <img> 可直接消费
         pipe:1              : 输出到 stdout
     """
-    cmd = [
+    return [
         'ffmpeg', '-hide_banner', '-loglevel', 'error',
         '-fflags', 'nobuffer', '-flags', 'low_delay',
         '-f', 'v4l2',
@@ -72,17 +124,16 @@ def _build_ffmpeg_cmd(device: str, width: int, height: int, fps: int) -> list[st
         '-i', device,
         '-c:v', 'copy',
         '-f', 'mpjpeg',
-        '-an',  # 没有音频
+        '-an',
         'pipe:1',
     ]
-    return cmd
 
 
-def _stream_ffmpeg_output(proc: subprocess.Popen):
+def _stream_ffmpeg_output(proc: subprocess.Popen, device: str):
     """把 ffmpeg stdout 按块直接转发给 HTTP 客户端。
 
-    这里**不解析 multipart 帧**，让浏览器 <img> 自己处理 boundary。
-    用 8KB 块避免 chunk 太小拖累内核 sendfile 优化。
+    finally 里**一定**杀进程组 + 解登记。即便客户端突然消失，
+    BrokenPipeError 触发后这里会把 ffmpeg 干净收掉。
     """
     try:
         while True:
@@ -91,15 +142,10 @@ def _stream_ffmpeg_output(proc: subprocess.Popen):
                 break
             yield chunk
     except (BrokenPipeError, ConnectionResetError):
-        # 客户端断开是正常情况
         pass
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _kill_proc_tree(proc)
+        _release_holder(device, proc)
 
 
 @csrf_exempt
@@ -130,9 +176,10 @@ def mjpeg_passthrough_view(request, stream_id):
         from .mjpeg_view import mjpeg_stream
         return mjpeg_stream(request, stream_id)
 
-    lock = _device_lock(device)
-    if not lock.acquire(blocking=False):
-        return JsonResponse({'error': f'设备 {device} 已被占用'}, status=409)
+    # 关键：清掉任何旧 ffmpeg（这就是 409 bug 的根本修复）
+    # 等 200ms 让内核完成 v4l2 解绑，否则新 ffmpeg open 设备会 EBUSY
+    _evict_holder(device)
+    time.sleep(0.2)
 
     # 暂停 cv2 reader（如果存在），让出设备
     cv2_was_running = stream_id in stream_manager.streams
@@ -144,31 +191,36 @@ def mjpeg_passthrough_view(request, stream_id):
     logger.info("Starting ffmpeg passthrough: %s", shlex.join(cmd))
 
     try:
+        # start_new_session=True：让 ffmpeg 成为新进程组组长，便于 killpg 整组
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             bufsize=0,
+            start_new_session=True,
         )
     except FileNotFoundError:
-        lock.release()
+        if cv2_was_running:
+            _restart_cv2_reader(stream_id, device, meta)
         return JsonResponse({'error': 'ffmpeg 未安装'}, status=500)
 
     # 等 0.5s 看 ffmpeg 是否立刻挂掉（设备被占、参数错等）
     time.sleep(0.5)
     if proc.poll() is not None:
-        lock.release()
         if cv2_was_running:
             _restart_cv2_reader(stream_id, device, meta)
         return JsonResponse({
             'error': f'ffmpeg 启动失败 (exit={proc.returncode})',
         }, status=500)
 
+    # 登记到 active procs，下次请求来时能驱逐我们
+    with _REGISTRY_GUARD:
+        _ACTIVE_PROCS[device] = proc
+
     def cleanup_after_stream():
         try:
-            yield from _stream_ffmpeg_output(proc)
+            yield from _stream_ffmpeg_output(proc, device)
         finally:
-            lock.release()
             if cv2_was_running:
                 _restart_cv2_reader(stream_id, device, meta)
             logger.info("ffmpeg passthrough ended for %s", device)
