@@ -138,9 +138,9 @@ export const useOCRCamera = ({
         const player = new MJPEGPlayer({
           videoElement: videoRef.current,
           streamId: streamId,
-          fps: 25,
-          quality: 95,
-          targetWidth: 0, // 0 = 不缩放，保持原生分辨率
+          fps: 12,
+          quality: 75,
+          targetWidth: 960,
           onError: (error) => {
             console.error('MJPEGPlayer 错误:', error);
             toast.error(`MJPEG 流播放失败: ${error.message}`);
