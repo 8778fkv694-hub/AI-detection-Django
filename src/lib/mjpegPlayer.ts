@@ -106,14 +106,12 @@ export class MJPEGPlayer {
       throw error;
     });
 
-    // ✅ 关键：把 <img> 插入到 video 的父容器，直接显示，隐藏 video
+    // ✅ 关键：把 <img> 插入到 video 的父容器，直接显示
     const container = this.videoElement.parentElement;
     if (container) {
-      // 保存 video 原来的 display 样式
-      (this.videoElement as any).__originalDisplay = this.videoElement.style.display;
-      this.videoElement.style.display = 'none';
-
-      // 设置 img 为容器大小
+      // 不再隐藏 video—— AI 推理（useRealtimeDetectionLoop 等）会调用
+      // drawImage(videoRef.current) 截图，video 必须可读。
+      // <img> 用更高 z-index 盖在上面，浏览器只重绘 <img> 那一层，性能不受影响。
       this.mjpegImg.style.position = 'absolute';
       this.mjpegImg.style.inset = '0';
       this.mjpegImg.style.width = '100%';
@@ -122,7 +120,26 @@ export class MJPEGPlayer {
       this.mjpegImg.style.opacity = '1';
       this.mjpegImg.style.left = '0';
       this.mjpegImg.style.top = '0';
+      this.mjpegImg.style.zIndex = '5';
+      this.mjpegImg.style.pointerEvents = 'none';
       container.appendChild(this.mjpegImg);
+
+      // 关键：让 <video> 元素也持有同一份画面，供 AI 推理 drawImage(video) 使用
+      // 用 captureStream 把 hidden canvas 喂到 video.srcObject
+      // 这条链路比"显示链路"宽松：浏览器内部限速，落后几帧也不影响 AI 抓取
+      try {
+        const stream = (this.canvas as any).captureStream
+          ? (this.canvas as any).captureStream(15)
+          : null;
+        if (stream) {
+          (this.videoElement as any).__originalSrcObject = this.videoElement.srcObject;
+          this.videoElement.srcObject = stream;
+          // 立刻 play() 让 video.videoWidth 在 canvas 第一帧后就有值
+          this.videoElement.play().catch(() => {/* autoplay 限制下静默 */});
+        }
+      } catch (e) {
+        console.warn('MJPEGPlayer: captureStream 不可用，AI 推理可能拿不到帧', e);
+      }
     }
 
     // 事件驱动：每次收到新帧立即回调
@@ -135,14 +152,20 @@ export class MJPEGPlayer {
         this.frameCount = 0;
         this.lastFrameTime = now;
       }
-      // onFrame 回调（用于 AI 截图等）
+
+      const img = this.mjpegImg;
+      if (img.naturalWidth === 0) return;
+
+      // 把当前帧画到 hidden canvas → captureStream 把它喂给 <video>
+      // 让 useRealtimeDetectionLoop 的 drawImage(videoRef.current) 拿到画面
+      if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
+        this.canvas.width = img.naturalWidth;
+        this.canvas.height = img.naturalHeight;
+      }
+      this.ctx.drawImage(img, 0, 0);
+
+      // 老的 onFrame 回调链路保留
       if (this.onFrame) {
-        const img = this.mjpegImg;
-        if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
-          this.canvas.width = img.naturalWidth;
-          this.canvas.height = img.naturalHeight;
-        }
-        this.ctx.drawImage(img, 0, 0);
         this.canvas.toBlob((blob) => {
           if (blob) {
             const reader = new FileReader();
@@ -170,13 +193,21 @@ export class MJPEGPlayer {
     // 停止流
     this.mjpegImg.src = '';
 
-    // 把 img 从容器移除，恢复 video 显示
+    // 把 img 从容器移除
     if (this.mjpegImg.parentElement) {
       this.mjpegImg.parentElement.removeChild(this.mjpegImg);
     }
-    // 恢复 video
-    const orig = (this.videoElement as any).__originalDisplay;
-    this.videoElement.style.display = orig ?? '';
+
+    // 解绑 captureStream → video，让上层重新设置物理摄像头时不冲突
+    try {
+      const stream = this.videoElement.srcObject as MediaStream | null;
+      if (stream && typeof stream.getTracks === 'function') {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+      this.videoElement.srcObject = (this.videoElement as any).__originalSrcObject ?? null;
+    } catch {
+      // 忽略
+    }
   }
 
   destroy(): void {
