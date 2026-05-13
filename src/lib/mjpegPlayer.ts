@@ -45,9 +45,9 @@ export class MJPEGPlayer {
   constructor(options: MJPEGPlayerOptions) {
     this.videoElement = options.videoElement;
     this.streamId = options.streamId;
-    this.fps = options.fps || 12;      // Jetson 友好默认：12fps 即可流畅预览
-    this.quality = options.quality || 75;  // 75 画质对检测预览足够，不高耗 CPU
-    this.targetWidth = options.targetWidth ?? 960;
+    this.fps = options.fps || 12;
+    this.quality = options.quality || 75;
+    this.targetWidth = options.targetWidth ?? 0;  // 0=不缩图，省掉 cv2.resize
     this.onError = options.onError;
     this.onFrame = options.onFrame;
 

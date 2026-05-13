@@ -24,7 +24,7 @@ interface StreamSettingsState extends StreamDisplaySettings {
 const DEFAULTS: StreamDisplaySettings = {
   fps: 12,
   quality: 75,
-  targetWidth: 960,
+  targetWidth: 0,  // 0=不缩图，让 Jetson 后端跳过 cv2.resize
 };
 
 export const useStreamSettingsStore = create<StreamSettingsState>()(
@@ -38,7 +38,14 @@ export const useStreamSettingsStore = create<StreamSettingsState>()(
     }),
     {
       name: 'global-stream-display-settings',
-      version: 1,
+      version: 2,
+      migrate: (persistedState: any, version: number) => {
+        if (version < 2) {
+          // v2: targetWidth 改为 0，跳过 cv2.resize 省 CPU
+          return { ...persistedState, targetWidth: 0 };
+        }
+        return persistedState as StreamDisplaySettings;
+      },
     }
   )
 );

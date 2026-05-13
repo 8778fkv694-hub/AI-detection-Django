@@ -142,7 +142,7 @@ fi
 
 # 启动React前端（后台运行）
 echo "🚀 启动React前端服务器..."
-npm run dev > react.log 2>&1 &
+npm run dev:client > react.log 2>&1 &
 REACT_PID=$!
 echo $REACT_PID > react.pid
 
@@ -154,8 +154,8 @@ sleep 10
 echo "🔍 检查React前端状态..."
 REACT_STARTED=false
 for i in {1..5}; do
-    if curl -s http://localhost:3303 > /dev/null 2>&1; then
-        echo "✅ React前端启动成功，运行在 http://localhost:3303"
+    if curl -sk https://localhost:3303 > /dev/null 2>&1; then
+        echo "✅ React前端启动成功，运行在 https://localhost:3303"
         REACT_STARTED=true
         break
     else
@@ -167,8 +167,8 @@ done
 if [ "$REACT_STARTED" = false ]; then
     echo "⚠️  React前端可能启动失败，请检查日志: react.log"
 else
-    echo "🌐 自动打开前端页面: http://localhost:3303"
-    open "http://localhost:3303" > /dev/null 2>&1 || true
+    echo "🌐 自动打开前端页面: https://localhost:3303"
+    open "https://localhost:3303" > /dev/null 2>&1 || true
 fi
 
 # 启动Node.js后端
@@ -241,7 +241,7 @@ echo ""
 echo "🎉 项目启动完成！"
 echo ""
 echo "📱 访问地址："
-echo "   前端界面: http://localhost:3303"
+echo "   前端界面: https://localhost:3303"
 echo "   Node.js后端: http://localhost:3001"
 echo "   Django后端API:  http://localhost:8000/api/"
 echo "   RPA文件管理: http://localhost:3002"

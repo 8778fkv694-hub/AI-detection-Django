@@ -366,23 +366,45 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
 
           // 仅在需要触发并行二维码识别时，按需截图（降低 CPU 消耗）
-          if (enableParallelQrDetection && !fixtureQrInputRef.current && 
+          if (enableParallelQrDetection && !fixtureQrInputRef.current &&
               (Date.now() - lastQrDetectTimeRef.current >= effectiveQrInterval)) {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-              base64DataForQr = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+            const qrCanvas = document.createElement('canvas');
+            const qrSrcW = videoRef.current.videoWidth;
+            const qrSrcH = videoRef.current.videoHeight;
+            let qrDstW = qrSrcW;
+            let qrDstH = qrSrcH;
+            if (qrDstW > 960) {
+              qrDstH = Math.round(qrDstH * 960 / qrDstW);
+              qrDstW = 960;
+            }
+            qrCanvas.width = qrDstW;
+            qrCanvas.height = qrDstH;
+            const qrCtx = qrCanvas.getContext('2d');
+            if (qrCtx) {
+              qrCtx.drawImage(videoRef.current, 0, 0, qrDstW, qrDstH);
+              base64DataForQr = qrCanvas.toDataURL('image/jpeg', 0.80).split(',')[1];
             }
           }
 
         } else {
-          // ====== 传统模式：前端高频截图并上传 Base64 (100-500KB) ======
+          // ====== 传统模式：前端截图 → 缩图 → 压缩 → 上传 Base64 ======
+          const MAX_WIDTH = 960; // 发 Jetson 前缩到 960px，降低网络传输
+          const JPEG_QUALITY = 0.80;
+
+          const srcWidth = videoRef.current.videoWidth;
+          const srcHeight = videoRef.current.videoHeight;
+
+          // 计算缩图尺寸（保持宽高比）
+          let dstWidth = srcWidth;
+          let dstHeight = srcHeight;
+          if (dstWidth > MAX_WIDTH) {
+            dstHeight = Math.round(dstHeight * MAX_WIDTH / dstWidth);
+            dstWidth = MAX_WIDTH;
+          }
+
           const canvas = document.createElement('canvas');
-          canvas.width = videoRef.current.videoWidth;
-          canvas.height = videoRef.current.videoHeight;
+          canvas.width = dstWidth;
+          canvas.height = dstHeight;
           const ctx = canvas.getContext('2d');
 
           if (!ctx) {
@@ -391,8 +413,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             return;
           }
 
-          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-          dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+          ctx.drawImage(videoRef.current, 0, 0, dstWidth, dstHeight);
+          dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
           base64Data = dataUrl.split(',')[1];
 
           if (!base64Data) {
@@ -400,7 +422,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             setIsDetecting(false);
             return;
           }
-          
+
           base64DataForQr = base64Data;
 
           // 执行YOLO检测
