@@ -113,6 +113,31 @@ GET /api/streams/.../mjpeg/?quality=85&width=960&fps=22&_=...
 - `backend/inspection/yolo.py`
   - 模型池命中日志从 `info` 降为 `debug`，避免高频推理时刷爆 journald。
 
+### 7. Mac 本地 Jetson 模拟烧机
+
+已新增脚本：
+
+```bash
+venv/bin/python scripts/local_jetson_burnin.py --duration 60 --stream-fps 8 --inference-ms 45 --streams 2 --model-pool-size 2
+```
+
+覆盖内容：
+
+- 无真实摄像头/YOLO 权重时，模拟 2 路 1280x720、8 FPS 视频流。
+- 模拟 Jetson 较慢 YOLO 推理（45ms/次）。
+- 周期性触发 owner 重复 start/stop、配置切换、第二路检测循环 force stop/restart。
+- 验证模型池容量检查、失败启动不残留 owner、无 owner stop 不误停、force stop 释放 active loop。
+- 验证 `duplicate_frame_skips` 增长，确认同一帧重复推理防护生效。
+
+本地 60 秒烧机结果：
+
+- `ok: true`
+- `active_loops: 2`
+- owners 稳定为 `burnin_stream_1: 1`、`burnin_stream_2: 1`
+- `burnin_stream_1 duplicate_frame_skips: 5830`
+- `burnin_stream_2 duplicate_frame_skips: 789`
+- 失败启动返回 `owners: 0`，没有假 owner 残留。
+
 ## 本轮发现但尚未完成部署验证的问题
 
 ### PPE 检测循环会被误停
