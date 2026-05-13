@@ -111,7 +111,7 @@ POST /detection-loop/stop/ 200
 
 同时还看到 OCR 页面也会发同一个 stream 的 stop。原因是 OCR、实时检测、PPE 共用一个 `stream_id`，后端旧的 `stop_loop(stream_id)` 没有 owner 概念，一个页面 cleanup 可能停掉另一个页面的检测循环。
 
-本地已经开始修复，但尚未重新 build + 同步 + 重启验证：
+本地已经完成修复并通过 build，但尚未同步到 Jetson 重启验证：
 
 - `backend/inspection/detection_loop.py`
   - 增加 owner/ref owner 管理。
@@ -123,26 +123,26 @@ POST /detection-loop/stop/ 200
   - PPE start/stop 已带 `owner_id`。
 - `src/hooks/liveInspection/useLiveYoloDetection.ts`
   - Live YOLO start/stop 已带 `owner_id`。
+- `src/hooks/ocr/useRealtimeDetectionLoop.ts`
+  - OCR 实时检测 start/stop 已带 `owner_id`。
 
 下次要继续：
 
-1. 给 `src/hooks/ocr/useRealtimeDetectionLoop.ts` 也补 `owner_id`。
-2. `npm run build`
-3. 同步到 Jetson：
+1. 同步本机最新代码到 Jetson：
 
 ```bash
-rsync -az backend/inspection/detection_loop.py backend/inspection/detection_api.py jetson:~/projects/AI-Detection/backend/inspection/
+rsync -az backend/inspection/stream_service.py backend/inspection/mjpeg_view.py backend/inspection/detection_loop.py backend/inspection/detection_api.py jetson:~/projects/AI-Detection/backend/inspection/
 rsync -az src/ jetson:~/projects/AI-Detection/src/
 rsync -az --delete dist/ jetson:~/projects/AI-Detection/dist/
 ```
 
-4. 重启：
+2. 重启：
 
 ```bash
 ssh -tt -i ~/.ssh/id_rsa -o IdentitiesOnly=yes -o ControlMaster=no -S none jetson 'sudo -S systemctl restart ai-backend ai-frontend-spa && sleep 3 && systemctl is-active ai-backend ai-frontend-spa'
 ```
 
-5. 验证：
+3. 验证：
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/streams/detection-loop/status/
@@ -172,7 +172,7 @@ npm run build
 
 注意：
 
-- `owner_id` 防误停补丁是在后续发现后本地追加的，尚未完成 Jetson 部署验证。
+- `owner_id` 防误停补丁已在本地完成并通过 `npm run build`，尚未完成 Jetson 部署验证。
 - 结束前不要假设 PPE 画框已经最终解决；下次从 owner 生命周期修复部署开始。
 
 ## 下次优先级
