@@ -141,6 +141,19 @@ POST /detection-loop/stop/ 200
 - 同步 `src/` 和 `dist/`
 - 重启 `ai-backend`、`ai-frontend-spa`
 - 检查 stream manager、detection loop、最新 detections、MJPEG 5 秒帧数、后端日志
+- 自动调用 `./scripts/jetson_yolo_direct_check.sh`，抓取同一 stream 的 snapshot/frame 并直接 POST `/api/results/yolo-detect/`
+
+也可以单独运行 YOLO 直测脚本：
+
+```bash
+./scripts/jetson_yolo_direct_check.sh
+```
+
+可选参数：
+
+```bash
+JETSON_STREAM_ID=<stream_id> YOLO_CONF=0.25 ./scripts/jetson_yolo_direct_check.sh
+```
 
 预期：
 
@@ -171,5 +184,5 @@ npm run build
 
 1. 运行 `./scripts/deploy_verify_jetson.sh` 部署并验证 `owner_id` 防误停。
 2. 打开 PPE 页面，点击“开启摄像头”和“开始监控”，观察 `detection-loop/status` 是否稳定。
-3. 若 loop 稳定但 `boxes=[]`，用同一摄像头帧直接调用 YOLO 接口确认是否场景/模型未检出，而不是画框渲染问题。
+3. 若 loop 稳定但 `boxes=[]`，运行 `./scripts/jetson_yolo_direct_check.sh` 确认是否场景/模型未检出，而不是画框渲染问题。
 4. 若还需要更高显示帧率，测试把本地 USB 摄像头采集默认改为 `1280x720 MJPG 30fps`，再测 `/mjpeg-cv2` 5 秒帧数。

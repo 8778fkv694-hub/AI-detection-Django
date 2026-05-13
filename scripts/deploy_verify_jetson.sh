@@ -102,14 +102,56 @@ if [ -z "$STREAM_ID" ]; then
 fi
 
 log "Checking detection-loop status"
-remote "curl -sS http://127.0.0.1:8000/api/streams/detection-loop/status/"
+LOOP_STATUS_JSON="$(remote "curl -sS http://127.0.0.1:8000/api/streams/detection-loop/status/")"
+printf '%s\n' "$LOOP_STATUS_JSON"
+
+ACTIVE_LOOPS="$(printf '%s\n' "$LOOP_STATUS_JSON" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("active_loops", 0))
+except Exception:
+    print("unknown")
+')"
+log "Detection-loop active_loops=$ACTIVE_LOOPS"
 
 if [ -n "$STREAM_ID" ]; then
   log "Checking latest detections for stream $STREAM_ID"
-  remote "curl -sS http://127.0.0.1:8000/api/streams/$STREAM_ID/detections/"
+  DETECTIONS_JSON="$(remote "curl -sS http://127.0.0.1:8000/api/streams/$STREAM_ID/detections/")"
+  printf '%s\n' "$DETECTIONS_JSON"
+  BOX_COUNT="$(printf '%s\n' "$DETECTIONS_JSON" | python3 -c '
+import json, sys
+try:
+    print(len(json.load(sys.stdin).get("boxes") or []))
+except Exception:
+    print("unknown")
+')"
+  FRAME_SIZE="$(printf '%s\n' "$DETECTIONS_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    w, h = data.get("frame_width"), data.get("frame_height")
+    print(f"{w}x{h}" if w and h else "unknown")
+except Exception:
+    print("unknown")
+')"
+  log "Latest detection summary: boxes=$BOX_COUNT frame_size=$FRAME_SIZE"
 
   log "Measuring MJPEG-CV2 throughput for stream $STREAM_ID (5s sample)"
-  remote "curl -sS --max-time 5 'http://127.0.0.1:8000/api/streams/$STREAM_ID/mjpeg-cv2/?quality=75&width=960&fps=25&overlay=0' | python3 -c \"import sys; data=sys.stdin.buffer.read(); print({'frames': data.count(b'--frame'), 'bytes': len(data)})\""
+  MJPEG_SAMPLE="$(remote "curl -sS --max-time 5 'http://127.0.0.1:8000/api/streams/$STREAM_ID/mjpeg-cv2/?quality=75&width=960&fps=25&overlay=0' | python3 -c \"import sys, json; data=sys.stdin.buffer.read(); print(json.dumps({'frames': data.count(b'--frame'), 'bytes': len(data)}))\"")"
+  printf '%s\n' "$MJPEG_SAMPLE"
+  MJPEG_FRAMES="$(printf '%s\n' "$MJPEG_SAMPLE" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("frames", 0))
+except Exception:
+    print("unknown")
+')"
+  if [ "$MJPEG_FRAMES" != "unknown" ]; then
+    log "MJPEG sample summary: ${MJPEG_FRAMES} frames / 5s (~$((MJPEG_FRAMES / 5)) fps integer floor)"
+  fi
+
+  log "Running direct YOLO check script"
+  JETSON_SSH_TARGET="$SSH_TARGET" JETSON_STREAM_ID="$STREAM_ID" "$ROOT_DIR/scripts/jetson_yolo_direct_check.sh"
 fi
 
 log "Recent backend log tail"
