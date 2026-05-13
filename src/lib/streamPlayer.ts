@@ -42,6 +42,19 @@ export class StreamPlayer {
   private boundFullscreenChange: (() => void) | null = null;
   private ownsCanvas = false;
 
+  private restartFetchTimer(): void {
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+
+    if (!this.isPlaying) return;
+
+    this.intervalId = window.setInterval(() => {
+      this.fetchAndRenderFrame();
+    }, 1000 / this.fps);
+  }
+
   private isTransientFrameError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return (
@@ -169,9 +182,6 @@ export class StreamPlayer {
     this.consecutiveErrorCount = 0;
     this.isFetchingFrame = false;
 
-    // 计算帧间隔
-    const frameInterval = 1000 / this.fps;
-
     console.log(`StreamPlayer: 开始播放流媒体 ${this.streamId}, FPS: ${this.fps} (窗口 ${this.windowId})`);
 
     // 先获取一帧来初始化canvas尺寸（带重试机制）
@@ -216,10 +226,7 @@ export class StreamPlayer {
       }
     }
 
-    // 定时获取新帧
-    this.intervalId = window.setInterval(() => {
-      this.fetchAndRenderFrame();
-    }, frameInterval);
+    this.restartFetchTimer();
   }
 
   /**
@@ -280,6 +287,31 @@ export class StreamPlayer {
     if (this.ownsCanvas && this.canvas?.parentNode) {
       this.canvas.parentNode.removeChild(this.canvas);
     }
+  }
+
+  updateSettings(options: Pick<StreamPlayerOptions, 'fps' | 'quality' | 'targetWidth'>): void {
+    const nextFps = options.fps ?? this.fps;
+    const nextQuality = options.quality ?? this.quality;
+    const nextTargetWidth = options.targetWidth ?? this.targetWidth;
+    const changed =
+      nextFps !== this.fps ||
+      nextQuality !== this.quality ||
+      nextTargetWidth !== this.targetWidth;
+
+    this.fps = nextFps;
+    this.quality = nextQuality;
+    this.targetWidth = nextTargetWidth;
+
+    if (!this.isPlaying || !changed) return;
+
+    this.frameCount = 0;
+    this.lastFrameTime = Date.now();
+    this.consecutiveErrorCount = 0;
+    this.restartFetchTimer();
+    void this.fetchAndRenderFrame();
+    console.log(
+      `StreamPlayer: 更新显示参数 FPS=${this.fps}, quality=${this.quality}, width=${this.targetWidth}`
+    );
   }
 
   /**
@@ -373,9 +405,7 @@ export class StreamPlayer {
           return;
         }
 
-        // 首次加载时设置canvas尺寸
-        if (this.canvas.width === 0 || this.canvas.height === 0) {
-          // Canvas 使用后端缩放后的分辨率
+        if (this.canvas.width !== img.width || this.canvas.height !== img.height) {
           this.canvas.width = img.width;
           this.canvas.height = img.height;
           

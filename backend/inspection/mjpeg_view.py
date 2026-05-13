@@ -62,7 +62,7 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
             )
             break
 
-        frame = reader.get_frame()
+        frame = reader.get_frame_ref()
         if frame is None:
             time.sleep(0.05)
             continue
@@ -75,6 +75,8 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
         last_seen_id = version
         last_new_frame_time = time.time()  # 拿到新帧，重置心跳
 
+        frame_started_at = time.time()
+
         # 颜色校正按需开启（USB 摄像头偏绿才需要），默认关掉省 CPU
         if enhance:
             frame = reader._enhance_display_frame(frame)
@@ -85,6 +87,7 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
                 from .detection_loop import detection_loop_manager
                 boxes = detection_loop_manager.get_latest_boxes(stream_id)
                 if boxes:
+                    frame = frame.copy()
                     for box in boxes:
                         bbox = box.get('bbox', {})
                         x1, y1 = int(bbox.get('x1', 0)), int(bbox.get('y1', 0))
@@ -119,7 +122,8 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
             b'\r\n' + jpeg.tobytes() + b'\r\n'
         )
 
-        time.sleep(frame_interval)
+        elapsed = time.time() - frame_started_at
+        time.sleep(max(0.0, frame_interval - elapsed))
 
 
 @csrf_exempt

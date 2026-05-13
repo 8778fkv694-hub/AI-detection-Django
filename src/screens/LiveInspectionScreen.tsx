@@ -255,7 +255,12 @@ const LiveInspectionScreen: React.FC = () => {
         if (preferredCamera && devices.find((d) => d.deviceId === preferredCamera)) {
           setSelectedDeviceId(preferredCamera);
         } else if (devices.length > 0) {
-          setSelectedDeviceId(devices[0].deviceId);
+          const preferVirtual =
+            window.location.port === '3005' || window.location.port === '3001';
+          const preferredDevice = preferVirtual
+            ? devices.find((d) => d.isVirtual) || devices.find((d) => !d.isVirtual) || devices[0]
+            : devices.find((d) => !d.isVirtual) || devices.find((d) => d.isVirtual) || devices[0];
+          setSelectedDeviceId(preferredDevice.deviceId);
         }
       } catch (error) {
         console.error('获取摄像头设备失败:', error);

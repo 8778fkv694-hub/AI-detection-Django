@@ -245,24 +245,7 @@ class StreamReader:
             
             # 读取帧
             try:
-                if self.low_latency:
-                    # 低延迟模式：快速消费缓冲区，只保留最新帧
-                    # B9修复：从50帧降到10帧，减少单次阻塞时间
-                    latest_frame = None
-                    empty_streak = 0
-                    for _ in range(10):   # 最多连续读 10 帧
-                        ret, f = self.cap.read()
-                        if not ret or f is None:
-                            empty_streak += 1
-                            if empty_streak >= 3:
-                                break
-                            continue
-                        empty_streak = 0
-                        latest_frame = f
-                    ret = latest_frame is not None
-                    frame = latest_frame
-                else:
-                    ret, frame = self.cap.read()
+                ret, frame = self.cap.read()
 
                 if not ret or frame is None:
                     logger.warning(f"Failed to read frame from stream {self.stream_id}")
@@ -284,7 +267,9 @@ class StreamReader:
                 
                 # 控制读取频率
                 if self.low_latency:
-                    time.sleep(0.002)   # 低延迟模式：约 500fps 读取上限，快速清空缓冲
+                    # V4L2/RTSP 的 read() 本身会阻塞到下一帧；这里不能连续读多帧再只发布
+                    # 最后一帧，否则 frame_version 会按“批次”增长，MJPEG 去重后显示帧率被压低。
+                    time.sleep(0.001)
                 else:
                     time.sleep(0.033)   # 普通模式：约 30 FPS
                 

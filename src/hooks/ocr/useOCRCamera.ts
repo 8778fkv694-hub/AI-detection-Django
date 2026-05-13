@@ -279,6 +279,21 @@ export const useOCRCamera = ({
     }
   }, [selectedDeviceId, availableDevices, windowId, videoRef, setIsCameraOn, setIsRealtimeActive, setSelectedDeviceId, globalFps, globalQuality, globalWidth]);
 
+  useEffect(() => {
+    if (!isCameraOn || !selectedDeviceId?.startsWith('stream-')) return;
+
+    mjpegPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+    streamPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+  }, [globalFps, globalQuality, globalWidth, isCameraOn, selectedDeviceId]);
+
   // 摄像头控制函数
   const toggleCamera = useCallback(async () => {
     if (isCameraOn) {
@@ -353,6 +368,17 @@ export const useOCRCamera = ({
         // 保留用户当前选择，避免流媒体列表刷新时被重置
         return;
       } else if (devices.length > 0) {
+        const preferVirtual =
+          window.location.port === '3005' || window.location.port === '3001';
+        if (preferVirtual) {
+          const streamDevice = devices.find((d) => d.isVirtual);
+          if (streamDevice) {
+            setSelectedDeviceId(streamDevice.deviceId);
+            console.log(`[${windowId}] 自动选择流媒体设备: ${streamDevice.label}`);
+            return;
+          }
+        }
+
         // 基于windowId智能分配不同的默认设备，避免多窗口冲突
         // 通过windowId的简单哈希来选择不同的设备索引
         let deviceIndex = 0;

@@ -10,8 +10,10 @@ import { useCallback, useRef, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
+import { MJPEGPlayer } from '@/lib/mjpegPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
 import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
+import { useStreamSettingsStore } from '@/state/streamSettingsStore';
 
 export interface UseSafetyCameraOptions {
   /** 窗口ID */
@@ -31,6 +33,8 @@ export interface UseSafetyCameraResult {
   videoDevices: CameraDevice[];
   /** 当前选中的设备ID */
   selectedDeviceId: string | undefined;
+  /** MJPEG播放器引用 */
+  mjpegPlayerRef: React.MutableRefObject<MJPEGPlayer | null>;
   /** 流媒体播放器引用 */
   streamPlayerRef: React.MutableRefObject<StreamPlayer | null>;
   /** HLS播放器引用 */
@@ -64,11 +68,12 @@ const getUserMediaCompat = async (constraints: MediaStreamConstraints): Promise<
       const error = err as { name?: string };
       if (
         error?.name === 'OverconstrainedError' ||
-        error?.name === 'NotReadableError' ||
-        error?.name === 'NotAllowedError'
+        error?.name === 'NotReadableError'
       ) {
         try {
-          return await navigator.mediaDevices.getUserMedia({ video: true });
+          return await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          });
         } catch {
           throw err;
         }
@@ -101,12 +106,16 @@ export const useSafetyCamera = ({
 }: UseSafetyCameraOptions): UseSafetyCameraResult => {
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
+  const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
 
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isPpeActive, setIsPpeActive] = useState(false);
   const [videoDevices, setVideoDevices] = useState<CameraDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | undefined>(undefined);
+  const globalFps = useStreamSettingsStore((s) => s.fps);
+  const globalQuality = useStreamSettingsStore((s) => s.quality);
+  const globalWidth = useStreamSettingsStore((s) => s.targetWidth);
 
   // 获取摄像头列表
   useEffect(() => {
@@ -117,14 +126,16 @@ export const useSafetyCamera = ({
         if (mounted) {
           setVideoDevices(devices);
           if (!selectedDeviceId && devices.length > 0) {
-            const streamDevice = devices.find((d) => d.isVirtual);
-            if (streamDevice) {
-              setSelectedDeviceId(streamDevice.deviceId);
-              console.log(`[${windowId}] 自动选择流媒体设备: ${streamDevice.label}`);
-            } else if (devices.length > 0) {
-              setSelectedDeviceId(devices[0].deviceId);
-              console.log(`[${windowId}] 自动选择物理摄像头: ${devices[0].label}`);
-            }
+            const preferVirtual =
+              window.location.port === '3005' || window.location.port === '3001';
+            const preferredDevice = preferVirtual
+              ? devices.find((d) => d.isVirtual) || devices.find((d) => !d.isVirtual) || devices[0]
+              : devices.find((d) => !d.isVirtual) || devices.find((d) => d.isVirtual) || devices[0];
+
+            setSelectedDeviceId(preferredDevice.deviceId);
+            console.log(
+              `[${windowId}] 自动选择${preferredDevice.isVirtual ? '流媒体设备' : '物理摄像头'}: ${preferredDevice.label}`
+            );
           }
         }
       } catch (e) {
@@ -142,6 +153,11 @@ export const useSafetyCamera = ({
     async (deviceId?: string) => {
       try {
         // 停止之前的流媒体播放器
+        if (mjpegPlayerRef.current) {
+          mjpegPlayerRef.current.destroy();
+          mjpegPlayerRef.current = null;
+        }
+
         if (streamPlayerRef.current) {
           streamPlayerRef.current.destroy();
           streamPlayerRef.current = null;
@@ -169,12 +185,42 @@ export const useSafetyCamera = ({
 
           console.log(`[${windowId}] 启动虚拟流媒体摄像头: ${streamId}，播放模式: ${playMode}`);
 
+          // 优先 MJPEG 直显（零双重编码，清晰度最高）
+          try {
+            console.log(`[${windowId}] 使用 MJPEG 流 (fps=${globalFps}, q=${globalQuality}, w=${globalWidth})`);
+            const mjpegPlayer = new MJPEGPlayer({
+              videoElement: videoRef.current,
+              streamId: streamId,
+              fps: globalFps,
+              quality: globalQuality,
+              targetWidth: globalWidth,
+              onError: (error) => {
+                console.error('MJPEG播放错误:', error);
+                mjpegPlayerRef.current?.destroy();
+                mjpegPlayerRef.current = null;
+                setIsCameraOn(false);
+                setIsMonitoring(false);
+                setIsPpeActive(false);
+              },
+            });
+
+            await mjpegPlayer.start();
+            mjpegPlayerRef.current = mjpegPlayer;
+            setIsCameraOn(true);
+            console.log(`[${windowId}] MJPEG 流启动成功`);
+            return;
+          } catch (mjpegError) {
+            console.warn(`[${windowId}] MJPEG 启动失败，回退:`, mjpegError);
+            mjpegPlayerRef.current?.destroy();
+            mjpegPlayerRef.current = null;
+          }
+
           if (playMode === 'ffmpeg') {
             try {
               console.log(`[${windowId}] 使用FFmpeg/HLS流`);
               await startHLSStream(streamId, {
-                fps: 15,
-                width: 1280,
+                fps: globalFps,
+                width: globalWidth,
                 crf: 26,
                 preset: 'ultrafast',
                 threads: 2,
@@ -209,14 +255,14 @@ export const useSafetyCamera = ({
             }
           }
 
-          // JPEG方案
+          // JPEG 逐帧轮询（最终回退）
           console.log(`[${windowId}] 使用JPEG流`);
           const player = new StreamPlayer({
             videoElement: videoRef.current,
             streamId: streamId,
-            fps: 20,
-            quality: 100,
-            targetWidth: 1920,
+            fps: globalFps,
+            quality: globalQuality,
+            targetWidth: globalWidth,
             windowId: windowId,
             onError: (error) => {
               toast.error(`流媒体播放失败: ${error.message}`);
@@ -243,22 +289,53 @@ export const useSafetyCamera = ({
 
         // 物理摄像头
         const stream = await getUserMediaCompat({
-          video: deviceId ? { deviceId: { exact: deviceId } } : true,
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            : { width: { ideal: 1280 }, height: { ideal: 720 } },
         });
         if (videoRef.current) videoRef.current.srcObject = stream;
         setIsCameraOn(true);
+
+        stream.getVideoTracks().forEach((track) => {
+          track.addEventListener('ended', () => {
+            console.log(`[${windowId}] 摄像头轨道已结束`);
+            setIsCameraOn(false);
+            setIsMonitoring(false);
+            setIsPpeActive(false);
+          });
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : '无法访问摄像头';
         toast.error(msg);
       }
     },
-    [windowId, videoRef, videoDevices]
+    [windowId, videoRef, videoDevices, globalFps, globalQuality, globalWidth]
   );
+
+  useEffect(() => {
+    if (!isCameraOn || !selectedDeviceId?.startsWith('stream-')) return;
+
+    mjpegPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+    streamPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+  }, [globalFps, globalQuality, globalWidth, isCameraOn, selectedDeviceId]);
 
   // 切换摄像头
   const toggleCamera = useCallback(async () => {
     if (isCameraOn) {
       console.log(`[${windowId}] 关闭摄像头`);
+
+      if (mjpegPlayerRef.current) {
+        mjpegPlayerRef.current.destroy();
+        mjpegPlayerRef.current = null;
+      }
 
       if (streamPlayerRef.current) {
         streamPlayerRef.current.destroy();
@@ -280,42 +357,9 @@ export const useSafetyCamera = ({
       toast.success(`[${windowId.slice(-8)}] 摄像头已关闭`);
     } else {
       console.log(`[${windowId}] 开启摄像头`);
-      try {
-        const constraints: MediaStreamConstraints = {
-          video: {
-            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        };
-
-        console.log(`[${windowId}] 尝试启动摄像头:`, selectedDeviceId);
-        const stream = await getUserMediaCompat(constraints);
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        setIsCameraOn(true);
-        toast.success(`[${windowId.slice(-8)}] 摄像头已开启`);
-
-        stream.getVideoTracks().forEach((track) => {
-          track.addEventListener('ended', () => {
-            console.log(`[${windowId}] 摄像头轨道已结束`);
-            setIsCameraOn(false);
-            setIsMonitoring(false);
-            setIsPpeActive(false);
-          });
-        });
-      } catch (err) {
-        console.error(`[${windowId}] 无法访问摄像头:`, err);
-        const errorMessage = err instanceof Error ? err.message : '未知错误';
-        if (errorMessage.includes('Permission denied')) {
-          toast.error(`[${windowId.slice(-8)}] 摄像头权限被拒绝`);
-        } else if (errorMessage.includes('NotReadableError') || errorMessage.includes('NotAllowedError')) {
-          toast.error(`[${windowId.slice(-8)}] 摄像头被其他应用占用`);
-        } else {
-          toast.error(`[${windowId.slice(-8)}] 无法访问摄像头: ${errorMessage}`);
-        }
-      }
+      await startCamera(selectedDeviceId);
     }
-  }, [isCameraOn, selectedDeviceId, windowId, videoRef]);
+  }, [isCameraOn, selectedDeviceId, windowId, videoRef, startCamera]);
 
   // 切换摄像头设备
   const switchCamera = useCallback(
@@ -374,6 +418,7 @@ export const useSafetyCamera = ({
     isPpeActive,
     videoDevices,
     selectedDeviceId,
+    mjpegPlayerRef,
     streamPlayerRef,
     hlsPlayerRef,
     toggleCamera,

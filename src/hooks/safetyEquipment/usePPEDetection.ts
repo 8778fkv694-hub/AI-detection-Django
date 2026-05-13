@@ -8,7 +8,8 @@
 
 import { useCallback, useRef, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { yoloDetectBackend } from '@/lib/api';
+import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
+import { buildApiUrl } from '@/lib/config';
 import type { YoloDetection } from '@/lib/yoloDetector';
 
 export interface DetectionStats {
@@ -26,6 +27,8 @@ export interface BestDetection {
 }
 
 export interface UsePPEDetectionOptions {
+  /** 后端流ID（虚拟流媒体摄像头时启用） */
+  streamId?: string;
   /** 视频元素引用 */
   videoRef: React.RefObject<HTMLVideoElement>;
   /** 检测画布引用 */
@@ -69,7 +72,11 @@ export interface UsePPEDetectionResult {
   /** 执行抓拍检测 */
   performCaptureDetection: (imageData: string) => Promise<YoloDetection[]>;
   /** 在画布上绘制检测结果 */
-  drawDetections: (detections: YoloDetection[], canvas: HTMLCanvasElement) => void;
+  drawDetections: (
+    detections: YoloDetection[],
+    canvas: HTMLCanvasElement,
+    sourceSize?: { width: number; height: number }
+  ) => void;
   /** 检测统计 */
   detectionStats: DetectionStats;
   /** 是否正在检测 */
@@ -84,34 +91,8 @@ export interface UsePPEDetectionResult {
   runPpeDetection: () => Promise<string[] | null>;
 }
 
-// PPE相关的类别
-const PPE_RELEVANT_CLASSES = [
-  'person',
-  'cleanroom_cap',
-  'mask',
-  'no_cleanroom_cap',
-  'no_mask',
-  'helmet',
-  'face-mask',
-  'face-guard',
-  'gloves',
-  'glasses',
-  'shoes',
-  'ear',
-  'ear-mufs',
-  'face',
-  'foot',
-  'tool',
-  'hands',
-  'head',
-  'hat',
-  'Hardhat',
-  'NO-Hardhat',
-  'NO-Mask',
-  'NO-Safety Vest',
-];
-
 export const usePPEDetection = ({
+  streamId,
   videoRef,
   detectionCanvasRef,
   isPpeActive,
@@ -128,6 +109,8 @@ export const usePPEDetection = ({
   setBestDetectionInInterval,
 }: UsePPEDetectionOptions): UsePPEDetectionResult => {
   const isDetectingRef = useRef(false);
+  const backendLoopStartedRef = useRef(false);
+  const backendLoopOwnerRef = useRef(`ppe:${Date.now()}:${Math.random().toString(36).slice(2)}`);
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
   const [detectionStats, setDetectionStats] = useState<DetectionStats>({
@@ -136,30 +119,65 @@ export const usePPEDetection = ({
     equipmentDetections: 0,
   });
 
+  const getMinThreshold = useCallback(() => {
+    const thresholdValues = Object.values(ppeThresholds).filter(
+      (v) => typeof v === 'number'
+    ) as number[];
+    return thresholdValues.length > 0 ? Math.min(...thresholdValues) : 0.5;
+  }, [ppeThresholds]);
+
+  const mapBackendDetection = useCallback((d: BackendYoloDetection): YoloDetection => ({
+    class: d.label,
+    confidence: d.confidence,
+    bbox: [d.bbox.x1, d.bbox.y1, d.bbox.x2 - d.bbox.x1, d.bbox.y2 - d.bbox.y1],
+  }), []);
+
+  const filterDetections = useCallback(
+    (
+      detections: YoloDetection[],
+      fallbackThreshold: number,
+      useClassThresholds = false
+    ) => detections.filter((detection) => {
+      const classThreshold = ppeThresholds[detection.class as keyof typeof ppeThresholds];
+      const threshold = useClassThresholds && typeof classThreshold === 'number'
+        ? classThreshold
+        : fallbackThreshold;
+      return detection.confidence >= threshold;
+    }),
+    [ppeThresholds]
+  );
+
+  const fetchBackendSnapshotBase64 = useCallback(async (): Promise<string | null> => {
+    if (!streamId) return null;
+    try {
+      const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1] || '');
+        };
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error('获取PPE后端快照失败:', error);
+      return null;
+    }
+  }, [streamId]);
+
   // 执行检测（用于检测阈值过滤）
   const performDetection = useCallback(
     async (imageData: string): Promise<YoloDetection[]> => {
       try {
-        const thresholdValues = Object.values(ppeThresholds).filter(
-          (v) => typeof v === 'number'
-        ) as number[];
-        const minThreshold = thresholdValues.length > 0 ? Math.min(...thresholdValues) : 0.5;
+        const minThreshold = getMinThreshold();
         const backendDetections = await yoloDetectBackend(imageData, minThreshold, {
           detection_type: 'cleanroom_ppe',
         });
 
-        const detections: YoloDetection[] = backendDetections.map((d) => ({
-          class: d.label,
-          confidence: d.confidence,
-          bbox: [d.bbox.x1, d.bbox.y1, d.bbox.x2 - d.bbox.x1, d.bbox.y2 - d.bbox.y1],
-        }));
-
-        const filteredDetections = detections.filter((detection) => {
-          if (!PPE_RELEVANT_CLASSES.includes(detection.class)) return false;
-          const threshold =
-            ppeThresholds[detection.class as keyof typeof ppeThresholds] || 0.8;
-          return detection.confidence >= threshold;
-        });
+        const detections = backendDetections.map(mapBackendDetection);
+        const filteredDetections = filterDetections(detections, minThreshold, true);
 
         return filteredDetections;
       } catch (error) {
@@ -179,7 +197,7 @@ export const usePPEDetection = ({
         return [];
       }
     },
-    [ppeThresholds, setModelUnavailableDialog]
+    [filterDetections, getMinThreshold, mapBackendDetection, setModelUnavailableDialog]
   );
 
   // 执行抓拍检测
@@ -191,9 +209,8 @@ export const usePPEDetection = ({
           return [];
         }
 
-        if (imageData.length > 1000000) {
-          console.error('图片数据过大，跳过检测:', imageData.length);
-          return [];
+        if (imageData.length > 8000000) {
+          console.warn('图片数据较大，继续检测:', imageData.length);
         }
 
         try {
@@ -211,15 +228,8 @@ export const usePPEDetection = ({
           detection_type: 'cleanroom_ppe',
         });
 
-        const detections: YoloDetection[] = backendDetections.map((d) => ({
-          class: d.label,
-          confidence: d.confidence,
-          bbox: [d.bbox.x1, d.bbox.y1, d.bbox.x2 - d.bbox.x1, d.bbox.y2 - d.bbox.y1],
-        }));
-
-        const filteredDetections = detections.filter((detection) =>
-          PPE_RELEVANT_CLASSES.includes(detection.class)
-        );
+        const detections = backendDetections.map(mapBackendDetection);
+        const filteredDetections = filterDetections(detections, captureThreshold, true);
 
         return filteredDetections;
       } catch (error) {
@@ -227,16 +237,22 @@ export const usePPEDetection = ({
         return [];
       }
     },
-    [captureThreshold]
+    [captureThreshold, filterDetections, mapBackendDetection]
   );
 
   // 在画布上绘制检测结果
   const drawDetections = useCallback(
-    (detections: YoloDetection[], canvas: HTMLCanvasElement) => {
+    (
+      detections: YoloDetection[],
+      canvas: HTMLCanvasElement,
+      sourceSize?: { width: number; height: number }
+    ) => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const scaleX = sourceSize?.width ? canvas.width / sourceSize.width : 1;
+      const scaleY = sourceSize?.height ? canvas.height / sourceSize.height : 1;
 
       detections.forEach((detection) => {
         const [x, y, width, height] = detection.bbox;
@@ -264,15 +280,54 @@ export const usePPEDetection = ({
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, width, height);
+        ctx.strokeRect(x * scaleX, y * scaleY, width * scaleX, height * scaleY);
 
         ctx.fillStyle = color;
         ctx.font = '16px Arial';
-        ctx.fillText(`${detection.class}: ${(confidence * 100).toFixed(1)}%`, x, y - 5);
+        ctx.fillText(
+          `${detection.class}: ${(confidence * 100).toFixed(1)}%`,
+          x * scaleX,
+          y * scaleY - 5
+        );
       });
     },
     []
   );
+
+  useEffect(() => {
+    const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+    if (!useBackendDetection || !streamId) return;
+
+    const stopLoop = () => {
+      if (!backendLoopStartedRef.current) return;
+      backendLoopStartedRef.current = false;
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
+      }).catch((error) => console.error('停止PPE后端检测循环失败:', error));
+    };
+
+    if (isCameraOn && isPpeActive) {
+      backendLoopStartedRef.current = true;
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_id: 'ppe_detection',
+          conf_threshold: Math.min(captureThreshold, getMinThreshold()),
+          owner_id: backendLoopOwnerRef.current,
+        }),
+      }).catch((error) => {
+        backendLoopStartedRef.current = false;
+        console.error('启动PPE后端检测循环失败:', error);
+      });
+    } else {
+      stopLoop();
+    }
+
+    return stopLoop;
+  }, [captureThreshold, getMinThreshold, isCameraOn, isPpeActive, streamId]);
 
   // 实时PPE检测
   const runPpeDetection = useCallback(async (): Promise<string[] | null> => {
@@ -289,30 +344,55 @@ export const usePPEDetection = ({
     let autoCapturedImages: string[] | null = null;
 
     try {
-      const canvas = document.createElement('canvas');
+      const useBackendDetection =
+        import.meta.env.VITE_BACKEND_DETECTION !== 'false' && Boolean(streamId);
+      let base64Data = '';
+      let detections: YoloDetection[] = [];
+      let sourceSize: { width: number; height: number } | undefined;
 
-      if (!videoRef.current || videoRef.current.videoWidth <= 0 || videoRef.current.videoHeight <= 0) {
-        return null;
+      if (useBackendDetection && streamId) {
+        try {
+          const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
+          if (response.ok) {
+            const result = await response.json();
+            const backendDetections = (result.boxes || []) as BackendYoloDetection[];
+            detections = filterDetections(
+              backendDetections.map(mapBackendDetection),
+              Math.min(captureThreshold, getMinThreshold())
+            );
+            if (result.frame_width && result.frame_height) {
+              sourceSize = { width: result.frame_width, height: result.frame_height };
+            }
+          }
+        } catch (error) {
+          console.error('拉取PPE后端检测结果失败:', error);
+        }
+      } else {
+        const canvas = document.createElement('canvas');
+
+        if (!videoRef.current || videoRef.current.videoWidth <= 0 || videoRef.current.videoHeight <= 0) {
+          return null;
+        }
+
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          return null;
+        }
+
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        base64Data = dataUrl.split(',')[1];
+
+        if (!base64Data) {
+          return null;
+        }
+
+        detections = await performCaptureDetection(base64Data);
       }
-
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        return null;
-      }
-
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const base64Data = dataUrl.split(',')[1];
-
-      if (!base64Data) {
-        return null;
-      }
-
-      const detections = await performCaptureDetection(base64Data);
 
       const personCount = detections.filter((d) => d.class === 'person').length;
       const equipmentCount = detections.filter((d) =>
@@ -340,7 +420,9 @@ export const usePPEDetection = ({
         const videoHeight = videoRef.current.videoHeight;
 
         if (videoWidth > 0 && videoHeight > 0) {
-          drawDetections(detections, detectionCanvasRef.current);
+          detectionCanvasRef.current.width = videoWidth;
+          detectionCanvasRef.current.height = videoHeight;
+          drawDetections(detections, detectionCanvasRef.current, sourceSize);
         }
       }
 
@@ -357,7 +439,12 @@ export const usePPEDetection = ({
           personDetections.reduce((sum, d) => sum + d.confidence, 0) / personDetections.length;
 
         if (timeSinceLastCapture >= intervalMs && personDetections.length > 0) {
-          const finalImageData = bestDetectionInInterval?.imageData || base64Data;
+          const finalImageData =
+            bestDetectionInInterval?.imageData ||
+            base64Data ||
+            (await fetchBackendSnapshotBase64()) ||
+            (await captureCurrentFrame()) ||
+            '';
           const capturedImages = await handleAutoCapture(detections, finalImageData);
 
           if (capturedImages?.length) {
@@ -370,7 +457,10 @@ export const usePPEDetection = ({
           const shouldUpdate = !currentBest || avgConfidence > currentBest.confidence;
 
           if (shouldUpdate) {
-            const imageData = await captureCurrentFrame();
+            const imageData =
+              base64Data ||
+              (await fetchBackendSnapshotBase64()) ||
+              (await captureCurrentFrame());
             setBestDetectionInInterval({
               detections,
               imageData: imageData || '',
@@ -389,10 +479,14 @@ export const usePPEDetection = ({
     return autoCapturedImages;
   }, [
     isPpeActive,
+    streamId,
     videoRef,
     detectionCanvasRef,
     performCaptureDetection,
     drawDetections,
+    filterDetections,
+    getMinThreshold,
+    mapBackendDetection,
     showDetections,
     ppeThresholds,
     autoCapture,
@@ -402,6 +496,7 @@ export const usePPEDetection = ({
     setBestDetectionInInterval,
     handleAutoCapture,
     captureCurrentFrame,
+    fetchBackendSnapshotBase64,
   ]);
 
   // 画布尺寸设置

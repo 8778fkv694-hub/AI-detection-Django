@@ -148,6 +148,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   // P0修复：使用ref保存performRealtimeDetection函数，避免setInterval闭包问题
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
   const handleCaptureWorkflowRef = useRef<((validSelectedTargets: string[], currentDataUrl: string, currentBase64: string) => Promise<void>) | null>(null);
+  const backendLoopOwnerRef = useRef(`ocr:${Date.now()}:${Math.random().toString(36).slice(2)}`);
 
   // M2修复：保存workflowState到ref，延时循环中读取ref而非闭包值
   const workflowStateRef = useRef(workflowState);
@@ -1198,6 +1199,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         body: JSON.stringify({
           model_id: currentModelId || undefined,
           conf_threshold: detectionConfidence,
+          owner_id: backendLoopOwnerRef.current,
         }),
       }).catch(e => console.error('启动后端检测循环失败:', e));
     } else {
@@ -1205,6 +1207,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       console.log(`🛑 正在请求后端停止检测循环: stream=${streamId}`);
       fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
       }).catch(e => console.error('停止后端检测循环失败:', e));
     }
     
@@ -1213,6 +1217,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       if (useBackendDetection && streamId) {
         fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
         }).catch(e => console.error('卸载时停止后端检测循环失败:', e));
       }
     };

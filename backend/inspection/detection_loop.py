@@ -101,6 +101,7 @@ class DetectionLoop:
                 current_version = getattr(reader, 'frame_version', 0)
 
                 # YOLO 推理
+                frame_height, frame_width = frame.shape[:2]
                 t0 = time.time()
                 boxes = run_inference(
                     frame,
@@ -124,6 +125,8 @@ class DetectionLoop:
                         'stream_id': self.stream_id,
                         'frame_id': self._frame_id_counter,
                         'frame_version': current_version,
+                        'frame_width': frame_width,
+                        'frame_height': frame_height,
                         'boxes': boxes,
                         'detect_fps': round(avg_fps, 1),
                         'inference_ms': round(elapsed * 1000, 1),
@@ -200,6 +203,7 @@ class DetectionLoopManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._loops: Dict[str, DetectionLoop] = {}
                     cls._instance._ref_counts: Dict[str, int] = {}
+                    cls._instance._owners: Dict[str, set[str]] = {}
                     cls._instance._lock = threading.Lock()
         return cls._instance
 
@@ -208,11 +212,19 @@ class DetectionLoopManager:
         stream_id: str,
         model_id: str,
         conf_threshold: float = 0.5,
+        owner_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """启动指定流的检测循环（引用计数，支持多消费者）"""
         with self._lock:
-            # 递增引用计数
-            self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
+            # 递增引用计数。新版前端传 owner_id，同一 owner 重复 start 只算一次；
+            # 这样 OCR/实时检测/PPE 共享同一个 stream 时，一个页面的 cleanup
+            # 不会误停另一个页面正在使用的检测循环。
+            if owner_id:
+                owners = self._owners.setdefault(stream_id, set())
+                owners.add(owner_id)
+                self._ref_counts[stream_id] = len(owners)
+            else:
+                self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
 
             # 如果已有循环在跑
             if stream_id in self._loops and self._loops[stream_id].is_running:
@@ -223,14 +235,16 @@ class DetectionLoopManager:
                         'success': True,
                         'message': f'检测循环已在运行: stream={stream_id}',
                         'status': old_loop.get_status(),
+                        'owners': self._ref_counts.get(stream_id, 0),
                     }
                 # 配置变了，更新配置
                 old_loop.update_config(model_id=model_id, conf_threshold=conf_threshold)
                 return {
-                    'success': True,
-                    'message': f'检测循环配置已更新: stream={stream_id}',
-                    'status': old_loop.get_status(),
-                }
+                        'success': True,
+                        'message': f'检测循环配置已更新: stream={stream_id}',
+                        'status': old_loop.get_status(),
+                        'owners': self._ref_counts.get(stream_id, 0),
+                    }
 
             # 检查模型池容量
             from .yolo import MAX_MODEL_POOL_SIZE
@@ -255,36 +269,59 @@ class DetectionLoopManager:
                 'success': True,
                 'message': f'检测循环已启动: stream={stream_id}, model={model_id}',
                 'status': loop.get_status(),
+                'owners': self._ref_counts.get(stream_id, 0),
             }
 
-    def stop_loop(self, stream_id: str) -> Dict[str, Any]:
+    def stop_loop(self, stream_id: str, owner_id: Optional[str] = None) -> Dict[str, Any]:
         """停止指定流的检测循环（引用计数归零才真停）"""
         with self._lock:
-            current = self._ref_counts.get(stream_id, 0)
-            if current <= 0:
-                return {
-                    'success': False,
-                    'message': f'未找到检测循环引用: stream={stream_id}',
-                }
-
-            self._ref_counts[stream_id] = current - 1
-            if self._ref_counts[stream_id] > 0:
+            if owner_id:
+                owners = self._owners.setdefault(stream_id, set())
+                if owner_id not in owners:
+                    return {
+                        'success': True,
+                        'message': f'owner 未持有检测循环，忽略停止: stream={stream_id}',
+                        'owners': len(owners),
+                    }
+                owners.discard(owner_id)
+                self._ref_counts[stream_id] = len(owners)
+            elif self._owners.get(stream_id):
                 return {
                     'success': True,
-                    'message': f'检测循环仍有其他消费者 ({self._ref_counts[stream_id]}), 不停止: stream={stream_id}',
+                    'message': f'存在 owner 持有检测循环，忽略无 owner 停止: stream={stream_id}',
+                    'owners': len(self._owners[stream_id]),
+                }
+            else:
+                current = self._ref_counts.get(stream_id, 0)
+                if current <= 0:
+                    return {
+                        'success': False,
+                        'message': f'未找到检测循环引用: stream={stream_id}',
+                    }
+                self._ref_counts[stream_id] = current - 1
+
+            current = self._ref_counts.get(stream_id, 0)
+            if current > 0:
+                return {
+                    'success': True,
+                    'message': f'检测循环仍有其他消费者 ({current}), 不停止: stream={stream_id}',
+                    'owners': current,
                 }
 
             if stream_id not in self._loops:
                 return {
                     'success': True,
                     'message': f'检测循环引用已清零: stream={stream_id}',
+                    'owners': 0,
                 }
             loop = self._loops[stream_id]
             loop.stop()
             del self._loops[stream_id]
+            self._owners.pop(stream_id, None)
             return {
                 'success': True,
                 'message': f'检测循环已停止: stream={stream_id}',
+                'owners': 0,
             }
 
     def get_latest_boxes(self, stream_id: str) -> List[Dict[str, Any]]:
@@ -321,6 +358,10 @@ class DetectionLoopManager:
         return {
             'active_loops': len(statuses),
             'loops': statuses,
+            'owners': {
+                sid: len(owners)
+                for sid, owners in self._owners.items()
+            },
         }
 
     def stop_all(self):
@@ -330,6 +371,7 @@ class DetectionLoopManager:
                 loop.stop()
             self._loops.clear()
             self._ref_counts.clear()
+            self._owners.clear()
         logger.info("🛑 All detection loops stopped")
 
 

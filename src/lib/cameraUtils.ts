@@ -126,7 +126,7 @@ export const startCamera = async (
   error?: string;
 }> => {
   try {
-    const { width = 1280, height = 720, facingMode = 'environment' } = options;
+    const { width = 1280, height = 720, facingMode } = options;
     
     const constraints: MediaStreamConstraints = {
       video: deviceId 
@@ -134,7 +134,7 @@ export const startCamera = async (
         : { 
             width: { ideal: width },
             height: { ideal: height },
-            facingMode: { ideal: facingMode }
+            ...(facingMode ? { facingMode: { ideal: facingMode } } : {})
           }
     };
 
@@ -172,32 +172,39 @@ export const getCameraDevices = async (): Promise<CameraDevice[]> => {
     // 1. 获取物理摄像头设备（包括系统级虚拟摄像头如 OBS 虚拟摄像头）
     if (navigator.mediaDevices?.enumerateDevices) {
       try {
-        // 先直接枚举：Chrome/Edge 无需权限即可返回设备（只是 label 为空）
-        let devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(d => d.kind === 'videoinput');
-
-        if (videoDevices.length === 0) {
-          // Safari 在没有摄像头权限时 enumerateDevices 返回空列表。
-          // 需要先调 getUserMedia 弹出权限对话框，用户授权后才能枚举到设备。
-          try {
-            const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            tempStream.getTracks().forEach(t => t.stop());
-            devices = await navigator.mediaDevices.enumerateDevices();
-          } catch (permErr) {
-            // 用户拒绝或设备不可用 — 不是浏览器 bug，静默处理
-            console.warn('摄像头权限未授予，无法枚举本地设备:', (permErr as Error).message);
-          }
+        // 重要：先请求摄像头权限，这样浏览器才会返回完整的设备标签
+        // 如果没有权限，enumerateDevices() 返回的设备 label 字段会是空字符串
+        let hasPermission = false;
+        try {
+          // 尝试获取任意一个摄像头设备的权限（不指定具体设备）
+          const tempStream = await navigator.mediaDevices.getUserMedia({ 
+            video: true 
+          });
+          // 立即停止流，不占用摄像头资源
+          tempStream.getTracks().forEach(track => track.stop());
+          hasPermission = true;
+        } catch (permissionError) {
+          // 权限被拒绝或没有设备，继续尝试枚举（可能只能获取部分信息）
+          console.warn('无法获取摄像头权限，设备标签可能不完整:', permissionError);
         }
 
+        // 获取设备列表（如果已获得权限，标签会是完整的）
+        const devices = await navigator.mediaDevices.enumerateDevices();
         const physicalCameras = devices
           .filter(device => device.kind === 'videoinput')
           .map(device => ({
             deviceId: device.deviceId,
+            // 如果label为空，尝试使用设备ID的一部分作为标识
             label: device.label || `摄像头 ${device.deviceId.slice(0, 8)}...`,
             kind: device.kind,
             isVirtual: false
           }));
         allDevices.push(...physicalCameras);
+        
+        // 如果已获得权限，输出调试信息
+        if (hasPermission) {
+          console.log('已获取摄像头权限，设备列表包含完整标签:', physicalCameras.map(d => d.label));
+        }
       } catch (error) {
         console.warn('获取物理摄像头失败:', error);
       }
@@ -205,7 +212,9 @@ export const getCameraDevices = async (): Promise<CameraDevice[]> => {
 
     // 2. 获取虚拟流媒体摄像头
     try {
-      const activeStreams = await getActiveStreams();
+      const activeStreams = (await getActiveStreams()).filter(
+        (stream) => stream.enabled && (stream.is_active || stream.status === 'active')
+      );
       const virtualCameras = activeStreams.map(stream => ({
         deviceId: `stream-${stream.id}`, // 使用 stream- 前缀标识虚拟摄像头
         label: `📹 ${stream.name} (流媒体)`,

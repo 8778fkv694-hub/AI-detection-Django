@@ -6,7 +6,7 @@
  * 使用位置：LiveInspectionScreen
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend } from '@/lib/api';
 import { buildApiUrl } from '@/lib/config';
@@ -123,6 +123,8 @@ export const useLiveYoloDetection = ({
   handleDirectAIDetection,
   getTargetChineseName,
 }: UseLiveYoloDetectionOptions): UseLiveYoloDetectionResult => {
+  const backendLoopOwnerRef = useRef(`live:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+
   // YOLO检测
   const performYoloDetection = useCallback(async () => {
     if (!videoRef.current || !isCameraOn || !isYoloActive) return;
@@ -351,6 +353,7 @@ export const useLiveYoloDetection = ({
     addCapturedImage,
     handleDirectAIDetection,
     getTargetChineseName,
+    streamId,
     videoRef,
   ]);
 
@@ -381,12 +384,15 @@ export const useLiveYoloDetection = ({
         body: JSON.stringify({
           conf_threshold: detectionConfidence,
           ...(modelId ? { model_id: modelId } : {}),
+          owner_id: backendLoopOwnerRef.current,
         }),
       }).catch(e => console.error('启动后端Live YOLO检测循环失败:', e));
     } else {
       console.log(`🛑 正在请求后端停止Live YOLO检测循环: stream=${streamId}`);
       fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
       }).catch(e => console.error('停止后端Live YOLO检测循环失败:', e));
     }
 
@@ -394,10 +400,12 @@ export const useLiveYoloDetection = ({
       if (useBackendDetection && streamId) {
         fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
         }).catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
       }
     };
-  }, [isCameraOn, isYoloActive, streamId, detectionConfidence]);
+  }, [isCameraOn, isYoloActive, streamId, detectionConfidence, modelId]);
 
   // YOLO检测循环
   useEffect(() => {

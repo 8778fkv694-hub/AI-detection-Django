@@ -95,6 +95,9 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
     windowId: localState.windowId,
     selectedDeviceId: camera.selectedDeviceId,
   });
+  const backendStreamId = camera.selectedDeviceId?.startsWith('stream-')
+    ? camera.selectedDeviceId.replace('stream-', '')
+    : undefined;
 
   const capture = usePPECapture({
     videoRef,
@@ -103,6 +106,7 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
   });
 
   const detection = usePPEDetection({
+    streamId: backendStreamId,
     videoRef,
     detectionCanvasRef,
     isPpeActive: camera.isPpeActive,

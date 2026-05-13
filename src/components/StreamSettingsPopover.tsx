@@ -84,14 +84,32 @@ export const StreamSettingsPopover: React.FC = () => {
           <div className="mb-4">
             <div className="flex justify-between text-xs mb-1">
               <span className="text-muted-foreground">显示宽度</span>
-              <span className="text-foreground font-mono">{targetWidth}px</span>
+              <span className="text-foreground font-mono">
+                {targetWidth === 0 ? '原始' : `${targetWidth}px`}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 mb-2">
+              {[960, 1280, 0].map((width) => (
+                <button
+                  key={width}
+                  type="button"
+                  onClick={() => setTargetWidth(width)}
+                  className={`rounded border px-2 py-1 text-[11px] transition-colors ${
+                    targetWidth === width
+                      ? 'border-blue-500 bg-blue-500/15 text-blue-200'
+                      : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                  }`}
+                >
+                  {width === 0 ? '原始' : `${width}px`}
+                </button>
+              ))}
             </div>
             <input
               type="range"
               min={320}
               max={1920}
               step={80}
-              value={targetWidth}
+              value={targetWidth || 960}
               onChange={(e) => setTargetWidth(Number(e.target.value))}
               className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
@@ -108,7 +126,7 @@ export const StreamSettingsPopover: React.FC = () => {
             onClick={resetDefaults}
             className="w-full text-xs py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
           >
-            恢复默认 (12fps / 75% / 960px)
+            恢复默认 (20fps / 75% / 960px)
           </button>
         </div>
       )}

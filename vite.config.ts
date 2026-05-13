@@ -6,7 +6,7 @@ import fs from 'fs'
 // 检查SSL证书是否存在
 const sslKeyPath = './ssl/server.key';
 const sslCertPath = './ssl/server.crt';
-const hasSSL = true; // 启用HTTPS（macOS摄像头需要HTTPS）
+const hasSSL = false; // localhost HTTP 同样支持摄像头（secure context）
 
 export default defineConfig({
   plugins: [react()],

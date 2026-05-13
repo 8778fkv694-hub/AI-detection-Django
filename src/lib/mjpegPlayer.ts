@@ -35,6 +35,10 @@ export class MJPEGPlayer {
   // 用于截图/回调的隐藏 canvas
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  private drawIntervalId: number | null = null;
+  private captureTrack: (MediaStreamTrack & { requestFrame?: () => void }) | null = null;
+  private containerElement: HTMLElement | null = null;
+  private originalContainerPosition: string | null = null;
 
   // 重连机制
   private reconnectAttempts = 0;
@@ -98,7 +102,56 @@ export class MJPEGPlayer {
     params.set('quality', this.quality.toString());
     params.set('width', this.targetWidth.toString());
     params.set('fps', this.fps.toString());
+    params.set('_', Date.now().toString());
     return `${window.location.origin}/api/streams/${this.streamId}/mjpeg/?${params.toString()}`;
+  }
+
+  private restartDrawTimer(): void {
+    if (this.drawIntervalId !== null) {
+      window.clearInterval(this.drawIntervalId);
+      this.drawIntervalId = null;
+    }
+
+    if (!this.isPlaying) return;
+
+    this.drawIntervalId = window.setInterval(() => {
+      this.drawImageToCanvas();
+    }, Math.max(33, Math.round(1000 / this.fps)));
+  }
+
+  private drawImageToCanvas(): boolean {
+    const img = this.mjpegImg;
+    if (!this.isPlaying || img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+      return false;
+    }
+
+    if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
+      this.canvas.width = img.naturalWidth;
+      this.canvas.height = img.naturalHeight;
+      console.log(`MJPEGPlayer: Canvas分辨率 ${this.canvas.width}x${this.canvas.height}`);
+    }
+
+    this.ctx.drawImage(img, 0, 0, this.canvas.width, this.canvas.height);
+    this.captureTrack?.requestFrame?.();
+
+    this.frameCount++;
+    const now = Date.now();
+    if (now - this.lastFrameTime >= 1000) {
+      console.log(`MJPEGPlayer: 实际FPS: ${this.frameCount}`);
+      this.frameCount = 0;
+      this.lastFrameTime = now;
+    }
+
+    if (this.onFrame) {
+      this.canvas.toBlob((blob) => {
+        if (!blob || !this.onFrame) return;
+        const reader = new FileReader();
+        reader.onload = () => this.onFrame?.(reader.result as string);
+        reader.readAsDataURL(blob);
+      }, 'image/jpeg', 0.9);
+    }
+
+    return true;
   }
 
   async start(): Promise<void> {
@@ -134,9 +187,22 @@ export class MJPEGPlayer {
       throw error;
     });
 
-    // ✅ 关键：把 <img> 插入到 video 的父容器，直接显示
+    // 先把首帧画到 canvas，再 captureStream。否则浏览器会用 canvas 默认
+    // 300x150 建立 video track，PPE/实时检测抓到的就是低清画面。
+    if (!this.drawImageToCanvas()) {
+      this.stop();
+      throw new Error('MJPEG 首帧不可用');
+    }
+
+    // 关键：把 <img> 插入到 video 的父容器，直接显示
     const container = this.videoElement.parentElement;
     if (container) {
+      this.containerElement = container;
+      if (window.getComputedStyle(container).position === 'static') {
+        this.originalContainerPosition = container.style.position;
+        container.style.position = 'relative';
+      }
+
       // 不再隐藏 video—— AI 推理（useRealtimeDetectionLoop 等）会调用
       // drawImage(videoRef.current) 截图，video 必须可读。
       // <img> 用更高 z-index 盖在上面，浏览器只重绘 <img> 那一层，性能不受影响。
@@ -157,11 +223,14 @@ export class MJPEGPlayer {
       // 这条链路比"显示链路"宽松：浏览器内部限速，落后几帧也不影响 AI 抓取
       try {
         const stream = (this.canvas as any).captureStream
-          ? (this.canvas as any).captureStream(15)
+          ? (this.canvas as any).captureStream(this.fps)
           : null;
         if (stream) {
+          const [track] = stream.getVideoTracks();
+          this.captureTrack = (track as MediaStreamTrack & { requestFrame?: () => void }) || null;
           (this.videoElement as any).__originalSrcObject = this.videoElement.srcObject;
           this.videoElement.srcObject = stream;
+          this.captureTrack?.requestFrame?.();
           // 立刻 play() 让 video.videoWidth 在 canvas 第一帧后就有值
           this.videoElement.play().catch(() => {/* autoplay 限制下静默 */});
         }
@@ -170,38 +239,12 @@ export class MJPEGPlayer {
       }
     }
 
-    // 事件驱动：每次收到新帧立即回调
+    // MJPEG multipart 在 Firefox/Chromium 下不保证每帧触发 onload。
+    // 用定时 drawImage(img) 读取当前动态图像帧，保证 videoRef/capture 也同步更新。
+    this.restartDrawTimer();
+
     this.boundOnLoad = () => {
-      if (!this.isPlaying) return;
-      this.frameCount++;
-      const now = Date.now();
-      if (now - this.lastFrameTime >= 1000) {
-        console.log(`MJPEGPlayer: 实际FPS: ${this.frameCount}, 已渲染: ${this.frameCount} 帧`);
-        this.frameCount = 0;
-        this.lastFrameTime = now;
-      }
-
-      const img = this.mjpegImg;
-      if (img.naturalWidth === 0) return;
-
-      // 把当前帧画到 hidden canvas → captureStream 把它喂给 <video>
-      // 让 useRealtimeDetectionLoop 的 drawImage(videoRef.current) 拿到画面
-      if (this.canvas.width !== img.naturalWidth || this.canvas.height !== img.naturalHeight) {
-        this.canvas.width = img.naturalWidth;
-        this.canvas.height = img.naturalHeight;
-      }
-      this.ctx.drawImage(img, 0, 0);
-
-      // 老的 onFrame 回调链路保留
-      if (this.onFrame) {
-        this.canvas.toBlob((blob) => {
-          if (blob) {
-            const reader = new FileReader();
-            reader.onload = () => this.onFrame?.(reader.result as string);
-            reader.readAsDataURL(blob);
-          }
-        }, 'image/jpeg', 0.9);
-      }
+      this.drawImageToCanvas();
     };
     this.boundOnError = () => this._handleStreamError();
     this.mjpegImg.onload = this.boundOnLoad;
@@ -218,6 +261,10 @@ export class MJPEGPlayer {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.drawIntervalId !== null) {
+      window.clearInterval(this.drawIntervalId);
+      this.drawIntervalId = null;
     }
 
     // 解绑
@@ -244,16 +291,47 @@ export class MJPEGPlayer {
       if (stream && typeof stream.getTracks === 'function') {
         stream.getTracks().forEach((t) => t.stop());
       }
+      this.captureTrack = null;
       this.videoElement.srcObject = (this.videoElement as any).__originalSrcObject ?? null;
     } catch {
       // 忽略
     }
+
+    if (this.containerElement && this.originalContainerPosition !== null) {
+      this.containerElement.style.position = this.originalContainerPosition;
+    }
+    this.containerElement = null;
+    this.originalContainerPosition = null;
   }
 
   destroy(): void {
     this.stop();
     if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
     if (this.mjpegImg.parentNode) this.mjpegImg.parentNode.removeChild(this.mjpegImg);
+  }
+
+  updateSettings(options: Pick<MJPEGPlayerOptions, 'fps' | 'quality' | 'targetWidth'>): void {
+    const nextFps = options.fps ?? this.fps;
+    const nextQuality = options.quality ?? this.quality;
+    const nextTargetWidth = options.targetWidth ?? this.targetWidth;
+    const changed =
+      nextFps !== this.fps ||
+      nextQuality !== this.quality ||
+      nextTargetWidth !== this.targetWidth;
+
+    this.fps = nextFps;
+    this.quality = nextQuality;
+    this.targetWidth = nextTargetWidth;
+
+    if (!this.isPlaying || !changed) return;
+
+    this.frameCount = 0;
+    this.lastFrameTime = Date.now();
+    this.reconnectAttempts = 0;
+    this.restartDrawTimer();
+    const url = this.buildMjpegUrl();
+    console.log(`MJPEGPlayer: 更新显示参数并重连: ${url}`);
+    this.mjpegImg.src = url;
   }
 
   getIsPlaying(): boolean {

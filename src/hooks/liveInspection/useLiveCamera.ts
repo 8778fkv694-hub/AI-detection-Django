@@ -6,10 +6,11 @@
  * 使用位置：LiveInspectionScreen
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
+import { MJPEGPlayer } from '@/lib/mjpegPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
 import type { CameraDevice } from '@/lib/cameraUtils';
 import { useStreamSettingsStore } from '@/state/streamSettingsStore';
@@ -40,6 +41,8 @@ export interface UseLiveCameraResult {
   toggleCamera: () => Promise<void>;
   /** 手动抓拍 */
   handleCapture: () => Promise<void>;
+  /** MJPEG播放器引用 */
+  mjpegPlayerRef: React.MutableRefObject<MJPEGPlayer | null>;
   /** 流媒体播放器引用 */
   streamPlayerRef: React.MutableRefObject<StreamPlayer | null>;
   /** HLS播放器引用 */
@@ -59,16 +62,38 @@ export const useLiveCamera = ({
 }: UseLiveCameraOptions): UseLiveCameraResult => {
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
+  const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
 
   // 全局视频流显示设置（仅影响浏览器渲染，不影响 YOLO 检测）
   const globalFps = useStreamSettingsStore((s) => s.fps);
   const globalQuality = useStreamSettingsStore((s) => s.quality);
   const globalWidth = useStreamSettingsStore((s) => s.targetWidth);
 
+  useEffect(() => {
+    if (!isCameraOn || !selectedDeviceId?.startsWith('stream-')) return;
+
+    mjpegPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+    streamPlayerRef.current?.updateSettings({
+      fps: globalFps,
+      quality: globalQuality,
+      targetWidth: globalWidth,
+    });
+  }, [globalFps, globalQuality, globalWidth, isCameraOn, selectedDeviceId]);
+
   // 切换摄像头
   const toggleCamera = useCallback(async () => {
     if (isCameraOn) {
       console.log('关闭摄像头');
+
+      // 停止 MJPEG 播放器
+      if (mjpegPlayerRef.current) {
+        mjpegPlayerRef.current.destroy();
+        mjpegPlayerRef.current = null;
+      }
 
       // 停止流媒体播放器
       if (streamPlayerRef.current) {
@@ -114,6 +139,35 @@ export const useLiveCamera = ({
 
           console.log(`[${windowId}] 启动虚拟流媒体摄像头: ${streamId}，播放模式: ${playMode}`);
 
+          // 优先 MJPEG 直显（零双重编码，清晰度最高）
+          try {
+            console.log(`[${windowId}] 使用 MJPEG 流 (fps=${globalFps}, q=${globalQuality}, w=${globalWidth})`);
+            const mjpegPlayer = new MJPEGPlayer({
+              videoElement: videoRef.current,
+              streamId: streamId,
+              fps: globalFps,
+              quality: globalQuality,
+              targetWidth: globalWidth,
+              onError: (error) => {
+                console.error('MJPEG播放错误:', error);
+                mjpegPlayerRef.current?.destroy();
+                mjpegPlayerRef.current = null;
+                setIsCameraOn(false);
+                setIsYoloActive(false);
+              },
+            });
+
+            await mjpegPlayer.start();
+            mjpegPlayerRef.current = mjpegPlayer;
+            setIsCameraOn(true);
+            console.log(`[${windowId}] MJPEG 流启动成功`);
+            return;
+          } catch (mjpegError) {
+            console.warn(`[${windowId}] MJPEG 启动失败，回退:`, mjpegError);
+            mjpegPlayerRef.current?.destroy();
+            mjpegPlayerRef.current = null;
+          }
+
           if (playMode === 'ffmpeg') {
             try {
               console.log(`[${windowId}] 使用FFmpeg/HLS流 (fps=${globalFps}, w=${globalWidth})`);
@@ -153,7 +207,7 @@ export const useLiveCamera = ({
             }
           }
 
-          // 使用 JPEG 方案
+          // JPEG 逐帧轮询（最终回退）
           console.log(`[${windowId}] 使用JPEG流 (fps=${globalFps}, q=${globalQuality}, w=${globalWidth})`);
           const player = new StreamPlayer({
             videoElement: videoRef.current,
@@ -189,7 +243,6 @@ export const useLiveCamera = ({
             deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
             width: { ideal: 1280 },
             height: { ideal: 720 },
-            facingMode: 'environment',
           },
         };
 
@@ -247,6 +300,7 @@ export const useLiveCamera = ({
   return {
     toggleCamera,
     handleCapture,
+    mjpegPlayerRef,
     streamPlayerRef,
     hlsPlayerRef,
   };

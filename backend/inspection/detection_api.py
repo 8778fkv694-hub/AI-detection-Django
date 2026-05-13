@@ -58,13 +58,14 @@ def detection_loop_start(request, stream_id):
     try:
         data = json.loads(request.body)
         model_id = data.get('model_id')
+        owner_id = data.get('owner_id')
         conf_threshold = float(data.get('conf_threshold', 0.5))
         
         if not model_id:
             from .yolo import get_default_model_id
             model_id = get_default_model_id()
             
-        result = detection_loop_manager.start_loop(stream_id, model_id, conf_threshold)
+        result = detection_loop_manager.start_loop(stream_id, model_id, conf_threshold, owner_id)
         status_code = 200 if result['success'] else 400
         return JsonResponse(result, status=status_code)
         
@@ -78,7 +79,12 @@ def detection_loop_start(request, stream_id):
 def detection_loop_stop(request, stream_id):
     """停止指定流的检测循环"""
     try:
-        result = detection_loop_manager.stop_loop(stream_id)
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            data = {}
+        owner_id = data.get('owner_id')
+        result = detection_loop_manager.stop_loop(stream_id, owner_id)
         status_code = 200 if result['success'] else 404
         return JsonResponse(result, status=status_code)
         
