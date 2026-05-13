@@ -128,27 +128,19 @@ POST /detection-loop/stop/ 200
 
 下次要继续：
 
-1. 同步本机最新代码到 Jetson：
+1. Jetson 重新连上后，在 Mac 项目根目录运行一键部署验证脚本：
 
 ```bash
-rsync -az backend/inspection/stream_service.py backend/inspection/mjpeg_view.py backend/inspection/detection_loop.py backend/inspection/detection_api.py jetson:~/projects/AI-Detection/backend/inspection/
-rsync -az src/ jetson:~/projects/AI-Detection/src/
-rsync -az --delete dist/ jetson:~/projects/AI-Detection/dist/
+./scripts/deploy_verify_jetson.sh
 ```
 
-2. 重启：
+这个脚本会自动执行：
 
-```bash
-ssh -tt -i ~/.ssh/id_rsa -o IdentitiesOnly=yes -o ControlMaster=no -S none jetson 'sudo -S systemctl restart ai-backend ai-frontend-spa && sleep 3 && systemctl is-active ai-backend ai-frontend-spa'
-```
-
-3. 验证：
-
-```bash
-curl -sS http://127.0.0.1:8000/api/streams/detection-loop/status/
-curl -sS http://127.0.0.1:8000/api/streams/701efd6b-cf5c-4bea-b882-7914ffc65f79/detections/
-journalctl -u ai-backend -n 120 --no-pager
-```
+- 本地 `npm run build`
+- 同步 `stream_service.py`、`mjpeg_view.py`、`detection_loop.py`、`detection_api.py`
+- 同步 `src/` 和 `dist/`
+- 重启 `ai-backend`、`ai-frontend-spa`
+- 检查 stream manager、detection loop、最新 detections、MJPEG 5 秒帧数、后端日志
 
 预期：
 
@@ -177,7 +169,7 @@ npm run build
 
 ## 下次优先级
 
-1. 完成并部署 `owner_id` 防误停，重点解决 PPE 检测 loop 被 OCR/Live cleanup 停掉。
+1. 运行 `./scripts/deploy_verify_jetson.sh` 部署并验证 `owner_id` 防误停。
 2. 打开 PPE 页面，点击“开启摄像头”和“开始监控”，观察 `detection-loop/status` 是否稳定。
 3. 若 loop 稳定但 `boxes=[]`，用同一摄像头帧直接调用 YOLO 接口确认是否场景/模型未检出，而不是画框渲染问题。
 4. 若还需要更高显示帧率，测试把本地 USB 摄像头采集默认改为 `1280x720 MJPG 30fps`，再测 `/mjpeg-cv2` 5 秒帧数。
