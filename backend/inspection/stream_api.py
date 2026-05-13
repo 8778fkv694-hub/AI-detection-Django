@@ -499,7 +499,7 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
         stream_id = str(stream.id)
         try:
             stream_manager.remove_stream(stream_id)
-            detection_loop_manager.stop_loop(stream_id)
+            detection_loop_manager.stop_loop(stream_id, force=True)
         except Exception as e:
             logger.error(f"Failed to stop stream {stream_id}: {e}")
 
@@ -521,6 +521,7 @@ def stream_manager_status(request):
 def stop_all_streams(request):
     """停止所有流媒体"""
     try:
+        detection_loop_manager.stop_all()
         stream_manager.stop_all_streams()
         
         # 更新数据库中的状态
@@ -541,6 +542,7 @@ def restart_all_streams(request):
     """重启所有启用的流媒体"""
     try:
         # 先停止所有流
+        detection_loop_manager.stop_all()
         stream_manager.stop_all_streams()
         
         # 获取所有启用的流

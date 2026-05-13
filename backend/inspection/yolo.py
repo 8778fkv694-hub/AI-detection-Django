@@ -35,7 +35,7 @@ def load_model(model_id: Optional[str] = None):
     if model_id in _model_pool:
         _model_last_used[model_id] = datetime.now()
         _current_model_id = model_id
-        logger.info(f"📦 从模型池获取模型: {model_id}")
+        logger.debug(f"📦 从模型池获取模型: {model_id}")
         return _model_pool[model_id]
 
     with _lock:
@@ -419,4 +419,3 @@ def get_ppe_model_info() -> Dict[str, Any]:
         'required': True,
         'description': '系统必须依赖PPE检测模型进行个人防护装备检测'
     }
-

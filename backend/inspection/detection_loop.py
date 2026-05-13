@@ -38,6 +38,9 @@ class DetectionLoop:
         self._thread: Optional[threading.Thread] = None
         self.is_running: bool = False
         self._error_message: str = ""
+        self._config_version: int = 0
+        self._duplicate_frame_skips: int = 0
+        self._last_processed_frame_version: int = 0
 
     def start(self):
         """启动检测线程"""
@@ -67,12 +70,14 @@ class DetectionLoop:
 
     def update_config(self, model_id: Optional[str] = None, conf_threshold: Optional[float] = None):
         """动态更新检测配置（线程安全）"""
-        if model_id is not None:
-            self.model_id = model_id
-            logger.info(f"DetectionLoop {self.stream_id}: model changed to {model_id}")
-        if conf_threshold is not None:
-            self.conf_threshold = conf_threshold
-            logger.info(f"DetectionLoop {self.stream_id}: conf changed to {conf_threshold}")
+        with self._lock:
+            if model_id is not None:
+                self.model_id = model_id
+                logger.info(f"DetectionLoop {self.stream_id}: model changed to {model_id}")
+            if conf_threshold is not None:
+                self.conf_threshold = conf_threshold
+                logger.info(f"DetectionLoop {self.stream_id}: conf changed to {conf_threshold}")
+            self._config_version += 1
 
     def _detect_loop(self):
         """核心检测循环：只做推理，不做编码"""
@@ -80,6 +85,7 @@ class DetectionLoop:
         from .yolo import run_inference
 
         fps_window: List[float] = []
+        last_processed_signature: Optional[Tuple[int, int]] = None
 
         logger.info(f"DetectionLoop {self.stream_id}: thread started")
 
@@ -99,16 +105,26 @@ class DetectionLoop:
 
                 # 检查帧版本，避免对同一帧重复推理
                 current_version = getattr(reader, 'frame_version', 0)
+                with self._lock:
+                    current_config_version = self._config_version
+                    model_id = self.model_id
+                    conf_threshold = self.conf_threshold
+                current_signature = (current_version, current_config_version)
+                if current_signature == last_processed_signature:
+                    self._duplicate_frame_skips += 1
+                    time.sleep(0.005)
+                    continue
 
                 # YOLO 推理
                 frame_height, frame_width = frame.shape[:2]
                 t0 = time.time()
                 boxes = run_inference(
                     frame,
-                    conf=self.conf_threshold,
-                    model_id=self.model_id,
+                    conf=conf_threshold,
+                    model_id=model_id,
                 )
                 elapsed = time.time() - t0
+                last_processed_signature = current_signature
 
                 # 滑动窗口计算 FPS
                 fps_window.append(elapsed)
@@ -121,6 +137,7 @@ class DetectionLoop:
                 with self._lock:
                     self._frame_id_counter += 1
                     self._latest_raw_frame = frame  # 存引用，不编码
+                    self._last_processed_frame_version = current_version
                     self._latest_result = {
                         'stream_id': self.stream_id,
                         'frame_id': self._frame_id_counter,
@@ -131,7 +148,7 @@ class DetectionLoop:
                         'detect_fps': round(avg_fps, 1),
                         'inference_ms': round(elapsed * 1000, 1),
                         'timestamp': time.time(),
-                        'model_id': self.model_id,
+                        'model_id': model_id,
                     }
                     self._error_message = ""
 
@@ -185,7 +202,10 @@ class DetectionLoop:
             'detect_fps': result['detect_fps'] if result else 0,
             'inference_ms': result['inference_ms'] if result else 0,
             'frame_id': result['frame_id'] if result else 0,
+            'frame_version': result['frame_version'] if result else 0,
             'box_count': len(result['boxes']) if result else 0,
+            'duplicate_frame_skips': self._duplicate_frame_skips,
+            'last_processed_frame_version': self._last_processed_frame_version,
             'error': self._error_message,
         }
 
@@ -216,66 +236,114 @@ class DetectionLoopManager:
     ) -> Dict[str, Any]:
         """启动指定流的检测循环（引用计数，支持多消费者）"""
         with self._lock:
-            # 递增引用计数。新版前端传 owner_id，同一 owner 重复 start 只算一次；
-            # 这样 OCR/实时检测/PPE 共享同一个 stream 时，一个页面的 cleanup
-            # 不会误停另一个页面正在使用的检测循环。
-            if owner_id:
-                owners = self._owners.setdefault(stream_id, set())
-                owners.add(owner_id)
-                self._ref_counts[stream_id] = len(owners)
-            else:
-                self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
+            from .yolo import MAX_MODEL_POOL_SIZE
+
+            def add_reference() -> int:
+                # 新版前端传 owner_id，同一 owner 重复 start 只算一次；
+                # 这样 OCR/实时检测/PPE 共享同一个 stream 时，一个页面的 cleanup
+                # 不会误停另一个页面正在使用的检测循环。
+                if owner_id:
+                    owners = self._owners.setdefault(stream_id, set())
+                    owners.add(owner_id)
+                    self._ref_counts[stream_id] = len(owners)
+                else:
+                    self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
+                return self._ref_counts.get(stream_id, 0)
+
+            def active_model_counts() -> Dict[str, int]:
+                counts: Dict[str, int] = {}
+                for loop in self._loops.values():
+                    if not loop.is_running:
+                        continue
+                    counts[loop.model_id] = counts.get(loop.model_id, 0) + 1
+                return counts
+
+            def would_exceed_model_capacity(
+                next_model_id: str,
+                replacing_model_id: Optional[str] = None,
+            ) -> tuple[bool, int]:
+                counts = active_model_counts()
+                if replacing_model_id and counts.get(replacing_model_id, 0) <= 1:
+                    counts.pop(replacing_model_id, None)
+                counts[next_model_id] = counts.get(next_model_id, 0) + 1
+                return len(counts) > MAX_MODEL_POOL_SIZE, len(counts)
 
             # 如果已有循环在跑
             if stream_id in self._loops and self._loops[stream_id].is_running:
                 old_loop = self._loops[stream_id]
                 # 如果配置没变，直接返回
                 if old_loop.model_id == model_id and old_loop.conf_threshold == conf_threshold:
+                    owners = add_reference()
                     return {
                         'success': True,
                         'message': f'检测循环已在运行: stream={stream_id}',
                         'status': old_loop.get_status(),
-                        'owners': self._ref_counts.get(stream_id, 0),
+                        'owners': owners,
                     }
-                # 配置变了，更新配置
-                old_loop.update_config(model_id=model_id, conf_threshold=conf_threshold)
-                return {
-                        'success': True,
-                        'message': f'检测循环配置已更新: stream={stream_id}',
+
+                exceeds_capacity, candidate_count = would_exceed_model_capacity(
+                    model_id,
+                    replacing_model_id=old_loop.model_id,
+                )
+                if exceeds_capacity:
+                    return {
+                        'success': False,
+                        'message': (
+                            f'模型池将超限（{candidate_count}/{MAX_MODEL_POOL_SIZE}），'
+                            f'无法将 stream={stream_id} 切换到模型 {model_id}。'
+                            f'请先停止一个使用其他模型的检测循环。'
+                        ),
                         'status': old_loop.get_status(),
                         'owners': self._ref_counts.get(stream_id, 0),
                     }
 
+                # 配置变了，更新配置
+                owners = add_reference()
+                old_loop.update_config(model_id=model_id, conf_threshold=conf_threshold)
+                return {
+                    'success': True,
+                    'message': f'检测循环配置已更新: stream={stream_id}',
+                    'status': old_loop.get_status(),
+                    'owners': owners,
+                }
+
             # 检查模型池容量
-            from .yolo import MAX_MODEL_POOL_SIZE
-            active_models = set(
-                loop.model_id for loop in self._loops.values() if loop.is_running
-            )
-            if len(active_models) >= MAX_MODEL_POOL_SIZE and model_id not in active_models:
+            exceeds_capacity, candidate_count = would_exceed_model_capacity(model_id)
+            if exceeds_capacity:
                 return {
                     'success': False,
                     'message': (
-                        f'模型池已满（{len(active_models)}/{MAX_MODEL_POOL_SIZE}），'
+                        f'模型池已满（{candidate_count}/{MAX_MODEL_POOL_SIZE}），'
                         f'无法加载新模型 {model_id}。请先停止一个检测循环。'
                     ),
+                    'owners': self._ref_counts.get(stream_id, 0),
                 }
 
             # 创建并启动新循环
             loop = DetectionLoop(stream_id, model_id, conf_threshold)
             loop.start()
             self._loops[stream_id] = loop
+            owners = add_reference()
 
             return {
                 'success': True,
                 'message': f'检测循环已启动: stream={stream_id}, model={model_id}',
                 'status': loop.get_status(),
-                'owners': self._ref_counts.get(stream_id, 0),
+                'owners': owners,
             }
 
-    def stop_loop(self, stream_id: str, owner_id: Optional[str] = None) -> Dict[str, Any]:
+    def stop_loop(
+        self,
+        stream_id: str,
+        owner_id: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
         """停止指定流的检测循环（引用计数归零才真停）"""
         with self._lock:
-            if owner_id:
+            if force:
+                self._owners.pop(stream_id, None)
+                self._ref_counts[stream_id] = 0
+            elif owner_id:
                 owners = self._owners.setdefault(stream_id, set())
                 if owner_id not in owners:
                     return {

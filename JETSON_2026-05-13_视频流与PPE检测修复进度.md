@@ -97,6 +97,22 @@ GET /api/streams/.../mjpeg/?quality=85&width=960&fps=22&_=...
   - 只有有 overlay 框时才 `frame.copy()`。
   - sleep 改为扣除编码耗时：`sleep(max(0, frame_interval - elapsed))`。
 
+### 6. DetectionLoop 重复推理同一帧
+
+已修复本地代码，尚未同步到 Jetson 验证：
+
+- `backend/inspection/detection_loop.py`
+  - 之前虽然读取了 `reader.frame_version`，但没有真正跳过相同帧。
+  - 当 YOLO 推理快于摄像头发布新帧时，检测线程会对同一帧重复推理，造成 Jetson GPU/CPU 空转。
+  - 现在按 `(frame_version, config_version)` 去重；同一帧同一配置只推理一次。
+  - `status` 中新增 `duplicate_frame_skips` 和 `last_processed_frame_version`，便于实机确认是否生效。
+  - 已补上模型切换时的模型池容量检查，避免多个检测循环在 Jetson 上反复驱逐/重载 YOLO 模型。
+  - `stop_loop(..., force=True)` 用于系统级流媒体停止，避免 stream 被停后检测线程继续空转。
+- `backend/inspection/stream_api.py`
+  - 停止/重启流媒体时会同步强制停止检测循环，释放 active loop 和模型池占位。
+- `backend/inspection/yolo.py`
+  - 模型池命中日志从 `info` 降为 `debug`，避免高频推理时刷爆 journald。
+
 ## 本轮发现但尚未完成部署验证的问题
 
 ### PPE 检测循环会被误停
@@ -117,6 +133,7 @@ POST /detection-loop/stop/ 200
   - 增加 owner/ref owner 管理。
   - 带 `owner_id` 的 stop 只能停止自己启动的 loop。
   - 有 owner 持有时，无 owner 的旧 stop 不再误停 loop。
+  - `start_loop()` 不再在模型池容量检查前提前登记 owner，避免启动失败后残留假引用。
 - `backend/inspection/detection_api.py`
   - start/stop 支持 JSON 字段 `owner_id`。
 - `src/hooks/safetyEquipment/usePPEDetection.ts`
@@ -137,7 +154,7 @@ POST /detection-loop/stop/ 200
 这个脚本会自动执行：
 
 - 本地 `npm run build`
-- 同步 `stream_service.py`、`mjpeg_view.py`、`detection_loop.py`、`detection_api.py`
+- 同步 `stream_service.py`、`mjpeg_view.py`、`detection_loop.py`、`detection_api.py`、`stream_api.py`、`yolo.py`
 - 同步 `src/` 和 `dist/`
 - 重启 `ai-backend`、`ai-frontend-spa`
 - 检查 stream manager、detection loop、最新 detections、MJPEG 5 秒帧数、后端日志

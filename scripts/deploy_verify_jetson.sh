@@ -72,6 +72,8 @@ rsync -az \
   backend/inspection/mjpeg_view.py \
   backend/inspection/detection_loop.py \
   backend/inspection/detection_api.py \
+  backend/inspection/stream_api.py \
+  backend/inspection/yolo.py \
   "$SSH_TARGET:$REMOTE_DIR/backend/inspection/"
 
 log "Syncing frontend source and built dist"
