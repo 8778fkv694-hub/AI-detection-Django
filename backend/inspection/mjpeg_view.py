@@ -4,6 +4,7 @@ MJPEG 直推流视图
 零 base64 编码开销、零 JSON 包装，延迟最低。
 """
 import time
+import os
 import cv2
 import logging
 from django.http import StreamingHttpResponse, JsonResponse
@@ -12,6 +13,8 @@ from django.views.decorators.csrf import csrf_exempt
 from .stream_service import stream_manager
 
 logger = logging.getLogger(__name__)
+
+IS_JETSON = os.path.exists('/etc/nv_tegra_release')
 
 
 def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
@@ -32,6 +35,7 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     last_seen_id = -1  # 帧去重，避免相同帧反复编码
     last_new_frame_time = time.time()  # 心跳：记录最后一次拿到新帧的时间
+    last_overload_log_time = 0.0
     FRAME_TIMEOUT = 10.0  # 超过 10 秒没拿到新帧，判定流已死，主动退出
 
     # 检测框颜色映射（BGR 格式）
@@ -123,7 +127,26 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
         )
 
         elapsed = time.time() - frame_started_at
-        time.sleep(max(0.0, frame_interval - elapsed))
+        if elapsed >= frame_interval:
+            # Jetson 上 JPEG 编码慢于目标 FPS 时，继续追帧会把 Django worker
+            # 打满 100% CPU，最终表现为摄像头和 YOLO 同时卡顿。这里主动让出
+            # 一小段时间，宁可降低显示帧率，也不让编码线程长期无休眠空转。
+            now = time.time()
+            if now - last_overload_log_time >= 5.0:
+                logger.warning(
+                    "MJPEG encoder overloaded for stream %s: encode=%.1fms target_interval=%.1fms "
+                    "(quality=%s width=%s fps=%s)",
+                    stream_id,
+                    elapsed * 1000,
+                    frame_interval * 1000,
+                    quality,
+                    target_width,
+                    fps,
+                )
+                last_overload_log_time = now
+            time.sleep(min(frame_interval, max(0.005, elapsed * 0.15)))
+        else:
+            time.sleep(frame_interval - elapsed)
 
 
 @csrf_exempt
@@ -167,8 +190,18 @@ def mjpeg_stream(request, stream_id):
     width = int(request.GET.get('width', 960))
     fps = int(request.GET.get('fps', 12))
     fps = max(1, min(60, fps))
+    raw = request.GET.get('raw', '0') in ('1', 'true', 'True')
     enhance = request.GET.get('enhance', '0') in ('1', 'true', 'True')
     overlay = request.GET.get('overlay', '1') not in ('0', 'false', 'False')
+
+    if IS_JETSON and not raw:
+        # cv2 MJPEG 是 CPU JPEG 重编码路径。Jetson 上原始 1080p/高质量/高 FPS
+        # 会把 CPU 打满，导致“设置 25fps 但实际 10fps 以下”的卡顿症状更严重。
+        # 需要原始画质排查时可显式加 raw=1。
+        if width == 0 or width > 1280:
+            width = 1280
+        quality = min(quality, 85)
+        fps = min(fps, 20)
 
     response = StreamingHttpResponse(
         _mjpeg_generator(stream_id, quality, width, fps, enhance, overlay),

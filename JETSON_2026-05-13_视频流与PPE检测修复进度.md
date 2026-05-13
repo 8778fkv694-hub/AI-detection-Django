@@ -138,6 +138,30 @@ venv/bin/python scripts/local_jetson_burnin.py --duration 60 --stream-fps 8 --in
 - `burnin_stream_2 duplicate_frame_skips: 789`
 - 失败启动返回 `owners: 0`，没有假 owner 残留。
 
+### 8. 摄像头卡顿专项：MJPEG 多客户端与追帧
+
+已修复本地代码，尚未同步到 Jetson 验证：
+
+- `src/lib/mjpegPlayer.ts`
+  - 补上与 `StreamPlayer` 一致的 `BroadcastChannel` 互斥机制。
+  - OCR、PPE、实时检测打开同一个 stream 时，后打开的页面会通知旧页面释放 MJPEG 播放器。
+  - 避免多个页面同时拉 `/mjpeg/`，导致 Jetson 对同一摄像头重复 JPEG 编码。
+- `src/screens/StreamSettingsScreen.tsx`
+  - 设置页实时预览也加入同一 stream 的互斥广播。
+  - 当 PPE/实时检测/OCR 接管摄像头流时，设置页预览会自动停止。
+- `backend/inspection/mjpeg_view.py`
+  - 修复 cv2 MJPEG 生成器“编码慢于目标帧率时继续追帧”的问题。
+  - 当 `cv2.imencode` 耗时超过目标帧间隔时，主动 sleep 让出 CPU，避免 Django worker 长期 100% 占用。
+  - Jetson 上默认保护 cv2 MJPEG：非 `raw=1` 时限制为最高 `1280px / q85 / 20fps`，避免原始 1080p+高质量重编码造成摄像头和 YOLO 同时卡顿。
+
+本地已验证：
+
+- `npm run build` 通过。
+- `venv/bin/python backend/manage.py check` 通过。
+- 模拟 `imencode=25ms`、目标 `60fps` 时，MJPEG 生成器触发 overload sleep：
+  - `overload_sleep_count: 4`
+  - 日志出现 `MJPEG encoder overloaded ...`
+
 ## 本轮发现但尚未完成部署验证的问题
 
 ### PPE 检测循环会被误停

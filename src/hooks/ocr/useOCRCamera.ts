@@ -178,6 +178,7 @@ export const useOCRCamera = ({
           fps: globalFps,
           quality: globalQuality,
           targetWidth: globalWidth,
+          windowId: windowId,
           onError: (error) => {
             console.error('MJPEGPlayer 错误:', error);
             if (initializingMjpeg) {
@@ -188,6 +189,11 @@ export const useOCRCamera = ({
               setIsCameraOn(false);
               setIsRealtimeActive(false);
             });
+          },
+          onStreamTaken: () => {
+            toast.error('摄像头流已被其他窗口接管');
+            setIsCameraOn(false);
+            setIsRealtimeActive(false);
           },
         });
 

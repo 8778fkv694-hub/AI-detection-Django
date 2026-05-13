@@ -186,6 +186,8 @@ const StreamSettingsScreen: React.FC = () => {
   const imgRef = useRef<HTMLImageElement>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
+  const previewBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const previewWindowIdRef = useRef(`stream-settings-preview-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -334,6 +336,10 @@ const StreamSettingsScreen: React.FC = () => {
       streamPlayerRef.current.destroy();
       streamPlayerRef.current = null;
     }
+    if (previewBroadcastChannelRef.current) {
+      previewBroadcastChannelRef.current.close();
+      previewBroadcastChannelRef.current = null;
+    }
     if (imgRef.current) {
       imgRef.current.src = '';
     }
@@ -371,6 +377,24 @@ const StreamSettingsScreen: React.FC = () => {
         // JPG 模式：通过同源 SPA 代理拉 MJPEG，避免 HTTPS 页面跨端口直连失败。
         if (!imgRef.current) return;
         setPreviewTransport('mjpeg');
+        try {
+          const channel = new BroadcastChannel(`stream_${selectedStreamId}`);
+          previewBroadcastChannelRef.current = channel;
+          channel.onmessage = (event) => {
+            const { type, windowId } = event.data || {};
+            if (type !== 'REQUEST_STREAM' || windowId === previewWindowIdRef.current) return;
+            console.log(`[StreamSettings] 流 ${selectedStreamId} 被窗口 ${windowId} 接管，停止设置页预览`);
+            stopLivePreview();
+          };
+          channel.postMessage({
+            type: 'REQUEST_STREAM',
+            windowId: previewWindowIdRef.current,
+            streamId: selectedStreamId,
+            timestamp: Date.now(),
+          });
+        } catch (broadcastError) {
+          console.warn('[StreamSettings] BroadcastChannel 不可用，预览互斥功能关闭', broadcastError);
+        }
         const mjpegUrl = `${window.location.origin}/api/streams/${selectedStreamId}/mjpeg/?quality=80&width=960&fps=12`;
         console.log(`[StreamSettings] MJPEG 预览: ${mjpegUrl}`);
 

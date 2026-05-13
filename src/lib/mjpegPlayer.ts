@@ -12,6 +12,8 @@ export interface MJPEGPlayerOptions {
   targetWidth?: number;
   onError?: (error: Error) => void;
   onFrame?: (frameData: string) => void;
+  onStreamTaken?: () => void;
+  windowId?: string;
 }
 
 export class MJPEGPlayer {
@@ -22,6 +24,8 @@ export class MJPEGPlayer {
   private targetWidth: number;
   private onError?: (error: Error) => void;
   private onFrame?: (frameData: string) => void;
+  private onStreamTaken?: () => void;
+  private windowId: string;
 
   private isPlaying = false;
   private frameCount = 0;
@@ -45,6 +49,7 @@ export class MJPEGPlayer {
   private maxReconnects = 3;
   private reconnectDelay = 1000; // 重连间隔 ms
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private broadcastChannel: BroadcastChannel | null = null;
 
   constructor(options: MJPEGPlayerOptions) {
     this.videoElement = options.videoElement;
@@ -54,6 +59,8 @@ export class MJPEGPlayer {
     this.targetWidth = options.targetWidth ?? 0;  // 0=不缩图，省掉 cv2.resize
     this.onError = options.onError;
     this.onFrame = options.onFrame;
+    this.onStreamTaken = options.onStreamTaken;
+    this.windowId = options.windowId || `mjpeg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 
     // 创建隐藏的 canvas（仅用于 onFrame 截图回调）
     this.canvas = document.createElement('canvas');
@@ -72,6 +79,43 @@ export class MJPEGPlayer {
     this.mjpegImg.style.left = '-99999px';
     this.mjpegImg.style.opacity = '0';
     document.body.appendChild(this.mjpegImg);
+
+    this.initBroadcastChannel();
+  }
+
+  private initBroadcastChannel(): void {
+    try {
+      this.broadcastChannel = new BroadcastChannel(`stream_${this.streamId}`);
+      this.broadcastChannel.onmessage = (event) => {
+        const { type, windowId } = event.data || {};
+        if (type !== 'REQUEST_STREAM' || windowId === this.windowId) return;
+
+        console.log(
+          `MJPEGPlayer: 收到其他窗口 ${windowId} 请求使用流 ${this.streamId}，当前窗口将释放`
+        );
+        if (this.isPlaying) {
+          this.onStreamTaken?.();
+          this.stop();
+        }
+      };
+    } catch (error) {
+      console.warn('MJPEGPlayer: BroadcastChannel 不可用，跨窗口通信功能将被禁用', error);
+    }
+  }
+
+  private broadcastStreamRequest(): void {
+    if (!this.broadcastChannel) return;
+    try {
+      this.broadcastChannel.postMessage({
+        type: 'REQUEST_STREAM',
+        windowId: this.windowId,
+        streamId: this.streamId,
+        timestamp: Date.now(),
+      });
+      console.log(`MJPEGPlayer: 广播占用流 ${this.streamId} 的请求 (窗口 ${this.windowId})`);
+    } catch (error) {
+      console.warn('MJPEGPlayer: 广播消息失败', error);
+    }
   }
 
   private _handleStreamError(): void {
@@ -164,6 +208,7 @@ export class MJPEGPlayer {
     this.frameCount = 0;
     this.lastFrameTime = Date.now();
     this.reconnectAttempts = 0;  // 重置重连计数
+    this.broadcastStreamRequest();
 
     const mjpegUrl = this.buildMjpegUrl();
     console.log(`MJPEGPlayer: 开始播放 MJPEG 流: ${mjpegUrl}`);
@@ -306,6 +351,15 @@ export class MJPEGPlayer {
 
   destroy(): void {
     this.stop();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.close();
+        console.log(`MJPEGPlayer: BroadcastChannel 已关闭 (窗口 ${this.windowId})`);
+      } catch (error) {
+        console.warn('MJPEGPlayer: 关闭 BroadcastChannel 失败', error);
+      }
+      this.broadcastChannel = null;
+    }
     if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
     if (this.mjpegImg.parentNode) this.mjpegImg.parentNode.removeChild(this.mjpegImg);
   }

@@ -194,10 +194,17 @@ export const useSafetyCamera = ({
               fps: globalFps,
               quality: globalQuality,
               targetWidth: globalWidth,
+              windowId: windowId,
               onError: (error) => {
                 console.error('MJPEG播放错误:', error);
                 mjpegPlayerRef.current?.destroy();
                 mjpegPlayerRef.current = null;
+                setIsCameraOn(false);
+                setIsMonitoring(false);
+                setIsPpeActive(false);
+              },
+              onStreamTaken: () => {
+                toast.error('摄像头流已被其他窗口接管');
                 setIsCameraOn(false);
                 setIsMonitoring(false);
                 setIsPpeActive(false);
