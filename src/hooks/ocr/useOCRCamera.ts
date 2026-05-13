@@ -139,8 +139,39 @@ export const useOCRCamera = ({
           }
         }
 
-        // 使用 MJPEG 直连方案（最低延迟、最高清晰度）
-        console.log(`[${windowId}] 使用 MJPEG 直连（fps=${globalFps}, q=${globalQuality}, w=${globalWidth}）`);
+        const startFramePollingFallback = async (reason: unknown) => {
+          console.warn(`[${windowId}] MJPEG 启动失败，回退到 /frame/ 轮询`, reason);
+          mjpegPlayerRef.current?.destroy();
+          mjpegPlayerRef.current = null;
+          if (!videoRef.current) {
+            throw reason instanceof Error ? reason : new Error('MJPEG 启动失败');
+          }
+          const fallbackPlayer = new StreamPlayer({
+            videoElement: videoRef.current,
+            streamId: streamId,
+            fps: Math.min(globalFps, 12),
+            quality: Math.min(globalQuality, 90),
+            targetWidth: globalWidth || 1280,
+            windowId: windowId,
+            onError: (error) => {
+              console.error('StreamPlayer 兼容预览错误:', error);
+              toast.error(`流媒体播放失败: ${error.message}`);
+              streamPlayerRef.current?.destroy();
+              streamPlayerRef.current = null;
+              setIsCameraOn(false);
+              setIsRealtimeActive(false);
+            },
+          });
+          streamPlayerRef.current = fallbackPlayer;
+          await fallbackPlayer.start();
+          setIsCameraOn(true);
+          toast('MJPEG 透传不可用，已自动切到兼容预览', { icon: '⚠️' });
+          console.log(`[${windowId}] /frame/ 轮询摄像头启动成功`);
+        };
+
+        // 优先使用 MJPEG 流；失败时自动回退到已验证可用的 /frame/ 轮询。
+        console.log(`[${windowId}] 使用 MJPEG 流（fps=${globalFps}, q=${globalQuality}, w=${globalWidth}）`);
+        let initializingMjpeg = true;
         const player = new MJPEGPlayer({
           videoElement: videoRef.current,
           streamId: streamId,
@@ -149,18 +180,28 @@ export const useOCRCamera = ({
           targetWidth: globalWidth,
           onError: (error) => {
             console.error('MJPEGPlayer 错误:', error);
-            toast.error(`MJPEG 流播放失败: ${error.message}`);
-            mjpegPlayerRef.current?.destroy();
-            mjpegPlayerRef.current = null;
-            setIsCameraOn(false);
-            setIsRealtimeActive(false);
+            if (initializingMjpeg) {
+              return;
+            }
+            void startFramePollingFallback(error).catch((fallbackError) => {
+              toast.error(`流媒体播放失败: ${fallbackError instanceof Error ? fallbackError.message : '未知错误'}`);
+              setIsCameraOn(false);
+              setIsRealtimeActive(false);
+            });
           },
         });
 
         mjpegPlayerRef.current = player;
-        await player.start();
+        try {
+          await player.start();
+        } catch (mjpegError) {
+          initializingMjpeg = false;
+          await startFramePollingFallback(mjpegError);
+          return;
+        }
+        initializingMjpeg = false;
         setIsCameraOn(true);
-        console.log(`[${windowId}] MJPEG 直连摄像头启动成功`);
+        console.log(`[${windowId}] MJPEG 摄像头启动成功`);
         return;
       }
 

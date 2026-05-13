@@ -9,6 +9,7 @@
 import { useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend } from '@/lib/api';
+import { buildApiUrl } from '@/lib/config';
 import type { BackendYoloDetection } from '@/types';
 
 export interface UseLiveYoloDetectionOptions {
@@ -137,9 +138,8 @@ export const useLiveYoloDetection = ({
 
       if (useBackendDetection && streamId) {
         // 解耦模式：拉取后端最新 JSON 结果
-        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
         try {
-          const response = await fetch(`${apiBaseUrl}/streams/${streamId}/detections/`);
+          const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
           if (response.ok) {
             const result = await response.json();
             detections = result.boxes || [];
@@ -230,9 +230,8 @@ export const useLiveYoloDetection = ({
 
               // 获取图像进行处理
               if (useBackendDetection && streamId) {
-                const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
                 try {
-                  const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+                  const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
                   if (res.ok) {
                     const blob = await res.blob();
                     const objectUrl = URL.createObjectURL(blob);
@@ -372,12 +371,11 @@ export const useLiveYoloDetection = ({
   // ====== 后端检测循环生命周期管理 ======
   useEffect(() => {
     const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
     if (!useBackendDetection || !streamId) return;
 
     if (isCameraOn && isYoloActive) {
       console.log(`🚀 正在请求后端启动Live YOLO检测循环: stream=${streamId}`);
-      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/start/`, {
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -387,14 +385,14 @@ export const useLiveYoloDetection = ({
       }).catch(e => console.error('启动后端Live YOLO检测循环失败:', e));
     } else {
       console.log(`🛑 正在请求后端停止Live YOLO检测循环: stream=${streamId}`);
-      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
         method: 'POST',
       }).catch(e => console.error('停止后端Live YOLO检测循环失败:', e));
     }
 
     return () => {
       if (useBackendDetection && streamId) {
-        fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+        fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
           method: 'POST',
         }).catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
       }

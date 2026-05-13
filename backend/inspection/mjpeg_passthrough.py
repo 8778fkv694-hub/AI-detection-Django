@@ -20,6 +20,7 @@
 """
 import logging
 import os
+import select
 import shlex
 import signal
 import subprocess
@@ -175,15 +176,17 @@ def _build_ffmpeg_cmd(device: str, width: int, height: int, fps: int) -> list[st
     ]
 
 
-def _stream_ffmpeg_output(proc: subprocess.Popen, device: str):
+def _stream_ffmpeg_output(proc: subprocess.Popen, device: str, first_chunk: bytes = b''):
     """把 ffmpeg stdout 按块直接转发给 HTTP 客户端。
 
     finally 里**一定**杀进程组 + 解登记。即便客户端突然消失，
     BrokenPipeError 触发后这里会把 ffmpeg 干净收掉。
     """
     try:
+        if first_chunk:
+            yield first_chunk
         while True:
-            chunk = proc.stdout.read(8192)
+            chunk = os.read(proc.stdout.fileno(), 8192)
             if not chunk:
                 break
             yield chunk
@@ -204,6 +207,13 @@ def mjpeg_passthrough_view(request, stream_id):
         height (默认 720)
         fps    (默认 10, 前端显示用低帧率减轻 Jetson 负担)
     """
+    # 默认使用 stream_manager/cv2 reader 输出 MJPEG。它和检测循环、首页服务状态
+    # 共用同一条读帧链路，不会独占 /dev/video0。ffmpeg 零拷贝透传仍保留为
+    # ?passthrough=1 的手动排查/性能测试模式，避免生产预览抢占摄像头。
+    if request.GET.get('passthrough') not in ('1', 'true', 'True'):
+        from .mjpeg_view import mjpeg_stream
+        return mjpeg_stream(request, stream_id)
+
     # USB 摄像头 MJPG 必须给 ffmpeg 一个具体分辨率，width=0 当作"用默认"
     width = int(request.GET.get('width', 1280)) or 1280
     height = int(request.GET.get('height', 720)) or 720
@@ -262,13 +272,29 @@ def mjpeg_passthrough_view(request, stream_id):
             'error': f'ffmpeg 启动失败 (exit={proc.returncode})',
         }, status=500)
 
+    first_chunk = b''
+    ready, _, _ = select.select([proc.stdout], [], [], 2.0)
+    if ready:
+        try:
+            first_chunk = os.read(proc.stdout.fileno(), 8192)
+        except BlockingIOError:
+            first_chunk = b''
+
+    if not first_chunk:
+        logger.warning("ffmpeg passthrough produced no frame for %s, falling back to cv2 MJPEG", device)
+        _kill_proc_tree(proc)
+        if cv2_was_running:
+            _restart_cv2_reader(stream_id, device, meta)
+        from .mjpeg_view import mjpeg_stream
+        return mjpeg_stream(request, stream_id)
+
     # 登记到 active procs，下次请求来时能驱逐我们
     with _REGISTRY_GUARD:
         _ACTIVE_PROCS[device] = proc
 
     def cleanup_after_stream():
         try:
-            yield from _stream_ffmpeg_output(proc, device)
+            yield from _stream_ffmpeg_output(proc, device, first_chunk)
         finally:
             if cv2_was_running:
                 _restart_cv2_reader(stream_id, device, meta)

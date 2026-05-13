@@ -125,7 +125,7 @@ export async function analyzeImage(image: string, config: AIConfig, standard?: S
 
 // **这是正确的函数定义**
 export async function testAIConnection(config: AIConfig): Promise<void> {
-    const response = await apiRequest('/ai-configs/test-connection', {
+    const response = await apiRequest('/ai-configs/test-connection/', {
         method: 'POST',
         body: JSON.stringify({ config }),
     });

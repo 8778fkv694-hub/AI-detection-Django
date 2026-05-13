@@ -40,6 +40,26 @@ const SAMPLE_IMAGE_B64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQ
 
 const COMPACT_SAMPLE_IMAGE = 'data:image/jpeg;base64,' + SAMPLE_IMAGE_B64;
 
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  fallback: T,
+  timeoutMs: number = 8000
+): Promise<T> => {
+  let timer: number | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = window.setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+  }
+};
+
 async function triggerQRModelLoad(): Promise<{ ok: boolean; detail?: string }> {
   try {
     const res = await apiFetch('/wechat-qr/detect/', {
@@ -209,7 +229,15 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const [backendOk, yoloResult, aiResult, ollamaResult, ocrResult, qrResult, streamResult, preprocessResult, statsData] = await Promise.all([
-      backendPromise, yoloPromise, aiPromise, ollamaPromise, ocrPromise, qrPromise, streamPromise, preprocessPromise, statsPromise,
+      withTimeout(backendPromise, false, 5000),
+      withTimeout(yoloPromise, { ok: false, detail: '检查超时' }, 10000),
+      withTimeout(aiPromise, { ok: false, detail: '检查超时' }, 8000),
+      withTimeout(ollamaPromise, { ok: false, detail: '检查超时' }, 8000),
+      withTimeout(ocrPromise, { ok: false, detail: '检查超时' }, 8000),
+      withTimeout(qrPromise, { ok: false, detail: '检查超时' }, 8000),
+      withTimeout(streamPromise, { ok: false, detail: '检查超时' }, 5000),
+      withTimeout(preprocessPromise, { ok: false, detail: '检查超时' }, 5000),
+      withTimeout(statsPromise, null, 8000),
     ]);
 
     const serviceList: ServiceStatus[] = [

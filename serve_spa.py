@@ -119,9 +119,15 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
                     if header.lower() not in ('transfer-encoding', 'connection'):
                         self.send_header(header, value)
                 self.end_headers()
-                
-                # 发送响应体
-                self.wfile.write(response.read())
+
+                # 分块转发响应体。MJPEG 是无限流，不能 response.read() 等完整响应，
+                # 否则浏览器只收到 200 头但永远拿不到画面帧。
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
                 
         except urllib.error.HTTPError as e:
             self.send_response(e.code)
@@ -132,6 +138,8 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(e.read())
         except urllib.error.URLError as e:
             self.send_error(502, f"Backend unavailable: {e.reason}")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except Exception as e:
             self.send_error(500, f"Proxy error: {str(e)}")
     
@@ -174,7 +182,11 @@ def run_server(port: int = 3005, directory: str = "./dist",
 ╚════════════════════════════════════════════════════════╝
 """)
 
-    httpd = socketserver.TCPServer(("0.0.0.0", port), handler)
+    class ThreadingReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    httpd = ThreadingReusableTCPServer(("0.0.0.0", port), handler)
     if certfile and keyfile:
         import ssl
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

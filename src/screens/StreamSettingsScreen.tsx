@@ -181,6 +181,7 @@ const StreamSettingsScreen: React.FC = () => {
   const [hlsOptions, setHlsOptions] = useState<HlsOptionsState>(DEFAULT_HLS_OPTIONS);
 
   const [isLivePreview, setIsLivePreview] = useState(false);
+  const [previewTransport, setPreviewTransport] = useState<'hls' | 'mjpeg' | 'frame'>('mjpeg');
   const videoRef = useRef<HTMLVideoElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
@@ -336,6 +337,7 @@ const StreamSettingsScreen: React.FC = () => {
     if (imgRef.current) {
       imgRef.current.src = '';
     }
+    setPreviewTransport('mjpeg');
     setIsLivePreview(false);
   }, []);
 
@@ -351,6 +353,7 @@ const StreamSettingsScreen: React.FC = () => {
     try {
       if (mode === 'ffmpeg') {
         if (!videoRef.current) return;
+        setPreviewTransport('hls');
         const hlsUrl = getHLSPlaylistUrl(selectedStreamId);
         const player = new HLSPlayer({
           videoElement: videoRef.current,
@@ -365,31 +368,62 @@ const StreamSettingsScreen: React.FC = () => {
         hlsPlayerRef.current = player;
         setIsLivePreview(true);
       } else {
-        // JPG 模式：直接用 <img> 标签直连后端 MJPEG 流，零中转、最低延迟
+        // JPG 模式：通过同源 SPA 代理拉 MJPEG，避免 HTTPS 页面跨端口直连失败。
         if (!imgRef.current) return;
-        const protocol = window.location.protocol;
-        const host = window.location.hostname;
-        const mjpegUrl = `${protocol}//${host}:8000/api/streams/${selectedStreamId}/mjpeg/?quality=95&width=0`;
-        console.log(`[StreamSettings] MJPEG 直连: ${mjpegUrl}`);
+        setPreviewTransport('mjpeg');
+        const mjpegUrl = `${window.location.origin}/api/streams/${selectedStreamId}/mjpeg/?quality=80&width=960&fps=12`;
+        console.log(`[StreamSettings] MJPEG 预览: ${mjpegUrl}`);
 
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(() => {
-            reject(new Error('MJPEG 流连接超时'));
-          }, 10000);
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(() => {
+              reject(new Error('MJPEG 流连接超时'));
+            }, 10000);
 
-          const img = imgRef.current!;
-          img.onload = () => {
-            window.clearTimeout(timeout);
-            resolve();
-          };
-          img.onerror = () => {
-            window.clearTimeout(timeout);
-            reject(new Error('MJPEG 流连接失败'));
-          };
-          img.src = mjpegUrl;
-        });
+            const img = imgRef.current!;
+            img.onload = () => {
+              window.clearTimeout(timeout);
+              resolve();
+            };
+            img.onerror = () => {
+              window.clearTimeout(timeout);
+              reject(new Error('MJPEG 流连接失败'));
+            };
+            img.src = mjpegUrl;
+          });
 
-        setIsLivePreview(true);
+          setIsLivePreview(true);
+        } catch (mjpegError) {
+          console.warn('[StreamSettings] MJPEG 预览失败，回退到 /frame/ 轮询', mjpegError);
+          if (imgRef.current) {
+            imgRef.current.src = '';
+          }
+          setPreviewTransport('frame');
+          setIsLivePreview(true);
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+          if (!videoRef.current) {
+            throw mjpegError;
+          }
+          const player = new StreamPlayer({
+            videoElement: videoRef.current,
+            streamId: selectedStreamId,
+            fps: 10,
+            quality: 90,
+            targetWidth: 1280,
+            windowId: 'stream-settings-preview',
+            onError: (err) => {
+              console.error('帧轮询预览失败:', err);
+              toast.error('实时预览连接失败');
+              streamPlayerRef.current?.destroy();
+              streamPlayerRef.current = null;
+              setIsLivePreview(false);
+            },
+          });
+          streamPlayerRef.current = player;
+          await player.start();
+          setIsLivePreview(true);
+          toast('MJPEG 透传不可用，已自动切到兼容预览', { icon: '⚠️' });
+        }
       }
     } catch (error) {
       console.error('启动预览失败:', error);
@@ -1104,7 +1138,7 @@ const StreamSettingsScreen: React.FC = () => {
                           className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/70 group"
                         >
                           <div className={`relative aspect-video w-full bg-black ${isLivePreview ? 'flex items-center justify-center' : 'hidden'}`}>
-                            {selectedStream?.play_mode === 'ffmpeg' ? (
+                            {selectedStream?.play_mode === 'ffmpeg' || previewTransport === 'frame' ? (
                               <video
                                 ref={videoRef}
                                 className="h-full w-full object-contain"
@@ -1122,7 +1156,7 @@ const StreamSettingsScreen: React.FC = () => {
                             <div className="absolute left-4 top-4 flex items-center gap-2">
                               <Badge className="bg-rose-500 text-white animate-pulse">LIVE</Badge>
                               <span className="rounded bg-black/50 px-2 py-0.5 text-[10px] text-white backdrop-blur">
-                                {selectedStream?.play_mode === 'ffmpeg' ? 'HLS' : 'MJPEG 直连'}
+                                {previewTransport === 'hls' ? 'HLS' : previewTransport === 'frame' ? 'JPG 轮询' : 'MJPEG'}
                               </span>
                             </div>
                           </div>

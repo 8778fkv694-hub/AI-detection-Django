@@ -1,7 +1,7 @@
 /**
  * 流媒体管理 API
  */
-import { apiRequest, apiFetch, API_BASE_URL, directBackendFetch } from '@/lib/config';
+import { apiRequest, apiFetch, API_BASE_URL } from '@/lib/config';
 import type {
   StreamSource,
   StreamSourceCreate,
@@ -18,8 +18,8 @@ export const getStreamSources = async (): Promise<StreamSource[]> => {
   return await apiRequest<StreamSource[]>('/streams/');
 };
 
-const directBackendApiRequest = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
-  const response = await directBackendFetch(endpoint, options);
+const streamApiRequest = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+  const response = await apiFetch(endpoint, options);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -129,7 +129,7 @@ export const stopStream = async (id: string): Promise<{ message: string; stream:
  * 获取流媒体状态
  */
 export const getStreamStatus = async (id: string): Promise<StreamStatusResponse> => {
-  return await directBackendApiRequest<StreamStatusResponse>(`/streams/${id}/status/`);
+  return await streamApiRequest<StreamStatusResponse>(`/streams/${id}/status/`);
 };
 
 /**
@@ -147,21 +147,21 @@ export const getStreamFrame = async (
   }
 
   // 直接使用ViewSet action端点
-  return await directBackendApiRequest<StreamFrameResponse>(`/streams/${id}/frame/?${params.toString()}`);
+  return await streamApiRequest<StreamFrameResponse>(`/streams/${id}/frame/?${params.toString()}`);
 };
 
 /**
  * 获取所有激活的流媒体
  */
 export const getActiveStreams = async (): Promise<StreamSource[]> => {
-  return await directBackendApiRequest<StreamSource[]>('/streams/active_streams/');
+  return await streamApiRequest<StreamSource[]>('/streams/active_streams/');
 };
 
 /**
  * 获取流管理器状态
  */
 export const getStreamManagerStatus = async (): Promise<StreamManagerStatus> => {
-  return await directBackendApiRequest<StreamManagerStatus>('/streams/manager/status/');
+  return await streamApiRequest<StreamManagerStatus>('/streams/manager/status/');
 };
 
 /**
@@ -237,18 +237,8 @@ export const stopHLSStream = async (id: string): Promise<{
 
 /**
  * 获取HLS播放列表URL
- * 在生产环境下强制使用绝对 URL 指向后端，避免端口漂移
  */
 export const getHLSPlaylistUrl = (id: string): string => {
-  // 如果 API_BASE_URL 是相对路径且处于 3001/3005 端口（生产部署），尝试构建绝对路径
-  const port = window.location.port;
-  if (!API_BASE_URL.startsWith('http') && (port === '3001' || port === '3005')) {
-    const protocol = window.location.protocol;
-    const host = window.location.hostname;
-    return `${protocol}//${host}:8000/api/streams/${id}/hls/playlist.m3u8/`;
-  }
-
-  // 正常组合（API_BASE_URL 已经处理了绝对/相对逻辑）
   const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
   return `${baseUrl}/streams/${id}/hls/playlist.m3u8/`;
 };

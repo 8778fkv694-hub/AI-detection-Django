@@ -30,6 +30,13 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         days = options['days']
         dry_run = options['dry_run']
+        if days < 1:
+            raise ValueError('--days 必须大于 0')
+        if days > 36500:
+            self.stdout.write(
+                self.style.WARNING('--days 超过 36500，已按 36500 天处理')
+            )
+            days = 36500
         cutoff = timezone.now() - timedelta(days=days)
 
         count = InspectionResult.objects.filter(timestamp__lt=cutoff).count()

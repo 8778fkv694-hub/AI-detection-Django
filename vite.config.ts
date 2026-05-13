@@ -6,7 +6,7 @@ import fs from 'fs'
 // 检查SSL证书是否存在
 const sslKeyPath = './ssl/server.key';
 const sslCertPath = './ssl/server.crt';
-const hasSSL = false; // 临时禁用SSL，使用HTTP
+const hasSSL = true; // 启用HTTPS（macOS摄像头需要HTTPS）
 
 export default defineConfig({
   plugins: [react()],

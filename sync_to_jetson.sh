@@ -13,6 +13,7 @@ JETSON_PROJECT_PATH="/home/wenyili/projects/AI-Detection"
 
 # 本地项目路径
 LOCAL_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SSH_CTL="$HOME/.ssh/control-${JETSON_USER}@${JETSON_IP}:22"
 
 echo "╔════════════════════════════════════════════════════════╗"
 echo "║     🚀 同步代码到 Jetson Nano                          ║"
@@ -30,6 +31,38 @@ if ! ping -c 1 -W 2 $JETSON_IP > /dev/null 2>&1; then
     exit 1
 fi
 echo "✅ Jetson 在线"
+echo ""
+
+# 清理 Mac 休眠后残留的 ControlMaster socket，避免同步/SSH 首次连接卡住
+if [ -S "$SSH_CTL" ] && ! ssh -o ControlPath="$SSH_CTL" -O check "$JETSON_USER@$JETSON_IP" >/dev/null 2>&1; then
+    echo "🧹 清理过期 SSH ControlMaster: $SSH_CTL"
+    rm -f "$SSH_CTL"
+fi
+
+echo "🔍 检查 Jetson 磁盘..."
+DISK_INFO=$(ssh "$JETSON_USER@$JETSON_IP" "df -h ~ 2>/dev/null | tail -1")
+DISK_USAGE=$(echo "$DISK_INFO" | awk '{print $5}' | sed 's/%//')
+DISK_AVAIL=$(echo "$DISK_INFO" | awk '{print $4}')
+if [ -z "$DISK_USAGE" ]; then
+    echo "❌ 无法获取 Jetson 磁盘信息，取消同步"
+    rm -f "$EXCLUDE_FILE" 2>/dev/null || true
+    exit 1
+fi
+echo "   Jetson 磁盘: ${DISK_USAGE}% (可用: ${DISK_AVAIL})"
+if [ "$DISK_USAGE" -ge 95 ]; then
+    echo "❌ Jetson 磁盘已满 (${DISK_USAGE}%)，同步取消"
+    echo "   清理: ssh jetson '~/projects/AI-Detection/bin/cleanup_daily.sh'"
+    exit 1
+elif [ "$DISK_USAGE" -ge 85 ]; then
+    echo "⚠️  Jetson 磁盘偏高 (${DISK_USAGE}%)"
+    echo "   建议先运行: ssh jetson '~/projects/AI-Detection/bin/cleanup_daily.sh'"
+    read -p "仍继续同步? (y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "已取消"
+        exit 0
+    fi
+fi
 echo ""
 
 # 创建排除文件列表

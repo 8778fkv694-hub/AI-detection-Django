@@ -86,7 +86,7 @@ export const FusionModeSettingsPanel: React.FC<FusionModeSettingsPanelProps> = (
         }
       } else {
         console.log('🔗 测试在线模型连接...');
-        const response = await apiFetch('/ai-configs/test-connection', {
+        const response = await apiFetch('/ai-configs/test-connection/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ config })

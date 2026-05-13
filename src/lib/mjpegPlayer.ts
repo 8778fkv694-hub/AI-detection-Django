@@ -45,9 +45,9 @@ export class MJPEGPlayer {
   constructor(options: MJPEGPlayerOptions) {
     this.videoElement = options.videoElement;
     this.streamId = options.streamId;
-    this.fps = options.fps || 25;
-    this.quality = options.quality || 95;
-    this.targetWidth = options.targetWidth ?? 0;
+    this.fps = options.fps || 12;      // Jetson 友好默认：12fps 即可流畅预览
+    this.quality = options.quality || 75;  // 75 画质对检测预览足够，不高耗 CPU
+    this.targetWidth = options.targetWidth ?? 960;
     this.onError = options.onError;
     this.onFrame = options.onFrame;
 
@@ -82,7 +82,7 @@ export class MJPEGPlayer {
       // 重置 img.src 触发重新连接（MJPEG 的 multipart 流会重新握手）
       this.reconnectTimer = setTimeout(() => {
         if (!this.isPlaying) return;
-        const url = this.buildDirectMjpegUrl();
+        const url = this.buildMjpegUrl();
         console.log(`MJPEGPlayer: 重连中... ${url}`);
         this.mjpegImg.src = url;
       }, this.reconnectDelay * this.reconnectAttempts);  // 递增延迟：1s, 2s, 3s
@@ -93,14 +93,12 @@ export class MJPEGPlayer {
     }
   }
 
-  private buildDirectMjpegUrl(): string {
-    const protocol = window.location.protocol;
-    const host = window.location.hostname;
+  private buildMjpegUrl(): string {
     const params = new URLSearchParams();
     params.set('quality', this.quality.toString());
     params.set('width', this.targetWidth.toString());
     params.set('fps', this.fps.toString());
-    return `${protocol}//${host}:8000/api/streams/${this.streamId}/mjpeg/?${params.toString()}`;
+    return `${window.location.origin}/api/streams/${this.streamId}/mjpeg/?${params.toString()}`;
   }
 
   async start(): Promise<void> {
@@ -114,8 +112,8 @@ export class MJPEGPlayer {
     this.lastFrameTime = Date.now();
     this.reconnectAttempts = 0;  // 重置重连计数
 
-    const mjpegUrl = this.buildDirectMjpegUrl();
-    console.log(`MJPEGPlayer: 开始播放 MJPEG 流 (真正直连): ${mjpegUrl}`);
+    const mjpegUrl = this.buildMjpegUrl();
+    console.log(`MJPEGPlayer: 开始播放 MJPEG 流: ${mjpegUrl}`);
 
     // 等待第一帧
     await new Promise<void>((resolve, reject) => {

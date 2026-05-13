@@ -6,10 +6,13 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 WorkingDirectory=/home/wenyili/projects/AI-Detection
-ExecStartPre=-/usr/bin/pkill -f "serve_spa.py --port 3005"
-ExecStart=/usr/bin/python3 /home/wenyili/projects/AI-Detection/serve_spa.py --port 3005 --dir /home/wenyili/projects/AI-Detection/dist
+Environment="PYTHONUNBUFFERED=1"
+ExecStartPre=-/bin/bash -c '/usr/bin/fuser -k -TERM 3005/tcp 2>/dev/null; sleep 1; /usr/bin/fuser -k -KILL 3005/tcp 2>/dev/null; true'
+ExecStart=/home/wenyili/projects/AI-Detection/venv/bin/python /home/wenyili/projects/AI-Detection/serve_spa.py --port 3005 --dir /home/wenyili/projects/AI-Detection/dist --cert /home/wenyili/projects/AI-Detection/server.crt --key /home/wenyili/projects/AI-Detection/server.key --backend http://127.0.0.1:8000
 Restart=always
 RestartSec=3
+StartLimitIntervalSec=120
+StartLimitBurst=15
 
 [Install]
 WantedBy=graphical-session.target

@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
-import { apiFetch } from '@/lib/config';
+import { apiFetch, buildApiUrl } from '@/lib/config';
 import { calculateSharpnessAsync } from '@/lib/imageQuality/sharpnessCalculator';
 import { drawDetections } from '@/lib/ocr/detectionDrawer';
 import type { BestROIData } from '@/hooks/ocr/useROIProcessor';
@@ -145,8 +145,6 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     setAiAnalysisResult, setFinalResult,
   } = options;
 
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-
   // P0修复：使用ref保存performRealtimeDetection函数，避免setInterval闭包问题
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
   const handleCaptureWorkflowRef = useRef<((validSelectedTargets: string[], currentDataUrl: string, currentBase64: string) => Promise<void>) | null>(null);
@@ -201,7 +199,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         try {
           if (useBackendDetection && streamId) {
             // 解耦模式：从后端获取与检测框完全匹配的高清原图
-            const res = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+            const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
             if (!res.ok) return;
             const blob = await res.blob();
             const objectUrl = URL.createObjectURL(blob);
@@ -349,7 +347,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         if (useBackendDetection && streamId) {
           // ====== 解耦模式：拉取后端最新 JSON 结果（<1KB） ======
           try {
-            const response = await fetch(`${apiBaseUrl}/streams/${streamId}/detections/`);
+            const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
             if (response.ok) {
               const result = await response.json();
               detections = result.boxes || [];
@@ -531,7 +529,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           if (useBackendDetection && streamId && !finalDataUrl) {
             try {
               // M9修复：先取snapshot（带frame_id），再验证detection帧一致性
-              const snapRes = await fetch(`${apiBaseUrl}/streams/${streamId}/snapshot/`);
+              const snapRes = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
               if (snapRes.ok) {
                 const snapFrameId = parseInt(snapRes.headers.get('X-Frame-ID') || '0', 10);
                 const blob = await snapRes.blob();
@@ -549,7 +547,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
                 let detFrameId = 0;
                 if (useBackendDetection && streamId) {
                   // 重新拉一次detections，确保拿到与snapshot接近的最新结果
-                  const detRes = await fetch(`${apiBaseUrl}/streams/${streamId}/detections/`);
+                  const detRes = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
                   if (detRes.ok) {
                     const detResult = await detRes.json();
                     detFrameId = detResult.frame_id || 0;
@@ -1172,7 +1170,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       // 启动后端检测循环
       const detectionType = (modelConfig?.detection_type as string) || 'ocr_inspection';
       console.log(`🚀 正在请求后端启动检测循环: stream=${streamId}, model=${currentModelId || 'default'}`);
-      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/start/`, {
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1183,7 +1181,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     } else {
       // 暂停或停止时关闭后端检测循环
       console.log(`🛑 正在请求后端停止检测循环: stream=${streamId}`);
-      fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
         method: 'POST',
       }).catch(e => console.error('停止后端检测循环失败:', e));
     }
@@ -1191,12 +1189,12 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     return () => {
       // 卸载组件时停止检测循环
       if (useBackendDetection && streamId) {
-        fetch(`${apiBaseUrl}/streams/${streamId}/detection-loop/stop/`, {
+        fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
           method: 'POST',
         }).catch(e => console.error('卸载时停止后端检测循环失败:', e));
       }
     };
-  }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, detectionConfidence, modelConfig, apiBaseUrl]);
+  }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, detectionConfidence, modelConfig]);
 
   // 实时检测循环
   // 注意：workflowState 故意不放进 deps —— 否则 workflow 状态一变化就 clearInterval，
@@ -1210,11 +1208,13 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
     if (isRealtimeActive && isCameraOn) {
       if (detectionInterval === 0) {
+        // 自适应模式：100ms ≈ 10 FPS，对后端检测循环轮询已足够快
+        // 10ms 会跑出 100 req/s，在 Jetson GIL 竞争下白白拖垮 MJPEG 和推理
         const runAdaptive = async () => {
           if (!isRunning) return;
           await performRealtimeDetectionRef.current?.();
           if (isRunning) {
-            setTimeout(runAdaptive, 10);
+            setTimeout(runAdaptive, 100);
           }
         };
         runAdaptive();
