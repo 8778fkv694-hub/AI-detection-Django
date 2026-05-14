@@ -13,6 +13,72 @@ export interface CameraDevice {
   streamSource?: StreamSource; // 如果是虚拟摄像头，保存流媒体源信息
 }
 
+export interface GetCameraDevicesOptions {
+  requestPermission?: boolean;
+  includeStreams?: boolean;
+  authorizedCamera?: CameraDevice | null;
+}
+
+export const buildCameraVideoConstraints = (
+  deviceId?: string | null,
+  options: {
+    width?: number;
+    height?: number;
+    facingMode?: 'user' | 'environment';
+  } = {}
+): MediaTrackConstraints => {
+  const { width = 1280, height = 720, facingMode } = options;
+  const constraints: MediaTrackConstraints = {
+    width: { ideal: width },
+    height: { ideal: height },
+  };
+
+  if (deviceId) {
+    constraints.deviceId = { exact: deviceId };
+  }
+  if (facingMode) {
+    constraints.facingMode = { ideal: facingMode };
+  }
+
+  return constraints;
+};
+
+export const isCameraSecureContext = (): boolean => {
+  const isLocalhost =
+    /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+  return window.isSecureContext || window.location.protocol === 'https:' || isLocalhost;
+};
+
+const normalizePhysicalCamera = (device: MediaDeviceInfo): CameraDevice => {
+  const nativeDeviceId = device.deviceId?.trim() || '';
+  return {
+    deviceId: nativeDeviceId,
+    label: device.label || (nativeDeviceId ? `摄像头 ${nativeDeviceId.slice(0, 8)}...` : '未授权摄像头'),
+    kind: device.kind,
+    isVirtual: false,
+  };
+};
+
+export const cameraFromTrack = (track?: MediaStreamTrack): CameraDevice | null => {
+  if (!track) return null;
+  const settings = track.getSettings() as MediaTrackSettings & { deviceId?: string };
+  const nativeDeviceId = settings.deviceId?.trim() || '';
+  if (!nativeDeviceId) return null;
+
+  return {
+    deviceId: nativeDeviceId,
+    label: track.label || `摄像头 ${nativeDeviceId.slice(0, 8)}...`,
+    kind: 'videoinput',
+    isVirtual: false,
+  };
+};
+
+const pushUniqueCamera = (devices: CameraDevice[], camera: CameraDevice) => {
+  if (!devices.some((item) => item.deviceId === camera.deviceId)) {
+    devices.push(camera);
+  }
+};
+
 /**
  * 检查摄像头访问权限和可用性
  */
@@ -23,6 +89,15 @@ export const checkCameraAccess = async (): Promise<{
   isHttpAccess?: boolean;
 }> => {
   try {
+    const isHttpAccess = !isCameraSecureContext();
+    if (isHttpAccess) {
+      return {
+        isAvailable: false,
+        error: '摄像头访问需要 HTTPS 协议或 localhost 访问。Safari 下请使用 http://localhost:3303/。',
+        isHttpAccess: true
+      };
+    }
+
     // 检查是否支持mediaDevices API
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
       return {
@@ -31,28 +106,12 @@ export const checkCameraAccess = async (): Promise<{
       };
     }
 
-    // 检查是否使用HTTPS或localhost
-    const isLocalhost = window.location.hostname === 'localhost' || 
-                       window.location.hostname === '127.0.0.1' ||
-                       window.location.hostname.startsWith('192.168.') ||
-                       window.location.hostname.startsWith('10.') ||
-                       window.location.hostname.startsWith('172.');
-    
-    const isHttpAccess = !isLocalhost && window.location.protocol !== 'https:';
-    
-    if (isHttpAccess) {
-      return {
-        isAvailable: false,
-        error: '摄像头访问需要HTTPS协议或localhost访问。当前使用HTTP访问，摄像头功能受限。',
-        isHttpAccess: true
-      };
-    }
-
     // 尝试获取摄像头权限
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { width: 640, height: 480 } 
       });
+      const authorizedCamera = cameraFromTrack(stream.getVideoTracks()[0]);
       
       // 立即停止流
       stream.getTracks().forEach(track => track.stop());
@@ -61,11 +120,11 @@ export const checkCameraAccess = async (): Promise<{
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices
         .filter(device => device.kind === 'videoinput')
-        .map(device => ({
-          deviceId: device.deviceId,
-          label: device.label || `摄像头 ${device.deviceId.slice(0, 8)}...`,
-          kind: device.kind
-        }));
+        .filter(device => device.deviceId?.trim())
+        .map(normalizePhysicalCamera);
+      if (authorizedCamera && !videoDevices.some((device) => device.deviceId === authorizedCamera.deviceId)) {
+        videoDevices.unshift(authorizedCamera);
+      }
 
       return {
         isAvailable: true,
@@ -129,13 +188,7 @@ export const startCamera = async (
     const { width = 1280, height = 720, facingMode } = options;
     
     const constraints: MediaStreamConstraints = {
-      video: deviceId 
-        ? { deviceId: { exact: deviceId } }
-        : { 
-            width: { ideal: width },
-            height: { ideal: height },
-            ...(facingMode ? { facingMode: { ideal: facingMode } } : {})
-          }
+      video: buildCameraVideoConstraints(deviceId, { width, height, facingMode }),
     };
 
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -163,68 +216,69 @@ export const stopCamera = (stream?: MediaStream): void => {
 
 /**
  * 获取摄像头设备列表（包含物理摄像头和虚拟流媒体摄像头）
- * 注意：为了获取完整的设备标签（包括OBS虚拟摄像头等），需要先请求摄像头权限
+ * 注意：默认只枚举设备，不主动 getUserMedia，避免刷新设备列表时抢占 OBS/系统摄像头。
+ * 需要授权时应在用户点击“开启”后单独调用 getUserMedia，再把 track 信息传入 authorizedCamera。
  */
-export const getCameraDevices = async (): Promise<CameraDevice[]> => {
+export const getCameraDevices = async (
+  options: GetCameraDevicesOptions = {}
+): Promise<CameraDevice[]> => {
   try {
+    const {
+      requestPermission = false,
+      includeStreams = true,
+      authorizedCamera: knownAuthorizedCamera = null,
+    } = options;
     const allDevices: CameraDevice[] = [];
 
     // 1. 获取物理摄像头设备（包括系统级虚拟摄像头如 OBS 虚拟摄像头）
-    if (navigator.mediaDevices?.enumerateDevices) {
+    if (isCameraSecureContext() && navigator.mediaDevices?.enumerateDevices) {
       try {
-        // 重要：先请求摄像头权限，这样浏览器才会返回完整的设备标签
-        // 如果没有权限，enumerateDevices() 返回的设备 label 字段会是空字符串
-        let hasPermission = false;
-        try {
-          // 尝试获取任意一个摄像头设备的权限（不指定具体设备）
-          const tempStream = await navigator.mediaDevices.getUserMedia({ 
-            video: true 
-          });
-          // 立即停止流，不占用摄像头资源
-          tempStream.getTracks().forEach(track => track.stop());
-          hasPermission = true;
-        } catch (permissionError) {
-          // 权限被拒绝或没有设备，继续尝试枚举（可能只能获取部分信息）
-          console.warn('无法获取摄像头权限，设备标签可能不完整:', permissionError);
+        let authorizedCamera = knownAuthorizedCamera;
+        if (requestPermission) {
+          try {
+            const tempStream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+            });
+            authorizedCamera = cameraFromTrack(tempStream.getVideoTracks()[0]);
+            tempStream.getTracks().forEach(track => track.stop());
+          } catch (permissionError) {
+            console.warn('无法获取摄像头权限，设备标签可能不完整:', permissionError);
+          }
         }
 
-        // 获取设备列表（如果已获得权限，标签会是完整的）
         const devices = await navigator.mediaDevices.enumerateDevices();
         const physicalCameras = devices
           .filter(device => device.kind === 'videoinput')
-          .map(device => ({
-            deviceId: device.deviceId,
-            // 如果label为空，尝试使用设备ID的一部分作为标识
-            label: device.label || `摄像头 ${device.deviceId.slice(0, 8)}...`,
-            kind: device.kind,
-            isVirtual: false
-          }));
-        allDevices.push(...physicalCameras);
-        
-        // 如果已获得权限，输出调试信息
-        if (hasPermission) {
-          console.log('已获取摄像头权限，设备列表包含完整标签:', physicalCameras.map(d => d.label));
+          .filter(device => device.deviceId?.trim())
+          .map(normalizePhysicalCamera);
+        physicalCameras.forEach((camera) => pushUniqueCamera(allDevices, camera));
+        if (authorizedCamera) {
+          pushUniqueCamera(allDevices, authorizedCamera);
         }
       } catch (error) {
         console.warn('获取物理摄像头失败:', error);
       }
+    } else if (!isCameraSecureContext()) {
+      console.warn('当前页面不是摄像头安全上下文。Safari 下请使用 http://localhost:3303/ 或 HTTPS。');
     }
 
     // 2. 获取虚拟流媒体摄像头
-    try {
-      const activeStreams = (await getActiveStreams()).filter(
-        (stream) => stream.enabled && (stream.is_active || stream.status === 'active')
-      );
-      const virtualCameras = activeStreams.map(stream => ({
-        deviceId: `stream-${stream.id}`, // 使用 stream- 前缀标识虚拟摄像头
-        label: `📹 ${stream.name} (流媒体)`,
-        kind: 'videoinput',
-        isVirtual: true,
-        streamSource: stream
-      }));
-      allDevices.push(...virtualCameras);
-    } catch (error) {
-      console.warn('获取虚拟流媒体摄像头失败:', error);
+    if (includeStreams) {
+      try {
+        const activeStreams = (await getActiveStreams()).filter(
+          (stream) => stream.enabled && (stream.is_active || stream.status === 'active')
+        );
+        const virtualCameras = activeStreams.map(stream => ({
+          deviceId: `stream-${stream.id}`, // 使用 stream- 前缀标识虚拟摄像头
+          label: `📹 ${stream.name} (流媒体)`,
+          kind: 'videoinput',
+          isVirtual: true,
+          streamSource: stream
+        }));
+        allDevices.push(...virtualCameras);
+      } catch (error) {
+        console.warn('获取虚拟流媒体摄像头失败:', error);
+      }
     }
 
     return allDevices;
@@ -238,11 +292,5 @@ export const getCameraDevices = async (): Promise<CameraDevice[]> => {
  * 检查是否为HTTP访问（摄像头功能受限）
  */
 export const isHttpAccess = (): boolean => {
-  const isLocalhost = window.location.hostname === 'localhost' || 
-                     window.location.hostname === '127.0.0.1' ||
-                     window.location.hostname.startsWith('192.168.') ||
-                     window.location.hostname.startsWith('10.') ||
-                     window.location.hostname.startsWith('172.');
-  
-  return !isLocalhost && window.location.protocol !== 'https:';
+  return !isCameraSecureContext();
 };

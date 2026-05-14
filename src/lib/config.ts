@@ -71,6 +71,7 @@ export const API_CONFIG = {
   RETRY_ATTEMPTS: 3, // 重试次数
 } as const;
 
+
 // CSRF token缓存
 let csrfTokenCache: string | null = null;
 

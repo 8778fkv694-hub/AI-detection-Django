@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
+import { buildCameraVideoConstraints, cameraFromTrack, getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
 import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
 import { MJPEGPlayer } from '@/lib/mjpegPlayer';
@@ -43,6 +43,7 @@ export const useOCRCamera = ({
   const streamPlayerRef = useRef<StreamPlayer | null>(null);
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
   const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
+  const manualCameraSelectionRef = useRef(false);
 
   // 全局视频流显示设置（仅影响浏览器渲染，不影响 YOLO 检测）
   const globalFps = useStreamSettingsStore((s) => s.fps);
@@ -219,39 +220,83 @@ export const useOCRCamera = ({
 
       let lastError: Error | null = null;
 
+      const attachPhysicalStream = async (stream: MediaStream, attemptedDevice?: CameraDevice) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+
+        // Safari 通常只有在 getUserMedia 成功授权后，enumerateDevices 才会返回真实设备名。
+        try {
+          const authorizedCamera = cameraFromTrack(stream.getVideoTracks()[0]);
+          const refreshedDevices = await getCameraDevices({ authorizedCamera });
+          const nextDevices =
+            authorizedCamera && !refreshedDevices.some((device) => device.deviceId === authorizedCamera.deviceId)
+              ? [authorizedCamera, ...refreshedDevices]
+              : refreshedDevices;
+          setAvailableDevices(nextDevices);
+          const settings = stream.getVideoTracks()[0]?.getSettings() as MediaTrackSettings & { deviceId?: string };
+          const actualDeviceId =
+            settings?.deviceId ||
+            nextDevices.find((device) => !device.isVirtual && device.deviceId)?.deviceId ||
+            attemptedDevice?.deviceId ||
+            '';
+
+          if (actualDeviceId) {
+            setSelectedDeviceId(actualDeviceId);
+            const actualDevice = nextDevices.find((device) => device.deviceId === actualDeviceId);
+            console.log(`[${windowId}] 已授权摄像头: ${actualDevice?.label || actualDeviceId}`);
+          }
+        } catch (refreshError) {
+          console.warn(`[${windowId}] 摄像头授权后刷新设备列表失败:`, refreshError);
+        }
+
+        setIsCameraOn(true);
+        console.log(`[${windowId}] 摄像头状态已更新为开启`);
+
+        stream.getVideoTracks().forEach(track => {
+          track.addEventListener('ended', () => {
+            console.log(`[${windowId}] 摄像头轨道已结束，可能是被其他窗口占用`);
+            setIsCameraOn(false);
+            setIsRealtimeActive(false);
+          });
+        });
+      };
+
+      if (devicesToTry.length === 0) {
+        try {
+          console.log(`[${windowId}] 未枚举到物理摄像头，尝试通过用户手势请求系统摄像头授权`);
+          let stream: MediaStream;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: buildCameraVideoConstraints(undefined, {
+                width: 1280,
+                height: 720,
+              }),
+            });
+          } catch (constraintError) {
+            console.warn(`[${windowId}] Safari 不接受理想分辨率约束，改用 video: true 重试`, constraintError);
+            stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          }
+          await attachPhysicalStream(stream);
+          return;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          console.warn(`[${windowId}] 系统摄像头授权失败:`, lastError.name, lastError.message);
+        }
+      }
+
       for (const device of devicesToTry) {
         try {
           const constraints: MediaStreamConstraints = {
-            video: {
-              deviceId: device.deviceId ? { exact: device.deviceId } : undefined,
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            }
+            video: buildCameraVideoConstraints(device.deviceId, {
+              width: 1280,
+              height: 720,
+            }),
           };
 
           console.log(`[${windowId}] 尝试启动摄像头:`, device.label || device.deviceId);
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-          }
-
-          if (device.deviceId !== targetDeviceId) {
-            setSelectedDeviceId(device.deviceId);
-            console.log(`[${windowId}] 自动切换到可用设备: ${device.label || device.deviceId}`);
-          }
-
-          setIsCameraOn(true);
-          console.log(`[${windowId}] 摄像头状态已更新为开启`);
-
-          stream.getVideoTracks().forEach(track => {
-            track.addEventListener('ended', () => {
-              console.log(`[${windowId}] 摄像头轨道已结束，可能是被其他窗口占用`);
-              setIsCameraOn(false);
-              setIsRealtimeActive(false);
-            });
-          });
-
+          await attachPhysicalStream(stream, device);
           return;
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
@@ -265,11 +310,16 @@ export const useOCRCamera = ({
       }
 
       console.error(`[${windowId}] 无法访问任何摄像头设备`);
+      const errorName = lastError?.name || '';
       const errorMessage = lastError?.message || '未知错误';
 
-      if (errorMessage.includes('Permission denied') || errorMessage.includes('NotAllowedError')) {
-        toast.error('摄像头权限被拒绝，请检查浏览器权限设置');
-      } else if (errorMessage.includes('NotReadableError') || errorMessage.includes('in use')) {
+      if (errorName === 'NotAllowedError' || errorMessage.includes('Permission denied') || errorMessage.includes('NotAllowedError')) {
+        toast.error('摄像头权限被拒绝，请在 Safari 地址栏或 macOS 隐私设置中允许摄像头访问');
+      } else if (errorName === 'NotFoundError' || errorMessage.includes('NotFoundError')) {
+        toast.error('Safari 未找到可用摄像头，请确认系统摄像头权限和设备连接');
+      } else if (errorName === 'OverconstrainedError' || errorMessage.includes('OverconstrainedError')) {
+        toast.error('摄像头约束不被 Safari 支持，已使用系统摄像头配置重试后仍失败');
+      } else if (errorName === 'NotReadableError' || errorMessage.includes('NotReadableError') || errorMessage.includes('in use')) {
         if (devices.length > 1) {
           toast.error('当前摄像头被其他窗口占用，请尝试切换到其他摄像头设备');
         } else {
@@ -283,7 +333,7 @@ export const useOCRCamera = ({
       console.error('启动摄像头失败:', err);
       toast.error(msg);
     }
-  }, [selectedDeviceId, availableDevices, windowId, videoRef, setIsCameraOn, setIsRealtimeActive, setSelectedDeviceId, globalFps, globalQuality, globalWidth]);
+  }, [selectedDeviceId, availableDevices, windowId, videoRef, setIsCameraOn, setIsRealtimeActive, setSelectedDeviceId, setAvailableDevices, globalFps, globalQuality, globalWidth]);
 
   useEffect(() => {
     if (!isCameraOn || !selectedDeviceId?.startsWith('stream-')) return;
@@ -339,6 +389,7 @@ export const useOCRCamera = ({
   // 切换摄像头设备
   const switchCamera = useCallback(async (deviceId: string) => {
     console.log(`[${windowId}] 切换摄像头到:`, deviceId);
+    manualCameraSelectionRef.current = true;
     setSelectedDeviceId(deviceId);
 
     if (isCameraOn) {
@@ -371,6 +422,18 @@ export const useOCRCamera = ({
       if (preferredCamera && devices.find(d => d.deviceId === preferredCamera)) {
         setSelectedDeviceId(preferredCamera);
       } else if (selectedDeviceId && devices.find(d => d.deviceId === selectedDeviceId)) {
+        const preferVirtual =
+          window.location.port === '3005' || window.location.port === '3001';
+        const hasPhysicalDevice = devices.some((device) => !device.isVirtual);
+        if (
+          !preferVirtual &&
+          !manualCameraSelectionRef.current &&
+          selectedDeviceId.startsWith('stream-') &&
+          !hasPhysicalDevice
+        ) {
+          setSelectedDeviceId('');
+          return;
+        }
         // 保留用户当前选择，避免流媒体列表刷新时被重置
         return;
       } else if (devices.length > 0) {
@@ -385,16 +448,23 @@ export const useOCRCamera = ({
           }
         }
 
+        if (!devices.some((device) => !device.isVirtual)) {
+          // Mac 本地调试时不要自动选择流媒体源；让“开启”按钮触发本地摄像头授权。
+          setSelectedDeviceId('');
+          return;
+        }
+
         // 基于windowId智能分配不同的默认设备，避免多窗口冲突
         // 通过windowId的简单哈希来选择不同的设备索引
         let deviceIndex = 0;
+        const physicalDevices = devices.filter((device) => !device.isVirtual);
         if (windowId) {
           // 使用windowId生成一个简单的哈希值来选择设备
           const hash = windowId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          deviceIndex = hash % devices.length;
+          deviceIndex = hash % physicalDevices.length;
         }
-        setSelectedDeviceId(devices[deviceIndex].deviceId);
-        console.log(`[${windowId}] 自动分配摄像头设备索引 ${deviceIndex}: ${devices[deviceIndex].label}`);
+        setSelectedDeviceId(physicalDevices[deviceIndex].deviceId);
+        console.log(`[${windowId}] 自动分配摄像头设备索引 ${deviceIndex}: ${physicalDevices[deviceIndex].label}`);
       } else if (selectedDeviceId) {
         setSelectedDeviceId('');
       }

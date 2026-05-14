@@ -38,7 +38,7 @@ class StreamReader:
         self.auto_reconnect = auto_reconnect
         self.reconnect_interval = reconnect_interval
         self.low_latency = low_latency
-        
+
         self.cap: Optional[cv2.VideoCapture] = None
         self.current_frame: Optional[np.ndarray] = None
         self.is_running = False
@@ -47,9 +47,22 @@ class StreamReader:
         self.error_message = ""
         self.error_count = 0
         self.frame_version: int = 0  # 帧版本计数器，用于 MJPEG 去重
-        
+
         self.lock = threading.Lock()
         self.thread: Optional[threading.Thread] = None
+
+        # 共享编码缓存：多 MJPEG 消费者复用同一帧的 JPEG 编码结果，避免重复 cv2.imencode
+        # key: (frame_version, quality, target_width) → bytes
+        self._encode_cache: Dict[tuple, bytes] = {}
+        self._raw_mjpeg: Optional[bytes] = None  # V4L2RawReader 喂入的原始 MJPEG 字节
+        self._raw_mjpeg_version: int = 0
+
+        # Jetson V4L2 原始 MJPEG 源（替代 cv2 采集）
+        self._v4l2_source = None  # 由 StreamManager 注入
+
+        # _enhance_display_frame 结果缓存（同帧复用，省浮点运算）
+        self._enhanced_frame: Optional[np.ndarray] = None
+        self._enhanced_version: int = -1
 
     def _is_local_camera(self) -> bool:
         return isinstance(self.url, str) and self.url.startswith('/dev/video')
@@ -83,6 +96,14 @@ class StreamReader:
                     "forcing capture release (thread may linger)",
                     self.stream_id,
                 )
+        # 如果有 V4L2 原始源，一并停止，避免 /dev/video 设备句柄泄漏
+        v4l2 = getattr(self, '_v4l2_source', None)
+        if v4l2 is not None:
+            try:
+                v4l2.stop()
+            except Exception as e:
+                logger.warning("StreamReader %s: V4L2 stop error: %s", self.stream_id, e)
+            self._v4l2_source = None
         self._release_capture()
 
     def _build_capture_candidates(self):
@@ -206,9 +227,14 @@ class StreamReader:
         self.is_connected = False
 
     def _enhance_display_frame(self, frame: np.ndarray) -> np.ndarray:
-        """轻量修正 USB 摄像头常见的偏绿问题，仅用于返回前端显示帧。"""
+        """轻量修正 USB 摄像头常见的偏绿问题，仅用于返回前端显示帧。
+        结果按帧版本缓存，同帧多次调用复用同一份增强结果。"""
         if not self._is_local_camera() or frame.size == 0:
             return frame
+
+        version = self.frame_version
+        if version == self._enhanced_version and self._enhanced_frame is not None:
+            return self._enhanced_frame
 
         enhanced = frame.astype(np.float32)
 
@@ -219,10 +245,53 @@ class StreamReader:
 
         # 轻微提升整体对比度，避免画面发灰。
         enhanced *= 1.03
-        return np.clip(enhanced, 0, 255).astype(np.uint8)
+        result = np.clip(enhanced, 0, 255).astype(np.uint8)
+        self._enhanced_frame = result
+        self._enhanced_version = version
+        return result
     
     def _read_loop(self):
-        """读取循环（在后台线程中运行）"""
+        """读取循环（在后台线程中运行）。
+
+        当 _v4l2_source 存在时（Jetson V4L2 原始 MJPEG 路径），从 V4L2RawReader
+        同步帧引用，不持有 cv2.VideoCapture。否则走 cv2 采集路径。
+        """
+        if self._v4l2_source is not None:
+            self._v4l2_sync_loop()
+            return
+        self._cv2_read_loop()
+
+    def _v4l2_sync_loop(self):
+        """Jetson: 从 V4L2RawReader 同步帧状态，不解码、不重编码。"""
+        while self.is_running:
+            src = self._v4l2_source
+            if src is None or not src.is_connected:
+                time.sleep(0.5)
+                continue
+            if hasattr(src, 'get_bgr_frame_with_version'):
+                bgr, bgr_version = src.get_bgr_frame_with_version()
+            else:
+                bgr = src.get_bgr_frame()
+                bgr_version = getattr(src, 'frame_version', 0)
+            if bgr is None:
+                time.sleep(0.005)
+                continue
+            if hasattr(src, 'get_raw_mjpeg_with_version'):
+                raw, raw_version = src.get_raw_mjpeg_with_version()
+            else:
+                raw = src.get_raw_mjpeg()
+                raw_version = getattr(src, 'frame_version', 0)
+            with self.lock:
+                self.current_frame = bgr
+                self._raw_mjpeg = raw
+                self._raw_mjpeg_version = raw_version
+                self.frame_version = bgr_version
+                self.last_frame_time = datetime.now()
+                self.is_connected = True
+                self.error_count = 0
+            time.sleep(0.003)
+
+    def _cv2_read_loop(self):
         reconnect_delay = self.reconnect_interval  # B6: 动态退避延迟
         while self.is_running:
             # 如果未连接，尝试连接
@@ -301,10 +370,64 @@ class StreamReader:
         """
         with self.lock:
             return self.current_frame
+
+    def set_raw_mjpeg(self, data: bytes):
+        """V4L2RawReader 喂入原始 MJPEG 字节（Jetson 专用）。"""
+        with self.lock:
+            self._raw_mjpeg = data
+            self._raw_mjpeg_version += 1
+
+    def get_raw_mjpeg(self) -> Optional[bytes]:
+        """获取原始 MJPEG 字节，可直接推给浏览器，零 CPU 编码。"""
+        with self.lock:
+            return self._raw_mjpeg
+
+    def get_raw_mjpeg_version(self) -> int:
+        """获取原始 MJPEG 版本号。用于显示流按原始帧去重。"""
+        with self.lock:
+            return self._raw_mjpeg_version
+
+    def get_or_encode_jpeg(self, frame_version: int, quality: int,
+                           target_width: int) -> Optional[bytes]:
+        """获取帧的 JPEG 字节。优先返回原始 MJPEG（零 CPU），其次查缓存，
+        最后走 cv2.imencode 编码路径。缓存按帧版本号自动失效。"""
+        # 1) 原始 MJPEG 优先（Jetson V4L2RawReader 路径，零 CPU）
+        raw = self.get_raw_mjpeg()
+        if raw is not None:
+            return raw
+
+        # 2) 查共享编码缓存（多 tab 复用同一次 cv2.imencode）
+        cache_key = (frame_version, quality, target_width)
+        with self.lock:
+            cached = self._encode_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # 3) 编码并缓存（用 get_frame_ref 零拷贝，因为后续会缩放/编码生成新数组）
+        frame = self.get_frame_ref()
+        if frame is None:
+            return None
+        if target_width > 0 and frame.shape[1] > target_width:
+            h, w = frame.shape[:2]
+            frame = cv2.resize(
+                frame, (target_width, int((target_width / w) * h)),
+                interpolation=cv2.INTER_AREA,
+            )
+        _, jpeg = cv2.imencode(
+            '.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality],
+        )
+        result = jpeg.tobytes()
+        with self.lock:
+            self._encode_cache[cache_key] = result
+            # 清理旧版本缓存，只保留当前帧版本
+            stale = [k for k in self._encode_cache if k[0] != frame_version]
+            for k in stale:
+                del self._encode_cache[k]
+        return result
     
     def get_frame_base64(self, quality: int = 100, target_width: int = 1920) -> Optional[str]:
         """获取当前帧的 Base64 编码（JPEG格式，无压缩），支持高质量缩放
-        
+
         Args:
             quality: JPEG质量 (1-100)，默认100（无压缩/最高质量)
             target_width: 目标宽度，0表示不缩放
@@ -312,7 +435,7 @@ class StreamReader:
         frame = self.get_frame()
         if frame is None:
             return None
-        
+
         try:
             frame = self._enhance_display_frame(frame)
 
@@ -321,17 +444,17 @@ class StreamReader:
                 # 计算目标高度，保持宽高比
                 height, width = frame.shape[:2]
                 target_height = int((target_width / width) * height)
-                
+
                 # 使用 INTER_AREA 算法进行缩放（速度与质量的最佳平衡）
                 # INTER_AREA: 速度快，质量好，特别适合缩小图像
                 # LANCZOS4: 质量最好但速度最慢（CPU占用高）
                 frame = cv2.resize(
-                    frame, 
-                    (target_width, target_height), 
+                    frame,
+                    (target_width, target_height),
                     interpolation=cv2.INTER_AREA
                 )
                 logger.debug(f"Frame resized from {width}x{height} to {target_width}x{target_height} using INTER_AREA")
-            
+
             # 编码为JPEG（无压缩，质量100）
             # JPEG质量: 0-100
             # 100 = 最高质量（无压缩），95-99 = 高质量，85-94 = 中等质量，1-84 = 低质量
@@ -339,11 +462,11 @@ class StreamReader:
             quality = max(1, min(100, quality))  # 确保质量在1-100范围内
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
             _, buffer = cv2.imencode('.jpg', frame, encode_param)
-            
+
             # 转换为Base64
             jpeg_as_text = base64.b64encode(buffer).decode('utf-8')
             return f"data:image/jpeg;base64,{jpeg_as_text}"
-            
+
         except Exception as e:
             logger.error(f"Failed to encode frame to base64: {e}")
             return None
@@ -385,24 +508,40 @@ class StreamManager:
             self.initialized = True
             logger.info("StreamManager initialized")
     
-    def add_stream(self, stream_id: str, url: str, auto_reconnect: bool = True, 
+    def add_stream(self, stream_id: str, url: str, auto_reconnect: bool = True,
                    reconnect_interval: int = 5, low_latency: bool = False) -> bool:
         """添加并启动流媒体源"""
         # 总是先清理旧流（remove_stream 对不存在的 key 安全，pop 返回 None）
         self.remove_stream(stream_id)
-        
+
         # 创建新的流读取器
         reader = StreamReader(stream_id, url, auto_reconnect, reconnect_interval, low_latency)
-        success = reader.start()
-        
+
+        # Jetson 本地摄像头：尝试 V4L2 原始 MJPEG 采集（零 CPU 显示路径）
+        if url.startswith('/dev/video') and os.path.exists('/etc/nv_tegra_release'):
+            from .v4l2_raw_reader import V4L2RawReader
+            v4l2 = V4L2RawReader(url)
+            if v4l2.start():
+                reader._v4l2_source = v4l2
+                reader.is_connected = True
+                reader.is_running = True
+                reader.thread = threading.Thread(
+                    target=reader._v4l2_sync_loop, daemon=True,
+                )
+                reader.thread.start()
+                logger.info("Stream %s: 使用 V4L2 原始 MJPEG 采集（零 CPU 显示）", stream_id)
+
+        # V4L2 未启用时走 cv2 路径
+        if reader._v4l2_source is None:
+            success = reader.start()
+            if not success:
+                logger.error("Failed to start stream %s", stream_id)
+                return False
+
         with self._streams_lock:
-            if success:
-                self.streams[stream_id] = reader
-                logger.info(f"Stream {stream_id} added and started")
-            else:
-                logger.error(f"Failed to start stream {stream_id}")
-        
-        return success
+            self.streams[stream_id] = reader
+            logger.info("Stream %s added and started", stream_id)
+        return True
     
     def remove_stream(self, stream_id: str):
         """移除流媒体源（stop 在锁外执行，避免 join 阻塞其他线程）"""

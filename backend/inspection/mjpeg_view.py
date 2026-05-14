@@ -71,8 +71,13 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
             time.sleep(0.05)
             continue
 
-        # 用帧版本号去重：同一帧不重复编码 + 推送
-        version = getattr(reader, 'frame_version', 0)
+        fast_path = not enhance and not overlay and hasattr(reader, 'get_or_encode_jpeg')
+
+        # 用帧版本号去重：显示快速路径按原始 MJPEG 帧去重，检测/画框路径按 BGR 帧去重。
+        raw_version = 0
+        if fast_path and hasattr(reader, 'get_raw_mjpeg_version'):
+            raw_version = reader.get_raw_mjpeg_version()
+        version = raw_version if raw_version > 0 else getattr(reader, 'frame_version', 0)
         if version == last_seen_id:
             time.sleep(0.01)
             continue
@@ -80,6 +85,37 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
         last_new_frame_time = time.time()  # 拿到新帧，重置心跳
 
         frame_started_at = time.time()
+
+        # 快速路径：无 enhance、无 overlay 时直接走 get_or_encode_jpeg
+        # 这会命中 Jetson V4L2 零 CPU 原始 MJPEG，或多 tab 共享编码缓存
+        if fast_path:
+            jpeg_bytes = reader.get_or_encode_jpeg(version, quality, target_width)
+            if jpeg_bytes is not None:
+                yield (
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n'
+                    b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n'
+                    b'\r\n' + jpeg_bytes + b'\r\n'
+                )
+                elapsed = time.time() - frame_started_at
+                if elapsed >= frame_interval:
+                    now = time.time()
+                    if now - last_overload_log_time >= 5.0:
+                        logger.warning(
+                            "MJPEG encoder overloaded for stream %s: encode=%.1fms target_interval=%.1fms "
+                            "(quality=%s width=%s fps=%s)",
+                            stream_id,
+                            elapsed * 1000,
+                            frame_interval * 1000,
+                            quality,
+                            target_width,
+                            fps,
+                        )
+                        last_overload_log_time = now
+                    time.sleep(min(frame_interval, max(0.005, elapsed * 0.15)))
+                else:
+                    time.sleep(frame_interval - elapsed)
+                continue
 
         # 颜色校正按需开启（USB 摄像头偏绿才需要），默认关掉省 CPU
         if enhance:
@@ -196,7 +232,7 @@ def mjpeg_stream(request, stream_id):
 
     if IS_JETSON and not raw:
         # cv2 MJPEG 是 CPU JPEG 重编码路径。Jetson 上原始 1080p/高质量/高 FPS
-        # 会把 CPU 打满，导致“设置 25fps 但实际 10fps 以下”的卡顿症状更严重。
+        # 会把 CPU 打满，导致"设置 25fps 但实际 10fps 以下"的卡顿症状更严重。
         # 需要原始画质排查时可显式加 raw=1。
         if width == 0 or width > 1280:
             width = 1280

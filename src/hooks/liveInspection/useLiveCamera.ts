@@ -12,7 +12,7 @@ import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
 import { MJPEGPlayer } from '@/lib/mjpegPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
-import type { CameraDevice } from '@/lib/cameraUtils';
+import { buildCameraVideoConstraints, type CameraDevice } from '@/lib/cameraUtils';
 import { useStreamSettingsStore } from '@/state/streamSettingsStore';
 
 export interface UseLiveCameraOptions {
@@ -245,11 +245,10 @@ export const useLiveCamera = ({
 
         // 物理摄像头
         const constraints: MediaStreamConstraints = {
-          video: {
-            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: buildCameraVideoConstraints(selectedDeviceId, {
+            width: 1280,
+            height: 720,
+          }),
         };
 
         console.log(`[${windowId}] 尝试启动摄像头:`, selectedDeviceId);

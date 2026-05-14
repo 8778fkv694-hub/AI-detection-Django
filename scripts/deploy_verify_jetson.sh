@@ -16,6 +16,7 @@ SSH_OPTS=(
   -o ControlMaster=no
   -S none
 )
+RSYNC_SSH="ssh -i $HOME/.ssh/id_rsa -o IdentitiesOnly=yes -o ControlMaster=no -S none"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -68,7 +69,9 @@ fi
 
 log "Syncing backend hot-path files"
 rsync -az \
+  -e "$RSYNC_SSH" \
   backend/inspection/stream_service.py \
+  backend/inspection/v4l2_raw_reader.py \
   backend/inspection/mjpeg_view.py \
   backend/inspection/detection_loop.py \
   backend/inspection/detection_api.py \
@@ -77,8 +80,8 @@ rsync -az \
   "$SSH_TARGET:$REMOTE_DIR/backend/inspection/"
 
 log "Syncing frontend source and built dist"
-rsync -az src/ "$SSH_TARGET:$REMOTE_DIR/src/"
-rsync -az --delete dist/ "$SSH_TARGET:$REMOTE_DIR/dist/"
+rsync -az -e "$RSYNC_SSH" src/ "$SSH_TARGET:$REMOTE_DIR/src/"
+rsync -az -e "$RSYNC_SSH" --delete dist/ "$SSH_TARGET:$REMOTE_DIR/dist/"
 
 if [ "$SKIP_RESTART" != "1" ]; then
   log "Restarting Jetson services. Enter sudo password on prompt if requested."

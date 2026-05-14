@@ -12,7 +12,7 @@ import { StreamPlayer } from '@/lib/streamPlayer';
 import { HLSPlayer } from '@/lib/hlsPlayer';
 import { MJPEGPlayer } from '@/lib/mjpegPlayer';
 import { startHLSStream, getHLSPlaylistUrl } from '@/api/streamApi';
-import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
+import { buildCameraVideoConstraints, getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
 import { useStreamSettingsStore } from '@/state/streamSettingsStore';
 
 export interface UseSafetyCameraOptions {
@@ -296,9 +296,10 @@ export const useSafetyCamera = ({
 
         // 物理摄像头
         const stream = await getUserMediaCompat({
-          video: deviceId
-            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-            : { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: buildCameraVideoConstraints(deviceId, {
+            width: 1280,
+            height: 720,
+          }),
         });
         if (videoRef.current) videoRef.current.srcObject = stream;
         setIsCameraOn(true);

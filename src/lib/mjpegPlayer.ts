@@ -146,6 +146,8 @@ export class MJPEGPlayer {
     params.set('quality', this.quality.toString());
     params.set('width', this.targetWidth.toString());
     params.set('fps', this.fps.toString());
+    params.set('overlay', '0');
+    params.set('enhance', '0');
     params.set('_', Date.now().toString());
     return `${window.location.origin}/api/streams/${this.streamId}/mjpeg/?${params.toString()}`;
   }

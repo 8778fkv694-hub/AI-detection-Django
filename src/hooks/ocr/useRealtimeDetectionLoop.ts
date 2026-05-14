@@ -135,7 +135,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     evaluateDetections, evaluateDebounce,
     batchManager,
     stitchROISnapshots, stitchMultipleROIs, captureFrameData, processCapturedImage,
-    detectedElements, elementDetectionStartTime, nonGridTargets,
+    detectedElements, elementDetectionStartTime: _elementDetectionStartTime, nonGridTargets: _nonGridTargets,
     enableParallelQrDetection, qrDetectIntervalMs, fixtureQrInput, fixtureQrPrefixes, fixtureQrPattern,
     onFixtureQrDetected, streamId,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
@@ -620,31 +620,14 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       } finally {
         isDetectingRef.current = false;
         setIsDetecting(false);
-
-        if (detectionQueueRef.current.length > 0) {
-          const nextTask = detectionQueueRef.current.shift();
-          if (nextTask) {
-            setTimeout(() => { nextTask(); }, 0);
-          }
-        } else {
-          isProcessingQueueRef.current = false;
-        }
+        detectionQueueRef.current = [];
+        isProcessingQueueRef.current = false;
       }
     };
 
     if (isProcessingQueueRef.current || isDetectingRef.current) {
-      // M3: 限制队列最大长度，防止检测慢时无限堆积
-      const MAX_QUEUE_SIZE = 5;
-      if (detectionQueueRef.current.length < MAX_QUEUE_SIZE) {
-        detectionQueueRef.current.push(executeDetection);
-      } else {
-        console.warn('⚠️ 检测队列已满（' + MAX_QUEUE_SIZE + '），丢弃最早的排队任务');
-        detectionQueueRef.current.shift();
-        detectionQueueRef.current.push(executeDetection);
-      }
-      if (!isProcessingQueueRef.current) {
-        isProcessingQueueRef.current = true;
-      }
+      // 实时视频只处理最新帧；旧检测任务排队会造成 OBS/浏览器预览周期性卡顿。
+      detectionQueueRef.current = [];
       return;
     }
 
@@ -1191,7 +1174,6 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
     if (isRealtimeActive && isCameraOn && !isPaused) {
       // 启动后端检测循环
-      const detectionType = (modelConfig?.detection_type as string) || 'ocr_inspection';
       console.log(`🚀 正在请求后端启动检测循环: stream=${streamId}, model=${currentModelId || 'default'}`);
       fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
         method: 'POST',
