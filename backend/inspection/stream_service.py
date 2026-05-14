@@ -268,24 +268,26 @@ class StreamReader:
             if src is None or not src.is_connected:
                 time.sleep(0.5)
                 continue
-            if hasattr(src, 'get_bgr_frame_with_version'):
-                bgr, bgr_version = src.get_bgr_frame_with_version()
-            else:
-                bgr = src.get_bgr_frame()
-                bgr_version = getattr(src, 'frame_version', 0)
-            if bgr is None:
-                time.sleep(0.005)
-                continue
             if hasattr(src, 'get_raw_mjpeg_with_version'):
                 raw, raw_version = src.get_raw_mjpeg_with_version()
             else:
                 raw = src.get_raw_mjpeg()
                 raw_version = getattr(src, 'frame_version', 0)
+            if hasattr(src, 'get_bgr_frame_with_version'):
+                bgr, bgr_version = src.get_bgr_frame_with_version()
+            else:
+                bgr = src.get_bgr_frame()
+                bgr_version = getattr(src, 'frame_version', 0)
+            if raw is None and bgr is None:
+                time.sleep(0.005)
+                continue
             with self.lock:
-                self.current_frame = bgr
-                self._raw_mjpeg = raw
-                self._raw_mjpeg_version = raw_version
-                self.frame_version = bgr_version
+                if bgr is not None:
+                    self.current_frame = bgr
+                    self.frame_version = bgr_version
+                if raw is not None:
+                    self._raw_mjpeg = raw
+                    self._raw_mjpeg_version = raw_version
                 self.last_frame_time = datetime.now()
                 self.is_connected = True
                 self.error_count = 0
@@ -530,6 +532,12 @@ class StreamManager:
                 )
                 reader.thread.start()
                 logger.info("Stream %s: 使用 V4L2 原始 MJPEG 采集（零 CPU 显示）", stream_id)
+            else:
+                logger.warning(
+                    "Stream %s: V4L2 原始 MJPEG 启动失败，回退 OpenCV: %s",
+                    stream_id,
+                    v4l2.error_message,
+                )
 
         # V4L2 未启用时走 cv2 路径
         if reader._v4l2_source is None:

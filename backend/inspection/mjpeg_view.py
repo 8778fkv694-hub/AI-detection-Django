@@ -66,12 +66,11 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
             )
             break
 
+        fast_path = not enhance and not overlay and hasattr(reader, 'get_or_encode_jpeg')
         frame = reader.get_frame_ref()
-        if frame is None:
+        if frame is None and not fast_path:
             time.sleep(0.05)
             continue
-
-        fast_path = not enhance and not overlay and hasattr(reader, 'get_or_encode_jpeg')
 
         # 用帧版本号去重：显示快速路径按原始 MJPEG 帧去重，检测/画框路径按 BGR 帧去重。
         raw_version = 0
@@ -116,6 +115,10 @@ def _mjpeg_generator(stream_id: str, quality: int = 75, target_width: int = 960,
                 else:
                     time.sleep(frame_interval - elapsed)
                 continue
+
+        if frame is None:
+            time.sleep(0.01)
+            continue
 
         # 颜色校正按需开启（USB 摄像头偏绿才需要），默认关掉省 CPU
         if enhance:

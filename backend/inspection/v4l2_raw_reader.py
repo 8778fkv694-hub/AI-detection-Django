@@ -1,7 +1,7 @@
 """
 V4L2 原始 MJPEG 读取器（Jetson 专用）
 
-直接从 /dev/video* 读取摄像头硬件编码的 MJPEG 字节，不解码。
+通过 v4l2-ctl 的 mmap streaming 从 /dev/video* 读取摄像头硬件编码的 MJPEG 字节，不解码。
 缓存原始字节给 MJPEG 显示（零 CPU），仅按需 cv2.imdecode 一份 BGR 给 AI 推理。
 
 为什么不用 cv2.VideoCapture：
@@ -14,12 +14,11 @@ V4L2 原始 MJPEG 读取器（Jetson 专用）
   - JPEG 帧边界通过 SOI(FFD8)/EOI(FFD9) 识别，JPEG 规范保证这两个标记
     不会出现在熵编码数据中（字节填充：FF→FF00），不会误匹配。
   - 缓冲区积压防护：超过 MAX_BUF 字节后强制对齐到下一个 SOI，防止 OOM。
-  - select() 超时 1s 防止 os.read() 永久阻塞。
+  - 后台进程 stdout 只输出 MJPEG 字节，stderr 单独 drain，避免状态输出阻塞。
   - 只用于 Jetson 本地 /dev/video* 摄像头，RTSP/视频文件仍走 cv2 路径。
 """
 
 import os
-import select
 import subprocess
 import threading
 import time
@@ -47,7 +46,7 @@ class V4L2RawReader:
         self.max_decode_fps = max_decode_fps  # YOLO 只需 10-15fps，解码可降频
         self._min_decode_interval = 1.0 / max_decode_fps if max_decode_fps > 0 else 0
         self._last_decode_time: float = 0.0
-        self.fd: Optional[int] = None
+        self.proc: Optional[subprocess.Popen] = None
         self.raw_bytes: Optional[bytes] = None       # 原始 MJPEG，直接推浏览器
         self.bgr_frame: Optional[np.ndarray] = None  # cv2.imdecode 解码，给 AI
         self.raw_frame_version: int = 0              # 每个原始 MJPEG 帧递增
@@ -60,6 +59,8 @@ class V4L2RawReader:
         self.error_count: int = 0
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._stderr_tail: str = ''
 
     def _configure_device(self) -> bool:
         """用 v4l2-ctl 配置摄像头为 MJPG 格式。幂等：已配好时无副作用。"""
@@ -69,6 +70,7 @@ class V4L2RawReader:
                     'v4l2-ctl', '-d', self.device,
                     '--set-fmt-video',
                     f'width={self.width},height={self.height},pixelformat=MJPG',
+                    f'--set-parm={self.fps}',
                 ],
                 check=True, capture_output=True, timeout=10,
             )
@@ -95,20 +97,26 @@ class V4L2RawReader:
             return False
 
         try:
-            import fcntl
-            import struct
-            self.fd = os.open(self.device, os.O_RDWR | os.O_NONBLOCK)
-            # VIDIOC_STREAMON: 启动视频捕获流，否则 os.read() 可能永远阻塞或返回空
-            VIDIOC_STREAMON = 0x40045612
-            V4L2_BUF_TYPE_VIDEO_CAPTURE = 1
-            buf_type = struct.pack('I', V4L2_BUF_TYPE_VIDEO_CAPTURE)
-            fcntl.ioctl(self.fd, VIDIOC_STREAMON, buf_type)
-        except ImportError:
-            self.error_message = 'fcntl 模块不可用（非 Linux 平台）'
+            # uvcvideo 摄像头通常不支持 read() I/O（v4l2-ctl --all 显示 Read buffers: 0），
+            # 但支持 mmap streaming。用 v4l2-ctl 持有设备并把原始 MJPEG 写到 stdout，
+            # Python 只负责拆 JPEG 帧，不做 BGR->JPEG 重编码。
+            self.proc = subprocess.Popen(
+                [
+                    'v4l2-ctl', '-d', self.device,
+                    '--stream-mmap=4',
+                    '--stream-count=0',
+                    '--stream-to=-',
+                    '--stream-poll',
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+        except FileNotFoundError:
+            self.error_message = 'v4l2-ctl 未安装，无法启动 mmap streaming'
             return False
         except OSError as e:
-            self.error_message = f'无法打开/启动 {self.device}: {e}'
-            self.stop()
+            self.error_message = f'无法启动 mmap streaming {self.device}: {e}'
             return False
 
         self.is_running = True
@@ -117,14 +125,22 @@ class V4L2RawReader:
             target=self._read_loop, daemon=True,
             name=f'v4l2-raw-{os.path.basename(self.device)}',
         )
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, daemon=True,
+            name=f'v4l2-raw-stderr-{os.path.basename(self.device)}',
+        )
+        self._stderr_thread.start()
         self._thread.start()
 
         # 等待首帧就绪
         for _ in range(30):
             if self.bgr_frame is not None:
                 return True
+            if self.proc and self.proc.poll() is not None:
+                break
             time.sleep(0.1)
-        self.error_message = 'V4L2 首帧超时'
+        detail = f': {self._stderr_tail.strip()}' if self._stderr_tail.strip() else ''
+        self.error_message = f'V4L2 mmap 首帧超时或进程退出{detail}'
         self.stop()
         return False
 
@@ -134,21 +150,35 @@ class V4L2RawReader:
         if self._thread:
             self._thread.join(timeout=3.0)
             self._thread = None
-        if self.fd is not None:
+        if self.proc is not None:
             try:
-                import fcntl
-                import struct
-                VIDIOC_STREAMOFF = 0x40045613
-                V4L2_BUF_TYPE_VIDEO_CAPTURE = 1
-                fcntl.ioctl(self.fd, VIDIOC_STREAMOFF, struct.pack('I', V4L2_BUF_TYPE_VIDEO_CAPTURE))
+                self.proc.terminate()
+                self.proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=2.0)
             except Exception:
                 pass
-            try:
-                os.close(self.fd)
-            except OSError:
-                pass
-            self.fd = None
+            self.proc = None
+        if self._stderr_thread:
+            self._stderr_thread.join(timeout=1.0)
+            self._stderr_thread = None
         self.is_connected = False
+
+    def _drain_stderr(self):
+        """消费 v4l2-ctl 的状态输出，避免 stderr pipe 填满导致采集阻塞。"""
+        proc = self.proc
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            while self.is_running:
+                chunk = proc.stderr.read(256)
+                if not chunk:
+                    break
+                text = chunk.decode(errors='replace')
+                self._stderr_tail = (self._stderr_tail + text)[-1000:]
+        except Exception:
+            pass
 
     @staticmethod
     def _split_jpeg(buf: bytearray) -> tuple:
@@ -171,18 +201,26 @@ class V4L2RawReader:
         return frame, rest
 
     def _read_loop(self):
-        """V4L2 读取主循环。os.read() 返回一个完整的 MJPEG 帧。"""
+        """V4L2 mmap 读取主循环，从 v4l2-ctl stdout 拆分完整 MJPEG 帧。"""
         buf = bytearray()
-        READ_SIZE = 2 * 1024 * 1024    # 一帧上限 2MB（1080p MJPEG 实际 ~150KB）
+        READ_SIZE = 256 * 1024         # stdout 分块读取；JPEG 帧可跨块拼接
         MAX_BUF = 4 * 1024 * 1024      # 积压上限，超过后强制对齐防止 OOM
 
         while self.is_running:
             try:
-                ready, _, _ = select.select([self.fd], [], [], 1.0)
-                if not ready:
-                    continue
-                chunk = os.read(self.fd, READ_SIZE)
+                proc = self.proc
+                if proc is None or proc.stdout is None:
+                    break
+                chunk = proc.stdout.read(READ_SIZE)
                 if not chunk:
+                    if proc.poll() is not None:
+                        self.error_message = (
+                            f'v4l2-ctl streaming exited with code {proc.returncode}: '
+                            f'{self._stderr_tail.strip()}'
+                        )
+                        self.error_count += 1
+                        break
+                    time.sleep(0.01)
                     continue
                 buf.extend(chunk)
 
@@ -219,8 +257,6 @@ class V4L2RawReader:
                                 self.frame_version = self.bgr_frame_version
                             self._last_decode_time = now
 
-            except BlockingIOError:
-                continue
             except OSError as e:
                 self.error_message = f'V4L2 读取错误: {e}'
                 self.error_count += 1
