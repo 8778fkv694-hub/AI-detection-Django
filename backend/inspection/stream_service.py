@@ -394,6 +394,8 @@ class StreamReader:
         """获取帧的 JPEG 字节。优先返回原始 MJPEG（零 CPU），其次查缓存，
         最后走 cv2.imencode 编码路径。缓存按帧版本号自动失效。"""
         # 1) 原始 MJPEG 优先（Jetson V4L2RawReader 路径，零 CPU）
+        # 浏览器端会通过 CSS 缩放显示，不需要后端重编码。
+        # 后端缩放 1080p→960 的 imencode 成本（~50ms/帧）远大于多传 150KB 的带宽。
         raw = self.get_raw_mjpeg()
         if raw is not None:
             return raw
