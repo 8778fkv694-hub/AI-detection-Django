@@ -344,6 +344,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         let base64DataForQr = '';
         let dataUrl = '';
         let base64Data = '';
+        let currentFrameId = 0;
 
         if (useBackendDetection && streamId) {
           // ====== 解耦模式：拉取后端最新 JSON 结果（<1KB） ======
@@ -352,6 +353,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             if (response.ok) {
               const result = await response.json();
               detections = result.boxes || [];
+              currentFrameId = result.frame_id || 0;
               
               // 同步更新后端的 FPS 统计
               if (result.detect_fps) {
@@ -551,10 +553,17 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           
           if (useBackendDetection && streamId && !finalDataUrl) {
             try {
-              // M9修复：先取snapshot（带frame_id），再验证detection帧一致性
-              const snapRes = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
+              // 通过 frame_id 从后端 Ring Buffer 请求历史帧，实现完美对齐
+              const url = currentFrameId > 0 
+                ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${currentFrameId}`)
+                : buildApiUrl(`/streams/${streamId}/snapshot/`);
+                
+              const snapRes = await fetch(url);
               if (snapRes.ok) {
                 const snapFrameId = parseInt(snapRes.headers.get('X-Frame-ID') || '0', 10);
+                if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
+                  console.warn(`⚠️ 后端 Ring Buffer 未能命中请求帧(${currentFrameId})，退化返回帧(${snapFrameId})`);
+                }
                 const blob = await snapRes.blob();
                 const objectUrl = URL.createObjectURL(blob);
                 const reader = new FileReader();
@@ -564,24 +573,6 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
                 });
                 finalBase64 = finalDataUrl.split(',')[1] || '';
                 URL.revokeObjectURL(objectUrl);
-
-                // M9修复：验证detection帧与snapshot帧是否一致（允许±2帧容差）
-                // 从前面拉取的detections结果中提取frame_id
-                let detFrameId = 0;
-                if (useBackendDetection && streamId) {
-                  // 重新拉一次detections，确保拿到与snapshot接近的最新结果
-                  const detRes = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
-                  if (detRes.ok) {
-                    const detResult = await detRes.json();
-                    detFrameId = detResult.frame_id || 0;
-                    const frameGap = Math.abs(snapFrameId - detFrameId);
-                    if (frameGap > 2) {
-                      console.warn(`⚠️ 快照帧(${snapFrameId})与检测帧(${detFrameId})差距=${frameGap}，使用新检测结果`);
-                      // 使用新拉的检测结果更新latest detections引用
-                      // （注意这里只影响本工作流，不覆盖外部state）
-                    }
-                  }
-                }
               }
             } catch (e) {
               console.error('抓拍后端原图失败:', e);

@@ -17,6 +17,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 import cv2
 import numpy as np
+import collections
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class DetectionLoop:
 
         # === 核心缓存 ===
         self._latest_result: Optional[Dict[str, Any]] = None
-        self._latest_raw_frame: Optional[np.ndarray] = None  # 不做 JPEG 编码
+        self._frame_buffer = collections.deque(maxlen=30)  # Ring Buffer：保存最近约1秒的历史帧 (frame_id, frame_ref)
         self._frame_id_counter: int = 0
 
         self._lock = threading.Lock()
@@ -136,7 +137,10 @@ class DetectionLoop:
                 # 更新缓存
                 with self._lock:
                     self._frame_id_counter += 1
-                    self._latest_raw_frame = frame  # 存引用，不编码
+                    self._frame_buffer.append({
+                        'frame_id': self._frame_id_counter,
+                        'frame_ref': frame
+                    })
                     self._last_processed_frame_version = current_version
                     self._latest_result = {
                         'stream_id': self.stream_id,
@@ -180,14 +184,31 @@ class DetectionLoop:
         """按需编码，返回 (jpeg_bytes, actual_frame_id)。
 
         编码在调用者线程（Django worker）中执行，不阻塞检测线程。
+        如果在 Ring Buffer 中找到请求的 frame_id，返回对应的历史帧。
         """
         with self._lock:
-            frame = self._latest_raw_frame
-            actual_id = self._frame_id_counter
-        if frame is None:
-            return None, None
+            if not self._frame_buffer:
+                return None, None
+
+            frame_to_encode = None
+            actual_id = None
+
+            if requested_frame_id is not None:
+                # 尝试在 Ring Buffer 中找 (从新往旧找更快)
+                for item in reversed(self._frame_buffer):
+                    if item['frame_id'] == requested_frame_id:
+                        frame_to_encode = item['frame_ref']
+                        actual_id = item['frame_id']
+                        break
+
+            # 如果没传 frame_id 或者已在历史中过期被挤出，退化为取最新帧
+            if frame_to_encode is None:
+                item = self._frame_buffer[-1]
+                frame_to_encode = item['frame_ref']
+                actual_id = item['frame_id']
+
         # 编码在此线程中执行
-        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        _, jpeg = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return jpeg.tobytes(), actual_id
 
     def get_status(self) -> Dict[str, Any]:
