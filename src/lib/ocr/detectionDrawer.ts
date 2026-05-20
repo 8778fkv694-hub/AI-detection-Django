@@ -14,7 +14,11 @@ import type { BackendYoloDetection } from '@/lib/api';
  * @param detections 检测结果数组
  * @param canvas 目标画布元素
  */
-export const drawDetections = (detections: BackendYoloDetection[], canvas: HTMLCanvasElement | null) => {
+export const drawDetections = (
+  detections: BackendYoloDetection[], 
+  canvas: HTMLCanvasElement | null,
+  perfStats?: { inferenceMs: number | null; fps: number | null }
+) => {
   if (!canvas) {
     console.log('画布元素不存在');
     return;
@@ -87,6 +91,32 @@ export const drawDetections = (detections: BackendYoloDetection[], canvas: HTMLC
     ctx.font = '16px Arial';
     ctx.fillText(`${label}: ${(confidence * 100).toFixed(1)}%`, x1, y1 - 5);
   });
+
+  // 绘制右下角推理耗时与帧率
+  if (perfStats && perfStats.inferenceMs !== null) {
+    const text = `推理: ${perfStats.inferenceMs}ms | 帧率: ${perfStats.fps || 0} FPS`;
+    ctx.font = 'bold 14px monospace';
+    const textWidth = ctx.measureText(text).width;
+    const padding = 8;
+    const rectWidth = textWidth + padding * 2;
+    const rectHeight = 26;
+    const rectX = canvas.width - rectWidth - 10;
+    const rectY = canvas.height - rectHeight - 10;
+
+    // 绘制半透明背景
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(rectX, rectY, rectWidth, rectHeight, 4);
+    } else {
+      ctx.rect(rectX, rectY, rectWidth, rectHeight);
+    }
+    ctx.fill();
+
+    // 绘制亮绿色文字
+    ctx.fillStyle = '#4ade80';
+    ctx.fillText(text, rectX + padding, rectY + 17);
+  }
 };
 
 /**

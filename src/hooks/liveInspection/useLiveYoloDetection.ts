@@ -6,7 +6,7 @@
  * 使用位置：LiveInspectionScreen
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend } from '@/lib/api';
 import { buildApiUrl } from '@/lib/config';
@@ -125,6 +125,19 @@ export const useLiveYoloDetection = ({
 }: UseLiveYoloDetectionOptions): UseLiveYoloDetectionResult => {
   const backendLoopOwnerRef = useRef(`live:${Date.now()}:${Math.random().toString(36).slice(2)}`);
 
+  // 性能指标状态（推理耗时与帧率）
+  const [perfStats, setPerfStats] = useState<{ inferenceMs: number | null; fps: number | null }>({
+    inferenceMs: null,
+    fps: null,
+  });
+
+  // 监听状态，关闭时清除指标
+  useEffect(() => {
+    if (!isYoloActive || !isCameraOn) {
+      setPerfStats({ inferenceMs: null, fps: null });
+    }
+  }, [isYoloActive, isCameraOn]);
+
   // YOLO检测
   const performYoloDetection = useCallback(async () => {
     if (!videoRef.current || !isCameraOn || !isYoloActive) return;
@@ -147,6 +160,12 @@ export const useLiveYoloDetection = ({
             const result = await response.json();
             detections = result.boxes || [];
             currentFrameId = result.frame_id || 0;
+            
+            // 更新性能指标
+            setPerfStats({
+              inferenceMs: result.inference_ms || null,
+              fps: result.detect_fps || null,
+            });
           }
         } catch (e) {
           console.error('拉取后端检测结果失败:', e);
@@ -160,7 +179,15 @@ export const useLiveYoloDetection = ({
         ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
         const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
 
+        const startTime = performance.now();
         detections = await yoloDetectBackend(base64Image, detectionConfidence);
+        const elapsed = performance.now() - startTime;
+        
+        // 更新性能指标
+        setPerfStats({
+          inferenceMs: Math.round(elapsed),
+          fps: Math.round(1000 / elapsed),
+        });
       }
 
       setDetectionResults(detections);
@@ -476,7 +503,33 @@ export const useLiveYoloDetection = ({
       ctx.font = '14px Arial';
       ctx.fillText(label, x1 + 5, y1 - 5);
     });
-  }, [detectionResults, showDetections, isYoloActive, canvasRef, videoRef]);
+
+    // 绘制右下角推理耗时与帧率
+    if (perfStats.inferenceMs !== null) {
+      const text = `推理: ${perfStats.inferenceMs}ms | 帧率: ${perfStats.fps || 0} FPS`;
+      ctx.font = 'bold 14px monospace';
+      const textWidth = ctx.measureText(text).width;
+      const padding = 8;
+      const rectWidth = textWidth + padding * 2;
+      const rectHeight = 26;
+      const rectX = canvas.width - rectWidth - 10;
+      const rectY = canvas.height - rectHeight - 10;
+
+      // 绘制半透明背景
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(rectX, rectY, rectWidth, rectHeight, 4);
+      } else {
+        ctx.rect(rectX, rectY, rectWidth, rectHeight);
+      }
+      ctx.fill();
+
+      // 绘制亮绿色文字
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText(text, rectX + padding, rectY + 17);
+    }
+  }, [detectionResults, showDetections, isYoloActive, canvasRef, videoRef, perfStats]);
 
   return {
     performYoloDetection,

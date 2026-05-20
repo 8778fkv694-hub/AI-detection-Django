@@ -148,6 +148,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   // P0修复：使用ref保存performRealtimeDetection函数，避免setInterval闭包问题
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
   const handleCaptureWorkflowRef = useRef<((validSelectedTargets: string[], currentDataUrl: string, currentBase64: string) => Promise<void>) | null>(null);
+  const latestPerfStatsRef = useRef<{ inferenceMs: number | null, fps: number | null }>({ inferenceMs: null, fps: null });
   const backendLoopOwnerRef = useRef(`ocr:${Date.now()}:${Math.random().toString(36).slice(2)}`);
 
   // M2修复：保存workflowState到ref，延时循环中读取ref而非闭包值
@@ -355,6 +356,12 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
               detections = result.boxes || [];
               currentFrameId = result.frame_id || 0;
               
+              // 更新性能指标
+              latestPerfStatsRef.current = {
+                inferenceMs: result.inference_ms || null,
+                fps: result.detect_fps || null,
+              };
+
               // 同步更新后端的 FPS 统计
               if (result.detect_fps) {
                 // 将后端真实 FPS 更新到统计中
@@ -430,10 +437,16 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
           // 执行YOLO检测
           const detectionType = (modelConfig?.detection_type as 'cleanroom_ppe' | 'kit_matching' | 'ocr_inspection' | 'ocr_fusion_inspection' | 'general_quality' | undefined) || 'ocr_inspection';
+          const startTime = performance.now();
           detections = await yoloDetectBackend(base64Data, detectionConfidence, {
             ...(currentModelId ? { model_id: currentModelId } : {}),
             detection_type: detectionType,
           });
+          const elapsed = performance.now() - startTime;
+          latestPerfStatsRef.current = {
+            inferenceMs: Math.round(elapsed),
+            fps: Math.round(1000 / elapsed),
+          };
         }
 
         // 并行触发工装码识别（如果本帧有图）
@@ -468,7 +481,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
               console.log('画布尺寸更新:', videoWidth, 'x', videoHeight);
             }
             if (detectionCanvasRef.current) {
-              drawDetections(detections, detectionCanvasRef.current);
+              drawDetections(detections, detectionCanvasRef.current, latestPerfStatsRef.current);
             }
           } else {
             console.log('视频尺寸无效，跳过绘制检测结果');
@@ -713,10 +726,17 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         if (imageSaveMode === 'roi') {
           try {
             const frameDetectionType = (modelConfig?.detection_type as any) || 'ocr_inspection';
+            const startTime = performance.now();
             const frameDetections = await yoloDetectBackend(frameBase64, detectionConfidence, {
               ...(currentModelId ? { model_id: currentModelId } : {}),
               detection_type: frameDetectionType,
             });
+            const elapsed = performance.now() - startTime;
+            latestPerfStatsRef.current = {
+              inferenceMs: Math.round(elapsed),
+              fps: Math.round(1000 / elapsed),
+            };
+
             const frameTargetDetections = frameDetections.filter(detection =>
               validSelectedTargets.includes(detection.label) && detection.confidence >= detectionConfidence
             );
@@ -730,7 +750,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
                   detectionCanvasRef.current.height = videoHeight;
                 }
                 if (detectionCanvasRef.current) {
-                  drawDetections(frameDetections, detectionCanvasRef.current);
+                  drawDetections(frameDetections, detectionCanvasRef.current, latestPerfStatsRef.current);
                 }
               }
             }
@@ -1209,13 +1229,13 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
     if (isRealtimeActive && isCameraOn) {
       if (detectionInterval === 0) {
-        // 自适应模式：100ms ≈ 10 FPS，对后端检测循环轮询已足够快
+        // 自适应模式：33ms ≈ 30 FPS，对后端检测循环轮询已足够快
         // 10ms 会跑出 100 req/s，在 Jetson GIL 竞争下白白拖垮 MJPEG 和推理
         const runAdaptive = async () => {
           if (!isRunning) return;
           await performRealtimeDetectionRef.current?.();
           if (isRunning) {
-            setTimeout(runAdaptive, 100);
+            setTimeout(runAdaptive, 33);
           }
         };
         runAdaptive();
