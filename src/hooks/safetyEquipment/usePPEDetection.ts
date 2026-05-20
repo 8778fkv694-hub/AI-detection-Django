@@ -147,11 +147,18 @@ export const usePPEDetection = ({
     [ppeThresholds]
   );
 
-  const fetchBackendSnapshotBase64 = useCallback(async (): Promise<string | null> => {
+  const fetchBackendSnapshotBase64 = useCallback(async (frameId?: number): Promise<string | null> => {
     if (!streamId) return null;
     try {
-      const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
+      const url = frameId && frameId > 0
+        ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${frameId}`)
+        : buildApiUrl(`/streams/${streamId}/snapshot/`);
+      const res = await fetch(url);
       if (!res.ok) return null;
+      const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
+      if (frameId && frameId > 0 && snapFrameId !== frameId) {
+        console.warn(`⚠️ 后端 Ring Buffer 未能命中请求帧(${frameId})，退化返回帧(${snapFrameId})`);
+      }
       const blob = await res.blob();
       return await new Promise<string>((resolve) => {
         const reader = new FileReader();
@@ -349,6 +356,7 @@ export const usePPEDetection = ({
       let base64Data = '';
       let detections: YoloDetection[] = [];
       let sourceSize: { width: number; height: number } | undefined;
+      let currentFrameId = 0;
 
       if (useBackendDetection && streamId) {
         try {
@@ -356,6 +364,7 @@ export const usePPEDetection = ({
           if (response.ok) {
             const result = await response.json();
             const backendDetections = (result.boxes || []) as BackendYoloDetection[];
+            currentFrameId = result.frame_id || 0;
             detections = filterDetections(
               backendDetections.map(mapBackendDetection),
               Math.min(captureThreshold, getMinThreshold())
@@ -442,7 +451,7 @@ export const usePPEDetection = ({
           const finalImageData =
             bestDetectionInInterval?.imageData ||
             base64Data ||
-            (await fetchBackendSnapshotBase64()) ||
+            (await fetchBackendSnapshotBase64(currentFrameId)) ||
             (await captureCurrentFrame()) ||
             '';
           const capturedImages = await handleAutoCapture(detections, finalImageData);
@@ -459,7 +468,7 @@ export const usePPEDetection = ({
           if (shouldUpdate) {
             const imageData =
               base64Data ||
-              (await fetchBackendSnapshotBase64()) ||
+              (await fetchBackendSnapshotBase64(currentFrameId)) ||
               (await captureCurrentFrame());
             setBestDetectionInInterval({
               detections,

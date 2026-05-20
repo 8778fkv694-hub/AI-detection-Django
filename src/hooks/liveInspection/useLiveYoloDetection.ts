@@ -137,6 +137,7 @@ export const useLiveYoloDetection = ({
     try {
       const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
       let detections: BackendYoloDetection[] = [];
+      let currentFrameId = 0;
 
       if (useBackendDetection && streamId) {
         // 解耦模式：拉取后端最新 JSON 结果
@@ -145,6 +146,7 @@ export const useLiveYoloDetection = ({
           if (response.ok) {
             const result = await response.json();
             detections = result.boxes || [];
+            currentFrameId = result.frame_id || 0;
           }
         } catch (e) {
           console.error('拉取后端检测结果失败:', e);
@@ -233,8 +235,15 @@ export const useLiveYoloDetection = ({
               // 获取图像进行处理
               if (useBackendDetection && streamId) {
                 try {
-                  const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
+                  const url = currentFrameId > 0
+                    ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${currentFrameId}`)
+                    : buildApiUrl(`/streams/${streamId}/snapshot/`);
+                  const res = await fetch(url);
                   if (res.ok) {
+                    const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
+                    if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
+                      console.warn(`⚠️ 后端 Ring Buffer 未能命中请求帧(${currentFrameId})，退化返回帧(${snapFrameId})`);
+                    }
                     const blob = await res.blob();
                     const objectUrl = URL.createObjectURL(blob);
 
