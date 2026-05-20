@@ -1,6 +1,10 @@
 {
   "results": [],
   "standards": [],
+  "ocrKeywordTemplates": [],
+  "ocrBarcodeTemplates": [],
+  "productRecipes": [],
+  "stageRecipes": [],
   "modelVersions": [],
   "ppeModelStatus": {
     "isLoaded": false,

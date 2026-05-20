@@ -13,6 +13,7 @@ import {
   Clock,
   ExternalLink,
 } from 'lucide-react';
+import { buildClientRouteUrl } from '@/lib/navigation';
 
 const DETECTION_TYPE_MAP: Record<string, { label: string; icon: typeof Camera; href: string; openNewWindow: boolean }> = {
   cleanroom_ppe: { label: 'PPE检测', icon: Shield, href: '/safety-equipment', openNewWindow: true },
@@ -42,10 +43,13 @@ const HomeScreen: React.FC = () => {
   }, [results]);
 
   const handleOpen = (href: string, openNewWindow: boolean) => {
-    if (openNewWindow) {
+    const isMobile = typeof window !== 'undefined' && (
+      (window as any).Capacitor || (window as any).__IS_MOBILE_APP__
+    );
+    if (openNewWindow && !isMobile) {
       const windowId = `window_${Date.now()}`;
       const newWindow = window.open(
-        `${href}?windowId=${windowId}`,
+        buildClientRouteUrl(`${href}?windowId=${windowId}`),
         windowId,
         'width=1200,height=800,resizable=yes,scrollbars=yes,status=yes'
       );

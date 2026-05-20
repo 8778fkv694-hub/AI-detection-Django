@@ -11,6 +11,7 @@ import { ImagePreviewModal } from '@/components/ocr/ImagePreviewModal';
 import type { InspectionResult } from '@/types';
 import { fetchFQCRecords, type FQCRecord } from '@/lib/fqcApi';
 import { FQCResultCard } from '@/components/ocr/FQCResultCard';
+import { navigateClientRoute } from '@/lib/navigation';
 
 // --- 新增的UI组件 ---
 
@@ -1012,7 +1013,7 @@ const EmptyState: React.FC = () => (
     <p className="text-sm text-center max-w-xs">
       请返回检测页面开始新的检测，结果将在这里自动汇总。
     </p>
-    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => (window.location.href = '/ocr')}>
+    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => navigateClientRoute('/ocr')}>
       <ArrowLeft className="h-4 w-4 mr-2" />
       返回OCR检测
     </Button>

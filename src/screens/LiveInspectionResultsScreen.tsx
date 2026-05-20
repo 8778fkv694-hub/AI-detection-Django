@@ -7,6 +7,7 @@ import { ArrowLeft, CheckCircle2, XCircle, AlertCircle, Trash2, Eye, Download, F
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/state/appStore';
+import { navigateClientRoute } from '@/lib/navigation';
 import type { InspectionResult } from '@/types';
 
 // --- 新增的UI组件 ---
@@ -562,7 +563,7 @@ const EmptyState: React.FC = () => (
     <p className="text-sm text-center max-w-xs">
       请返回检测页面开始新的检测，结果将在这里自动汇总。
     </p>
-    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => (window.location.href = '/live')}>
+    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => navigateClientRoute('/live-inspection')}>
       <ArrowLeft className="h-4 w-4 mr-2" />
       返回实时检测
     </Button>

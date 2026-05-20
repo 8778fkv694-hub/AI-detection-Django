@@ -203,6 +203,15 @@ const LocalModelScreen: React.FC = () => {
   // 启动本地模型服务
   const startOllama = useCallback(async () => {
     try {
+      const isMobile = typeof window !== 'undefined' && (
+        (window as any).Capacitor || (window as any).__IS_MOBILE_APP__
+      );
+      if (isMobile) {
+        toast.error('移动端暂不支持直接运行 Ollama 服务，请在主机上启动。', { duration: 5000 });
+        showStartGuide();
+        return;
+      }
+
       // 创建一个包含启动命令的HTML文件
       const command = 'ollama serve';
       const htmlContent = `

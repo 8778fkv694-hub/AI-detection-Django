@@ -98,7 +98,6 @@ export const useLiveModelConfig = ({
         label: modelConfig.class_names?.[className] || className,
       }));
     }
-    console.warn('⚠️ 实时检测页面：模型配置未加载，无法获取类别列表，请检查后端API');
     return [];
   }, [modelConfig]);
 

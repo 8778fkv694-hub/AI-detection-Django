@@ -6,7 +6,7 @@
   "scripts": {
     "build:web": "cd .. && npm run build:mobile",
     "cap:sync": "npx cap sync android",
-    "build:full": "npm run build:web && npm run cap:sync",
+    "build:full": "bash scripts/build-apk.sh debug",
     "open:android": "npx cap open android",
     "run:android": "npx cap run android",
     "build:apk:debug": "bash scripts/build-apk.sh debug",

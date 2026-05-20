@@ -27,12 +27,35 @@ app.use(cors({
   credentials: true,
 }));
 
+// 跨域隔离 (COOP/COEP) 核心中间件：允许前端 WebView 在启用 Cross-Origin Isolation 下拉取数据
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // 挂载主项目的 API 路由
 const apiRouter = require('./src/server/api');
 app.use('/api', apiRouter);
+
+// 跨域隔离 (COOP/COEP) 核心中间件：使整个 WebView 运行在安全隔离上下文，完美激活 SharedArrayBuffer
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+
+// 静态前端文件托管
+const distPath = path.join(__dirname, 'dist');
+if (fs.existsSync(distPath)) {
+  console.log('[mobile-node] Static dist directory found, registering express.static:', distPath);
+  app.use(express.static(distPath));
+} else {
+  console.warn('[mobile-node] Static dist directory NOT found:', distPath);
+}
 
 // 健康检查
 app.get('/health', (req, res) => {
@@ -42,6 +65,19 @@ app.get('/health', (req, res) => {
     service: 'Embedded Node.js Mobile Server',
     port: PORT
   });
+});
+
+// SPA 页面路由回退：对于任何非 API/Health 且非静态资源的请求，返回 index.html 供前端路由接管
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/health')) {
+    return next();
+  }
+  const indexHtml = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    res.sendFile(indexHtml);
+  } else {
+    res.status(404).send('React Build Assets Not Found');
+  }
 });
 
 // 错误处理中间件

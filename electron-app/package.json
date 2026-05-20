@@ -1,0 +1,67 @@
+{
+  "name": "wyl-inspection-electron",
+  "version": "1.0.0",
+  "description": "WYL AI 检测系统 Windows 桌面端",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:web": "cd .. && npm run build:mobile",
+    "copy:dist": "node scripts/copy-assets.js",
+    "pack:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win --x64 --dir",
+    "dist:win": "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win --x64",
+    "build:full": "npm run build:web && npm run copy:dist && npm run dist:win"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "lowdb": "1.0.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.wyl.inspection.desktop",
+    "productName": "WYL智能检测系统",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "www/**/*",
+      "src/**/*",
+      "icon.ico"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WYL智能检测系统"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "www/models/**/*"
+    ]
+  }
+}

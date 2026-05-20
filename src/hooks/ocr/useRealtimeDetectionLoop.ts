@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
-import { apiFetch, buildApiUrl } from '@/lib/config';
+import { apiFetch, buildApiUrl, isLocalOfflineMode } from '@/lib/config';
 import { calculateSharpnessAsync } from '@/lib/imageQuality/sharpnessCalculator';
 import { drawDetections } from '@/lib/ocr/detectionDrawer';
 import type { BestROIData } from '@/hooks/ocr/useROIProcessor';
@@ -195,7 +195,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       const validTargets = selectedTargets.filter(target => target != null && typeof target === 'string');
       if (validTargets.length === 0) return;
 
-      const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+      const useBackendDetection = !isLocalOfflineMode();
 
       const collectFrame = async () => {
         try {
@@ -339,7 +339,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         const validSelectedTargets = selectedTargets.filter(target => target != null && typeof target === 'string');
 
         // 检查是否启用后端持续检测
-        const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+        const useBackendDetection = !isLocalOfflineMode();
         
         let detections: any[] = [];
         let base64DataForQr = '';
@@ -1180,7 +1180,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
   // ====== 后端检测循环生命周期管理 ======
   useEffect(() => {
-    const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+    const useBackendDetection = !isLocalOfflineMode();
     if (!useBackendDetection || !streamId) return;
 
     if (isRealtimeActive && isCameraOn && !isPaused) {

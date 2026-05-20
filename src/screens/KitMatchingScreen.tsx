@@ -183,8 +183,6 @@ const KitMatchingScreen: React.FC = () => {
       return modelConfig.classes;
     }
 
-    // 如果API配置未加载，返回空数组（不进行硬编码）
-    console.warn('⚠️ 齐套化页面：模型配置未加载，无法获取类别列表，请检查后端API');
     return [];
   }, [modelConfig]);
 

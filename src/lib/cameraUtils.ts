@@ -92,6 +92,8 @@ const pushUniqueCamera = (devices: CameraDevice[], camera: CameraDevice) => {
 
 const getFacingModeFromLabel = (label?: string): CameraDevice['facingMode'] => {
   const normalized = (label || '').toLowerCase();
+  // 强制外接摄像头不属于前置/后置，避免在 Android 设备上被折叠
+  if (/(usb|uvc|external|otg|外接)/i.test(normalized)) return undefined;
   if (/(facing\s+front|front|user|前置)/i.test(normalized)) return 'user';
   if (/(facing\s+back|back|rear|environment|后置)/i.test(normalized)) return 'environment';
   return undefined;

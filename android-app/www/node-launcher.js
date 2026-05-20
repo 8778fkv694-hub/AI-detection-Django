@@ -16,9 +16,21 @@
   var RETRY_INTERVAL = 500;
 
   // 不在 Capacitor 环境（浏览器开发调试）— 直接跳过
+  // 如果已经运行在端口 5001，直接跳过 Node 进程的重复启动，只关闭 Loading 即可
+  if (window.location.port === "5001") {
+    console.log('[NodeLauncher] Already running on port 5001, skipping node bootstrap');
+    setTimeout(function() {
+      if (window._hideAppLoading) window._hideAppLoading();
+    }, 100);
+    return;
+  }
+
+  // 不在 Capacitor 环境（浏览器开发调试）— 直接跳过
   if (typeof cordova === 'undefined') {
     console.log('[NodeLauncher] Not in Capacitor environment, skipping node bootstrap');
-    if (window._hideAppLoading) window._hideAppLoading();
+    setTimeout(function() {
+      if (window._hideAppLoading) window._hideAppLoading();
+    }, 100);
     return;
   }
 
@@ -75,6 +87,14 @@
             console.log('[NodeLauncher] Health check OK:', data);
             window.__NODE_SERVER_READY = true;
             window.__NODE_SERVER_PORT = NODE_PORT;
+
+            // 如果当前不在 5001 端口（即在 Capacitor 默认的 http://localhost 下），则跳转至真实的 Node.js 端口以获得 COOP/COEP 跨域隔离支持
+            if (window.location.port !== "5001") {
+              console.log('[NodeLauncher] Redirecting WebView to Node server http://localhost:5001/');
+              window.location.href = 'http://localhost:5001/';
+              return;
+            }
+
             if (window._hideAppLoading) window._hideAppLoading();
             // 触发前端就绪事件
             window.dispatchEvent(new CustomEvent('node-server-ready', { detail: data }));

@@ -18,7 +18,11 @@ const config: CapacitorConfig = {
       '127.0.0.1',
       'localhost',
       '*.local'
-    ]
+    ],
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    }
   },
   plugins: {
     SplashScreen: {

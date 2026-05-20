@@ -15,15 +15,17 @@ export const API_BASE_URL = (() => {
     }
   }
 
-  // 2. 检查是否为移动端客户端环境
+  // 2. 检查是否为移动端客户端或 Electron 桌面端环境
   const isMobileApp = typeof window !== 'undefined' && (
     (window as any).cordova ||
     (window as any).Capacitor ||
-    (window as any).__IS_MOBILE_APP__
+    (window as any).__IS_MOBILE_APP__ ||
+    (window as any).__IS_ELECTRON__ ||
+    (typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron'))
   );
   if (isMobileApp) {
     const localNodePort = (window as any).__NODE_SERVER_PORT || 5001;
-    console.log(`📱 [Config] 移动端 App 模式: 默认连接本地服务端口 ${localNodePort}`);
+    console.log(`📱💻 [Config] 离线客户端模式: 默认连接本地服务端口 ${localNodePort}`);
     return `http://127.0.0.1:${localNodePort}/api`;
   }
 
@@ -76,6 +78,24 @@ export const DIRECT_BACKEND_API_BASE_URL = (() => {
 
   return API_BASE_URL;
 })();
+
+/**
+ * 判断当前是否处于本地/离线单机运行模式（即：直接连接内置的 Node 本地服务，不使用 Python 后端）
+ */
+export function isLocalOfflineMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  
+  // 1. 如果 API_BASE_URL 显式包含了 5001 端口，说明正在使用本地内置 Express 服务
+  if (API_BASE_URL.includes('5001')) {
+    return true;
+  }
+  
+  // 2. 检查全局标识，如果显式声明了离线或 Electron 离线且没有配自定义 IP
+  const isClientMode = (window as any).__IS_MOBILE_APP__ || (window as any).__IS_ELECTRON__;
+  const hasCustomServer = localStorage.getItem('API_SERVER_URL');
+  
+  return Boolean(isClientMode && !hasCustomServer);
+}
 
 export function buildApiUrl(endpoint: string, baseUrl: string = API_BASE_URL): string {
   return endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
@@ -292,4 +312,23 @@ export async function apiRequest<T = any>(
   } catch (e) {
     throw new Error('收到成功响应，但响应体不是有效的JSON格式');
   }
+}
+
+/**
+ * 辅助解析本地/网络模型相对路径，防止在 Electron file:// 协议下解析到硬盘根目录
+ */
+export function resolveModelUrl(p: string): string {
+  if (p.startsWith('http')) {
+    return p;
+  }
+  if (p.startsWith('file://') && !p.startsWith('file:///models/')) {
+    return p;
+  }
+  const modelPath = p.startsWith('file:///models/') ? p.replace('file:///', '') : p;
+  const rel = modelPath.replace(/^\/+/, '');
+  if (typeof window !== 'undefined') {
+    const assetBase = (window as any).__ELECTRON_ASSET_BASE__;
+    return new URL(rel, assetBase || window.location.href).href;
+  }
+  return p;
 }

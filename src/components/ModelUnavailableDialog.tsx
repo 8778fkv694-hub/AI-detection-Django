@@ -6,6 +6,8 @@ import { AlertCircle, RefreshCw, Settings, X } from 'lucide-react';
 import { getAvailableModels, switchPPEModel } from '@/lib/api';
 import toast from 'react-hot-toast';
 
+import { useNavigate } from 'react-router-dom';
+
 interface ModelUnavailableDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -28,6 +30,7 @@ const ModelUnavailableDialog: React.FC<ModelUnavailableDialogProps> = ({
   errorType,
   onModelSwitched
 }) => {
+  const navigate = useNavigate();
   const [availableModels, setAvailableModels] = React.useState<PPEModel[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [selectedModel, setSelectedModel] = React.useState<string>('');
@@ -88,8 +91,14 @@ const ModelUnavailableDialog: React.FC<ModelUnavailableDialogProps> = ({
   };
 
   const handleOpenModelManagement = () => {
-    // 这里可以导航到模型管理页面
-    window.open('/model-management', '_blank');
+    const isMobile = typeof window !== 'undefined' && (
+      (window as any).Capacitor || (window as any).__IS_MOBILE_APP__
+    );
+    if (isMobile) {
+      navigate('/model-management');
+    } else {
+      window.open('/model-management', '_blank');
+    }
     onClose();
   };
 

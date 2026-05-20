@@ -9,7 +9,7 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
-import { buildApiUrl } from '@/lib/config';
+import { buildApiUrl, isLocalOfflineMode } from '@/lib/config';
 import type { YoloDetection } from '@/lib/yoloDetector';
 
 export interface DetectionStats {
@@ -313,7 +313,7 @@ export const usePPEDetection = ({
   );
 
   useEffect(() => {
-    const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+    const useBackendDetection = !isLocalOfflineMode();
     if (!useBackendDetection || !streamId) return;
 
     const stopLoop = () => {
@@ -363,7 +363,7 @@ export const usePPEDetection = ({
 
     try {
       const useBackendDetection =
-        import.meta.env.VITE_BACKEND_DETECTION !== 'false' && Boolean(streamId);
+        !isLocalOfflineMode() && Boolean(streamId);
       let base64Data = '';
       let detections: YoloDetection[] = [];
       let sourceSize: { width: number; height: number } | undefined;

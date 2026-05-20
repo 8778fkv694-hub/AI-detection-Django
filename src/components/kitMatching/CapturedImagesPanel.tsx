@@ -85,22 +85,32 @@ export const CapturedImagesPanel: React.FC<CapturedImagesPanelProps> = ({
           <div className="text-xs text-slate-400 text-center">
             精选抓拍模式：每次只显示一张最佳图片
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={handleClearCapturedImages} className="flex-1">
-              <Trash2 className="mr-2 h-4 w-4" />清空抓拍图片
-            </Button>
-            <Button variant="outline" onClick={handleSaveToTempFolder} className="flex-1">
-              <Download className="mr-2 h-4 w-4" />保存到临时文件夹
-            </Button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={handleOpenTempFolder} className="flex-1">
-              <FolderOpen className="mr-2 h-4 w-4" />打开临时文件夹
-            </Button>
-            <Button variant="outline" onClick={handleClearTempFolder} className="flex-1">
-              <Trash2 className="mr-2 h-4 w-4" />清空临时文件夹
-            </Button>
-          </div>
+          {!(typeof window !== 'undefined' && ((window as any).Capacitor || (window as any).__IS_MOBILE_APP__)) ? (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={handleClearCapturedImages} className="flex-1">
+                  <Trash2 className="mr-2 h-4 w-4" />清空抓拍图片
+                </Button>
+                <Button variant="outline" onClick={handleSaveToTempFolder} className="flex-1">
+                  <Download className="mr-2 h-4 w-4" />保存到临时文件夹
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={handleOpenTempFolder} className="flex-1">
+                  <FolderOpen className="mr-2 h-4 w-4" />打开临时文件夹
+                </Button>
+                <Button variant="outline" onClick={handleClearTempFolder} className="flex-1">
+                  <Trash2 className="mr-2 h-4 w-4" />清空临时文件夹
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handleClearCapturedImages} className="w-full">
+                <Trash2 className="mr-2 h-4 w-4" />清空抓拍图片
+              </Button>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

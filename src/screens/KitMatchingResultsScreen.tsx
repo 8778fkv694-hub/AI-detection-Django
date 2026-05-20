@@ -8,6 +8,7 @@ import { format, isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/state/appStore';
 import { ImagePreviewModal } from '@/components/ocr/ImagePreviewModal';
+import { navigateClientRoute } from '@/lib/navigation';
 import type { InspectionResult } from '@/types';
 
 // --- 新增的UI组件 ---
@@ -583,7 +584,7 @@ const EmptyState: React.FC = () => (
     <p className="text-sm text-center max-w-xs">
       请返回检测页面开始新的检测，结果将在这里自动汇总。
     </p>
-    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => (window.location.href = '/kit-matching')}>
+    <Button variant="outline" className="mt-6 border-slate-600 hover:bg-slate-800" onClick={() => navigateClientRoute('/kit-matching')}>
       <ArrowLeft className="h-4 w-4 mr-2" />
       返回齐套化检测
     </Button>

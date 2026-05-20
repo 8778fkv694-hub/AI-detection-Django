@@ -13,6 +13,7 @@ import { StreamSettingsPopover } from '@/components/StreamSettingsPopover';
 import { ServerConfigPopover } from '@/components/ServerConfigPopover';
 import { cn } from '@/lib/utils';
 import { initCsrfToken } from '@/lib/config';
+import { buildClientRouteUrl } from '@/lib/navigation';
 
 import HomeScreen from '@/screens/HomeScreen';
 import LiveInspectionScreen from '@/screens/LiveInspectionScreen';
@@ -118,7 +119,8 @@ const AppMobile: React.FC = () => {
   // 打开新窗口功能
   const openInNewWindow = (href: string, name: string) => {
     const windowId = `window_${name}_${Date.now()}`;
-    const urlWithId = `${href}?windowId=${windowId}`;
+    const separator = href.includes('?') ? '&' : '?';
+    const urlWithId = buildClientRouteUrl(`${href}${separator}windowId=${windowId}`);
 
     const newWindow = window.open(
       urlWithId,
@@ -185,7 +187,7 @@ const AppMobile: React.FC = () => {
                   </NavLink>
 
                   {/* 新窗口按钮 */}
-                  {item.allowNewWindow && (
+                  {item.allowNewWindow && !(typeof window !== 'undefined' && ((window as any).Capacitor || (window as any).__IS_MOBILE_APP__)) && (
                     <Button
                       onClick={(e) => {
                         e.preventDefault();

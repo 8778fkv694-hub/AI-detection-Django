@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAIConfigStore } from '@/state/aiConfigStore';
 import { useAppStore } from '@/state/appStore';
-import { apiRequest, apiFetch } from '@/lib/config';
+import { apiRequest, apiFetch, isLocalOfflineMode } from '@/lib/config';
+import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
 import { getDataStats, getYoloStatus, getModelPoolStatus, testAIConnection } from '@/lib/api';
 import { getStreamManagerStatus } from '@/api/streamApi';
 import { getPreprocessingStatus } from '@/lib/imagePreprocessingApi';
@@ -137,6 +138,7 @@ const HomeDashboard: React.FC = () => {
   const [testingService, setTestingService] = useState<string | null>(null);
 
   const checkAll = useCallback(async () => {
+    const isOffline = isLocalOfflineMode();
     setServices(prev => prev.map(s => ({ ...s, loading: true })));
 
     const backendPromise = (async () => {
@@ -147,6 +149,11 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const yoloPromise = (async () => {
+      if (isOffline) {
+        const config = onnxYoloDetector.getConfig();
+        const activeModelName = config.modelPath.split('/').pop() || 'ppe.onnx';
+        return { ok: true, detail: `WASM 引擎已就绪 (${activeModelName})` };
+      }
       try {
         const status = await getYoloStatus();
         const pool = await getModelPoolStatus();
@@ -160,6 +167,7 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const aiPromise = (async () => {
+      if (isOffline) return { ok: false, detail: '未配置' };
       if (!config.apiKey && !config.apiBaseUrl) return { ok: false, detail: '未配置' };
       try {
         await testAIConnection(config);
@@ -168,6 +176,7 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const ollamaPromise = (async () => {
+      if (isOffline) return { ok: false, detail: '未配置' };
       try {
         const res = await apiFetch('/ollama/status/');
         if (!res.ok) throw new Error('ollama status error');
@@ -181,6 +190,7 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const ocrPromise = (async () => {
+      if (isOffline) return { ok: false, detail: '未配置' };
       try {
         const res = await apiFetch('/ocr/status/');
         if (!res.ok) throw new Error('ocr status error');
@@ -193,6 +203,7 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const qrPromise = (async () => {
+      if (isOffline) return { ok: false, detail: '未配置' };
       try {
         const res = await apiFetch('/wechat-qr/status/');
         if (!res.ok) throw new Error('qr status error');
@@ -206,6 +217,7 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const streamPromise = (async () => {
+      if (isOffline) return { ok: false, detail: '未配置' };
       try {
         const status = await getStreamManagerStatus();
         const activeCount = Object.values(status.streams || {}).filter((s: any) => s.is_running).length;
@@ -231,25 +243,49 @@ const HomeDashboard: React.FC = () => {
     const [backendOk, yoloResult, aiResult, ollamaResult, ocrResult, qrResult, streamResult, preprocessResult, statsData] = await Promise.all([
       withTimeout(backendPromise, false, 5000),
       withTimeout(yoloPromise, { ok: false, detail: '检查超时' }, 10000),
-      withTimeout(aiPromise, { ok: false, detail: '检查超时' }, 8000),
-      withTimeout(ollamaPromise, { ok: false, detail: '检查超时' }, 8000),
-      withTimeout(ocrPromise, { ok: false, detail: '检查超时' }, 8000),
-      withTimeout(qrPromise, { ok: false, detail: '检查超时' }, 8000),
+      withTimeout(aiPromise, { ok: false, detail: '检查超时' }, 2000),
+      withTimeout(ollamaPromise, { ok: false, detail: '检查超时' }, 2000),
+      withTimeout(ocrPromise, { ok: false, detail: '检查超时' }, 2000),
+      withTimeout(qrPromise, { ok: false, detail: '检查超时' }, 2000),
       withTimeout(streamPromise, { ok: false, detail: '检查超时' }, 5000),
       withTimeout(preprocessPromise, { ok: false, detail: '检查超时' }, 5000),
       withTimeout(statsPromise, null, 8000),
     ]);
 
-    const serviceList: ServiceStatus[] = [
-      { name: '后端服务', ok: backendOk as boolean, loading: false, detail: window.location.port ? `:${window.location.port}` : undefined },
-      { name: 'YOLO 检测', ok: yoloResult.ok, loading: false, detail: yoloResult.detail, testAction: async () => { const s = await getYoloStatus(); const p = await getModelPoolStatus(); setModelPoolInfo({ loaded_models: p.loaded_models, pool_size: p.pool_size, current_model: p.current_model }); return { ok: s.loaded, detail: `当前: ${p.current_model || '未加载'}` }; } },
-      { name: '云端 AI', ok: aiResult.ok, loading: false, detail: aiResult.detail, testAction: async () => { if (!config.apiKey && !config.apiBaseUrl) return { ok: false, detail: '未配置' }; try { await testAIConnection(config); return { ok: true, detail: config.modelName }; } catch { return { ok: false, detail: config.modelName }; } } },
-      { name: 'Ollama 本地', ok: ollamaResult.ok, loading: false, detail: ollamaResult.detail, testAction: async () => { const res = await apiFetch('/ollama/status/'); const data = await res.json(); if (data.success && data.status === 'running') { return { ok: true, detail: (data.models || []).map((m: any) => m.name || m).join(', ') || '运行中' }; } return { ok: false, detail: data.status || '未运行' }; } },
-      { name: 'OCR 引擎', ok: ocrResult.ok, loading: false, detail: ocrResult.detail, testAction: triggerOCRModelLoad },
-      { name: '二维码检测', ok: qrResult.ok, loading: false, detail: qrResult.detail, testAction: triggerQRModelLoad },
-      { name: '视频流', ok: streamResult.ok, loading: false, detail: streamResult.detail, testAction: async () => { const status = await getStreamManagerStatus(); const ac = Object.values(status.streams || {}).filter((s: any) => s.is_running).length; return { ok: true, detail: `${ac}/${status.total_streams || 0} 活跃` }; } },
-      { name: '图片预处理', ok: preprocessResult.ok, loading: false, detail: preprocessResult.detail, testAction: async () => { const data = await getPreprocessingStatus(); if (data.success) return { ok: true, detail: data.version ? `v${data.version}` : '可用' }; return { ok: false, detail: '不可用' }; } },
-    ];
+    let serviceList: ServiceStatus[];
+    if (isOffline) {
+      serviceList = [
+        { 
+          name: 'Express 离线服务', 
+          ok: backendOk as boolean, 
+          loading: false, 
+          detail: '本地端口: 5001' 
+        },
+        { 
+          name: 'YOLO 本地推理', 
+          ok: yoloResult.ok, 
+          loading: false, 
+          detail: yoloResult.detail 
+        },
+        { 
+          name: '本地图片预处理', 
+          ok: preprocessResult.ok, 
+          loading: false, 
+          detail: preprocessResult.detail 
+        },
+      ];
+    } else {
+      serviceList = [
+        { name: '后端服务', ok: backendOk as boolean, loading: false, detail: window.location.port ? `:${window.location.port}` : undefined },
+        { name: 'YOLO 检测', ok: yoloResult.ok, loading: false, detail: yoloResult.detail, testAction: async () => { const s = await getYoloStatus(); const p = await getModelPoolStatus(); setModelPoolInfo({ loaded_models: p.loaded_models, pool_size: p.pool_size, current_model: p.current_model }); return { ok: s.loaded, detail: `当前: ${p.current_model || '未加载'}` }; } },
+        { name: '云端 AI', ok: aiResult.ok, loading: false, detail: aiResult.detail, testAction: async () => { if (!config.apiKey && !config.apiBaseUrl) return { ok: false, detail: '未配置' }; try { await testAIConnection(config); return { ok: true, detail: config.modelName }; } catch { return { ok: false, detail: config.modelName }; } } },
+        { name: 'Ollama 本地', ok: ollamaResult.ok, loading: false, detail: ollamaResult.detail, testAction: async () => { const res = await apiFetch('/ollama/status/'); const data = await res.json(); if (data.success && data.status === 'running') { return { ok: true, detail: (data.models || []).map((m: any) => m.name || m).join(', ') || '运行中' }; } return { ok: false, detail: data.status || '未运行' }; } },
+        { name: 'OCR 引擎', ok: ocrResult.ok, loading: false, detail: ocrResult.detail, testAction: triggerOCRModelLoad },
+        { name: '二维码检测', ok: qrResult.ok, loading: false, detail: qrResult.detail, testAction: triggerQRModelLoad },
+        { name: '视频流', ok: streamResult.ok, loading: false, detail: streamResult.detail, testAction: async () => { const status = await getStreamManagerStatus(); const ac = Object.values(status.streams || {}).filter((s: any) => s.is_running).length; return { ok: true, detail: `${ac}/${status.total_streams || 0} 活跃` }; } },
+        { name: '图片预处理', ok: preprocessResult.ok, loading: false, detail: preprocessResult.detail, testAction: async () => { const data = await getPreprocessingStatus(); if (data.success) return { ok: true, detail: data.version ? `v${data.version}` : '可用' }; return { ok: false, detail: '不可用' }; } },
+      ];
+    }
     setServices(serviceList);
 
     if (statsData) {
@@ -278,7 +314,12 @@ const HomeDashboard: React.FC = () => {
   }, [config.apiKey, config.apiBaseUrl, config.modelName, results]);
 
   useEffect(() => {
-    const initial: ServiceStatus[] = [
+    const isOffline = isLocalOfflineMode();
+    const initial: ServiceStatus[] = isOffline ? [
+      { name: 'Express 离线服务', ok: false, loading: true },
+      { name: 'YOLO 本地推理', ok: false, loading: true },
+      { name: '本地图片预处理', ok: false, loading: true },
+    ] : [
       { name: '后端服务', ok: false, loading: true },
       { name: 'YOLO 检测', ok: false, loading: true },
       { name: '云端 AI', ok: false, loading: true },
@@ -365,7 +406,7 @@ const HomeDashboard: React.FC = () => {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
           {services.map(s => (
             <div
               key={s.name}

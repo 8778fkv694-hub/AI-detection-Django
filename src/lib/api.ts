@@ -1,6 +1,6 @@
 
 import type { AIConfig, Standard, InspectionResult } from '@/types';
-import { apiRequest, apiFetch, directBackendFetch } from './config';
+import { apiRequest, apiFetch, directBackendFetch, isLocalOfflineMode } from './config';
 import { composeInspectionSystemPrompt } from './llmPrompt';
 import { onnxYoloDetector } from './onnxYoloDetector';
 
@@ -191,20 +191,43 @@ export async function yoloDetectBackend(
     requestStartTime = now;
 
     try {
-        if ((window as any).__IS_MOBILE_APP__) {
-            console.log('[yoloDetectBackend] 📱 移动端 App 环境下拦截 YOLO 检测请求，使用本地 ONNX 进行推理');
+        if (isLocalOfflineMode()) {
+            console.log('[yoloDetectBackend] 📱💻 客户端离线模式下拦截 YOLO 检测请求，使用本地 ONNX 进行推理');
             try {
-                // 如果是移动端 App，使用 ONNX Runtime WASM
+                // 根据 options 中的 model_id 或 detection_type 自动确定目标模型 ID
+                let targetModelId = 'ppe_detection';
+                if (options?.model_id) {
+                    targetModelId = options.model_id;
+                } else if (options?.detection_type === 'cleanroom_ppe') {
+                    targetModelId = 'ppe_detection';
+                } else if (options?.detection_type === 'general_quality') {
+                    targetModelId = 'yolov8n';
+                }
+
+                const targetConfig = onnxYoloDetector.getModelConfigById(targetModelId);
+                const activeConfig = onnxYoloDetector.getConfig();
+
+                // 如果当前加载的不是目标模型，或者模型还没加载，就执行切换
+                const isLoaded = onnxYoloDetector.getModelStatus().isLoaded;
+                if (!isLoaded || activeConfig.modelPath !== targetConfig.modelPath) {
+                    console.log(`[yoloDetectBackend] 🔄 正在切换本地 ONNX 模型为: ${targetModelId} (${targetConfig.modelPath})`);
+                    const success = await onnxYoloDetector.switchModel(targetConfig.modelPath, targetConfig.classNames);
+                    if (!success) {
+                        throw new Error(`本地模型切换失败: ${targetModelId}`);
+                    }
+                }
+
+                // 使用 ONNX Runtime WASM 进行检测
                 const detections = await onnxYoloDetector.detect(imageBase64);
                 
                 // 根据传入置信度过滤
                 const filtered = detections.filter(d => d.confidence >= conf);
-                console.log(`[yoloDetectBackend] 📱 本地 ONNX 推理成功，检出 ${filtered.length} 个目标`);
+                console.log(`[yoloDetectBackend] 📱💻 本地 ONNX 推理成功，模型: ${targetModelId}，检出 ${filtered.length} 个目标`);
                 
                 isRequestInProgress = false;
                 return filtered;
             } catch (onnxError) {
-                console.error('[yoloDetectBackend] 📱 本地 ONNX 推理失败，降级网络请求:', onnxError);
+                console.error('[yoloDetectBackend] 📱💻 本地 ONNX 推理失败，降级网络请求:', onnxError);
             }
         }
 

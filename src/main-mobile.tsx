@@ -1,22 +1,28 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import AppMobile from './AppMobile';
 import './index.css';
 
-// 标记移动端环境，供全局或组件内部判断
-(window as any).__IS_MOBILE_APP__ = true;
+const isElectron = Boolean((window as any).__IS_ELECTRON__);
+
+// 标记移动端环境，供全局或组件内部判断；Electron 桌面端不能被覆盖成移动端
+if (!isElectron) {
+  (window as any).__IS_MOBILE_APP__ = true;
+}
 
 function mountReact() {
   if ((window as any).__REACT_MOUNTED__) return;
   (window as any).__REACT_MOUNTED__ = true;
   console.log('[main-mobile] mountReact called');
+
+  const Router = isElectron ? HashRouter : BrowserRouter;
   
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <BrowserRouter>
+      <Router>
         <AppMobile />
-      </BrowserRouter>
+      </Router>
     </StrictMode>
   );
 }

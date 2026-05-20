@@ -72,46 +72,55 @@ export const LiveCapturedImagesGrid: React.FC<LiveCapturedImagesGridProps> = ({
           </div>
 
           {/* 管理功能按钮 */}
-          <div className="space-y-2">
-            <div className="text-xs text-slate-400 text-center">
-              显示最近10张，保存时包含所有历史抓拍
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onSaveToTempFolder}
-                className="text-xs"
-              >
-                <Download className="h-3 w-3 mr-1" />
-                保存到临时文件夹
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onOpenTempFolder}
-                className="text-xs"
-              >
-                <FolderOpen className="h-3 w-3 mr-1" />
-                打开临时文件夹
-              </Button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onClearTempFolder}
-              className="text-xs text-red-400 hover:text-red-300"
-            >
-              <Trash2 className="h-3 w-3 mr-1" />
-              清空临时文件夹
-            </Button>
-            <div className="text-xs text-slate-500 flex items-center justify-center">
+          {!(typeof window !== 'undefined' && ((window as any).Capacitor || (window as any).__IS_MOBILE_APP__)) ? (
+            <>
+              <div className="space-y-2">
+                <div className="text-xs text-slate-400 text-center">
+                  显示最近10张，保存时包含所有历史抓拍
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onSaveToTempFolder}
+                    className="text-xs"
+                  >
+                    <Download className="h-3 w-3 mr-1" />
+                    保存到临时文件夹
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onOpenTempFolder}
+                    className="text-xs"
+                  >
+                    <FolderOpen className="h-3 w-3 mr-1" />
+                    打开临时文件夹
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onClearTempFolder}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  清空临时文件夹
+                </Button>
+                <div className="text-xs text-slate-500 flex items-center justify-center">
+                  当前模式: {imageSaveMode === 'roi' ? 'ROI截图' : '全画面'}
+                  {imageSaveMode === 'roi' && ' (仅自动检测)'}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-slate-500 flex items-center justify-center py-2">
               当前模式: {imageSaveMode === 'roi' ? 'ROI截图' : '全画面'}
               {imageSaveMode === 'roi' && ' (仅自动检测)'}
             </div>
-          </div>
+          )}
         </div>
       ) : (
         <div className="text-center py-4">

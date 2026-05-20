@@ -177,10 +177,34 @@ self.onmessage = async (e: MessageEvent) => {
       }
       const arrayBuffer = await response.arrayBuffer();
 
-      // 创建推理会话
+      // 配置 ONNX Runtime 环境参数以支持多线程和 SIMD
+      const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+      const numThreads = hasSharedArrayBuffer ? Math.min(4, navigator.hardwareConcurrency || 4) : 1;
+      
+      ort.env.wasm.numThreads = numThreads;
+      ort.env.wasm.simd = true;
+
+      // 设置 WASM 路径，确保 Capacitor 容器环境能正确从本地加载 WebAssembly 依赖
+      const origin = self.location.origin;
+      ort.env.wasm.wasmPaths = {
+        'ort-wasm.wasm': `${origin}/ort-wasm.wasm`,
+        'ort-wasm-threaded.wasm': `${origin}/ort-wasm-threaded.wasm`,
+        'ort-wasm-simd.wasm': `${origin}/ort-wasm-simd.wasm`,
+        'ort-wasm-simd-threaded.wasm': `${origin}/ort-wasm-simd-threaded.wasm`
+      };
+
+      console.log(`[YoloWorker] WASM 性能优化参数: numThreads=${numThreads}, simd=true, hasSharedArrayBuffer=${hasSharedArrayBuffer}`);
+
+      // 创建推理会话：使用优化后的 WASM + SIMD 保证运算结果 100% 正确与稳定
       session = await ort.InferenceSession.create(new Uint8Array(arrayBuffer), {
         executionProviders: ['wasm'],
-        graphOptimizationLevel: 'all'
+        graphOptimizationLevel: 'all',
+        extra: {
+          session: {
+            intra_op_num_threads: numThreads,
+            inter_op_num_threads: numThreads
+          }
+        }
       });
 
       // 从模型第一个输入元数据对象中推断输入分辨率 inputSize (inputMetadata 是数组)

@@ -6,6 +6,7 @@
 
 import type { BackendYoloDetection } from '@/types';
 import YoloWorker from './yolo.worker?worker';
+import { resolveModelUrl } from '@/lib/config';
 
 export interface OnnxYoloConfig {
   modelPath: string;
@@ -140,7 +141,7 @@ class OnnxYoloDetector {
       this.worker.postMessage({
         type: 'init',
         payload: {
-          modelPath: this.config.modelPath,
+          modelPath: resolveModelUrl(this.config.modelPath),
           inputSize: this.config.inputSize,
           confidenceThreshold: this.config.confidenceThreshold,
           nmsThreshold: this.config.nmsThreshold,

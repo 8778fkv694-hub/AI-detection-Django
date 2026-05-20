@@ -170,7 +170,7 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
       </div>
 
       {/* 摄像头选择器 */}
-      <Select value={selectedDeviceId} onValueChange={onSwitchCamera}>
+      <Select value={selectedDeviceId || ''} onValueChange={onSwitchCamera}>
         <SelectTrigger className="w-full bg-slate-800 border-slate-600">
           <SelectValue
             placeholder={videoDevices.length > 0 ? '选择摄像头' : '未检测到摄像头'}

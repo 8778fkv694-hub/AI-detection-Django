@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend } from '@/lib/api';
-import { buildApiUrl } from '@/lib/config';
+import { buildApiUrl, isLocalOfflineMode } from '@/lib/config';
 import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
 import { useModelPool } from '@/hooks/useModelPool';
 import type { BackendYoloDetection } from '@/types';
@@ -131,10 +131,11 @@ export const useLiveYoloDetection = ({
 
   const { activeModelId } = useModelPool();
 
-  // 当移动端离线激活模型变化时，自动切换本地 ONNX 模型，不硬编码
+  // 当移动端/桌面端离线激活模型变化时，自动切换本地 ONNX 模型，不硬编码
   useEffect(() => {
-    if ((window as any).__IS_MOBILE_APP__ && activeModelId) {
-      console.log(`[ONNX] 移动端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
+    const isOfflineClient = (window as any).__IS_MOBILE_APP__ || (window as any).__IS_ELECTRON__;
+    if (isOfflineClient && activeModelId) {
+      console.log(`[ONNX] 客户端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
       const { modelPath, classNames } = onnxYoloDetector.getModelConfigById(activeModelId);
       
       onnxYoloDetector.switchModel(modelPath, classNames).then((success) => {
@@ -173,10 +174,15 @@ export const useLiveYoloDetection = ({
       return;
     }
 
-    // 移动端环境下，如果距离上次推理完成小于 3 秒，则跳过（主动引入降采样/冷却，留出 CPU 让 WebView 渲染画面）
-    if ((window as any).__IS_MOBILE_APP__) {
+    // 移动端/工控机环境下，主动引入降采样/冷却，留出 CPU 让 WebView 渲染画面
+    // 移动端/工控机环境下，主动引入极短冷却时间，留出少许 CPU 时间供 WebView 渲染画面
+    const isMobile = (window as any).__IS_MOBILE_APP__;
+    const isElectron = (window as any).__IS_ELECTRON__;
+    if (isMobile || isElectron) {
       const now = Date.now();
-      if (now - lastDetectTimeRef.current < 3000) {
+      // 在多线程 Web Worker 模式下，设置极小冷却时间 (16ms = 60fps 刷新率) 以避免阻塞主线程渲染
+      const cooldownMs = 16;
+      if (now - lastDetectTimeRef.current < cooldownMs) {
         return;
       }
     }
@@ -188,7 +194,7 @@ export const useLiveYoloDetection = ({
 
     isDetectingRef.current = true;
     try {
-      const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+      const useBackendDetection = !isLocalOfflineMode();
       let detections: BackendYoloDetection[] = [];
       let currentFrameId = 0;
 
@@ -210,8 +216,8 @@ export const useLiveYoloDetection = ({
         } catch (e) {
           console.error('拉取后端检测结果失败:', e);
         }
-      } else if ((window as any).__IS_MOBILE_APP__) {
-        // 移动端模式：使用前端 ONNX 推理（避免后端 501）
+      } else if (isMobile || isElectron) {
+        // 移动端/桌面端离线模式：使用前端 ONNX 推理
         try {
           const startTime = performance.now();
           detections = await onnxYoloDetector.detectFromVideo(videoRef.current);
@@ -477,7 +483,7 @@ export const useLiveYoloDetection = ({
 
   // ====== 后端检测循环生命周期管理 ======
   useEffect(() => {
-    const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
+    const useBackendDetection = !isLocalOfflineMode();
     if (!useBackendDetection || !streamId) return;
 
     if (isCameraOn && isYoloActive) {
@@ -511,12 +517,34 @@ export const useLiveYoloDetection = ({
     };
   }, [isCameraOn, isYoloActive, streamId, detectionConfidence, modelId]);
 
-  // YOLO检测循环
+  // YOLO检测循环 (使用自适应递归循环取代硬编码的 500ms 轮询，解除帧率上限)
   useEffect(() => {
     if (!isYoloActive || !isCameraOn) return;
 
-    const interval = setInterval(performYoloDetection, 500);
-    return () => clearInterval(interval);
+    let active = true;
+    const useBackendDetection = !isLocalOfflineMode();
+    // 远程 Jetson 后端模式下轮询间隔 50ms (20 FPS)，本地 ONNX 模式下设置极小延时 (16ms = 60fps 刷新率) 以获取最大流畅度
+    const loopInterval = useBackendDetection ? 50 : 16;
+
+    const runLoop = async () => {
+      while (active) {
+        if (isYoloActive && isCameraOn && !isDetectingRef.current) {
+          try {
+            await performYoloDetection();
+          } catch (err) {
+            console.error('[YoloLoop] 检测帧异常:', err);
+          }
+        }
+        // 使用 setTimeout 间歇出让 CPU 渲染主线程，保证画面流畅度
+        await new Promise((resolve) => setTimeout(resolve, loopInterval));
+      }
+    };
+
+    runLoop();
+
+    return () => {
+      active = false;
+    };
   }, [isYoloActive, isCameraOn, performYoloDetection]);
 
   // 在画布上绘制检测框

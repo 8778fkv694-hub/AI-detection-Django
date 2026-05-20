@@ -71,6 +71,11 @@ fi
 echo "[build-apk] 在 nodejs-project 中执行 npm install..."
 (cd www/nodejs-project && npm install --no-audit --no-fund)
 
+# 复制前端打包产物到 nodejs-project 中供后端托管以支持 Cross-Origin Isolation
+echo "[build-apk] 复制 React 前端产物 dist 目录到 nodejs-project..."
+rm -rf www/nodejs-project/dist
+cp -R www/dist www/nodejs-project/dist
+
 # ── 3. Capacitor Android 同步 ──────────────────────
 echo "[build-apk] 步骤 3/8：npx cap sync android..."
 npx cap sync android
@@ -145,42 +150,43 @@ echo "[build-apk] ✅ nodejs-project 资源同步就绪"
 fi
 
 # ── 7b. 同步模型权重到 APK assets ───────────────────
-echo "[build-apk] 步骤 7b/8：同步模型权重 → assets..."
+echo "[build-apk] 步骤 7b/8：优化 APK 包体大小，跳过 .pt 权重 (使用端侧 .onnx 代替)..."
 MODEL_SRC_DIR="$ROOT/../models"
 MODEL_DST_DIR="android/app/src/main/assets/public/nodejs-project/models"
-MODEL_FILES=(
-  "ppe.pt"
-  "filter.pt"
-  "waterprifer.pt"
-  "yolo10x.pt"
-  "yolov8n.pt"
-)
-
 mkdir -p "$MODEL_DST_DIR"
-for MODEL_FILE in "${MODEL_FILES[@]}"; do
-  if [ -f "$MODEL_SRC_DIR/$MODEL_FILE" ]; then
-    cp "$MODEL_SRC_DIR/$MODEL_FILE" "$MODEL_DST_DIR/$MODEL_FILE"
-    SIZE="$(du -h "$MODEL_DST_DIR/$MODEL_FILE" | awk '{print $1}')"
-    echo "[build-apk]   ✅ $MODEL_FILE ($SIZE)"
-  else
-    echo "[build-apk]   ⚠️ 缺少模型文件: $MODEL_SRC_DIR/$MODEL_FILE"
-  fi
-done
-echo "[build-apk] ✅ 模型权重同步完成"
 
 # ── 7c. 同步 ONNX 模型到前端 dist（供 onnxruntime-web fetch）──
 echo "[build-apk] 步骤 7c/8：同步 ONNX 模型 → www/dist/models..."
 ONNX_DST_DIR="www/dist/models"
+rm -rf "$ONNX_DST_DIR"
+rm -rf "android/app/src/main/assets/public/models"
 mkdir -p "$ONNX_DST_DIR"
+mkdir -p "android/app/src/main/assets/public/models"
 ONNX_COUNT=0
 for ONNX_FILE in "$MODEL_SRC_DIR"/*.onnx; do
   if [ -f "$ONNX_FILE" ]; then
     BASENAME="$(basename "$ONNX_FILE")"
+    if [ "$BASENAME" = "ppe_large.onnx" ]; then
+      echo "[build-apk]   Skip $BASENAME (redundant on mobile)"
+      continue
+    fi
+    # 1. 复制到 www/dist/models/ (网页端开发/WebView 用)
     cp "$ONNX_FILE" "$ONNX_DST_DIR/$BASENAME"
-    # 也复制到 Node assets 目录和 WebView assets 目录
-    cp "$ONNX_FILE" "$MODEL_DST_DIR/$BASENAME"
+    
+    # 2. 复制到 Node.js 源码 dist 目录下 (保证源码完整)
+    mkdir -p "www/nodejs-project/dist/models"
+    cp "$ONNX_FILE" "www/nodejs-project/dist/models/$BASENAME"
+    
+    # 3. 复制到 Android 资产目录下的 Node.js dist 目录 (port 5001 Express 真实托管用)
+    mkdir -p "android/app/src/main/assets/public/nodejs-project/dist/models"
+    cp "$ONNX_FILE" "android/app/src/main/assets/public/nodejs-project/dist/models/$BASENAME"
+    
+    # 4. 复制到 Android 资产目录下的 WebView 目录
     mkdir -p "android/app/src/main/assets/public/models"
     cp "$ONNX_FILE" "android/app/src/main/assets/public/models/$BASENAME"
+    
+    # 5. 复制到原有的 Node 外部 models 目录 (兼容原有逻辑)
+    cp "$ONNX_FILE" "$MODEL_DST_DIR/$BASENAME"
     SIZE="$(du -h "$ONNX_DST_DIR/$BASENAME" | awk '{print $1}')"
     echo "[build-apk]   ✅ $BASENAME ($SIZE) → www/dist/models + assets + public/models"
     ONNX_COUNT=$((ONNX_COUNT + 1))

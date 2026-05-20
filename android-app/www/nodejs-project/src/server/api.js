@@ -150,6 +150,104 @@ router.post('/standards/?', asyncHandler(async (req, res) => {
     res.json(newStandard);
 }));
 
+const ensureCollection = (db, name) => {
+    if (!db.has(name).value()) {
+        db.set(name, []).write();
+    }
+    return db.get(name);
+};
+
+const createCrudRoutes = (basePath, collectionName) => {
+    router.get(`${basePath}/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        res.json(ensureCollection(db, collectionName).value() || []);
+    }));
+
+    router.get(`${basePath}/:id/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        const item = ensureCollection(db, collectionName).find({ id: req.params.id }).value();
+        if (!item) return res.status(404).json({ message: 'Not found' });
+        res.json(item);
+    }));
+
+    router.post(`${basePath}/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        const now = new Date().toISOString();
+        const newItem = {
+            id: req.body.id || Date.now().toString(),
+            ...req.body,
+            created_at: req.body.created_at || now,
+            updated_at: req.body.updated_at || now
+        };
+        ensureCollection(db, collectionName).push(newItem).write();
+        res.json(newItem);
+    }));
+
+    router.patch(`${basePath}/:id/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        const collection = ensureCollection(db, collectionName);
+        const existing = collection.find({ id: req.params.id }).value();
+        if (!existing) return res.status(404).json({ message: 'Not found' });
+        const updated = {
+            ...existing,
+            ...req.body,
+            id: existing.id,
+            updated_at: new Date().toISOString()
+        };
+        collection.find({ id: req.params.id }).assign(updated).write();
+        res.json(updated);
+    }));
+
+    router.put(`${basePath}/:id/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        const collection = ensureCollection(db, collectionName);
+        const existing = collection.find({ id: req.params.id }).value();
+        if (!existing) return res.status(404).json({ message: 'Not found' });
+        const updated = {
+            ...req.body,
+            id: existing.id,
+            created_at: existing.created_at,
+            updated_at: new Date().toISOString()
+        };
+        collection.find({ id: req.params.id }).assign(updated).write();
+        res.json(updated);
+    }));
+
+    router.delete(`${basePath}/:id/?`, asyncHandler(async (req, res) => {
+        const db = getDb();
+        ensureCollection(db, collectionName).remove({ id: req.params.id }).write();
+        res.status(204).end();
+    }));
+};
+
+createCrudRoutes('/ocr-keyword-templates', 'ocrKeywordTemplates');
+createCrudRoutes('/ocr-barcode-templates', 'ocrBarcodeTemplates');
+createCrudRoutes('/stage-recipes', 'stageRecipes');
+createCrudRoutes('/product-recipes', 'productRecipes');
+
+router.post('/product-recipes/:id/assign-stages/?', asyncHandler(async (req, res) => {
+    const db = getDb();
+    const collection = ensureCollection(db, 'productRecipes');
+    const product = collection.find({ id: req.params.id }).value();
+    if (!product) return res.status(404).json({ message: 'Not found' });
+
+    const stages = (req.body.stages || []).map((stage, index) => ({
+        id: stage.id || `${req.params.id}_stage_${index}_${Date.now()}`,
+        stage_recipe: stage.stage_recipe_id || stage.stage_recipe || '',
+        stage_recipe_name: stage.stage_recipe_name || '',
+        order: (stage.order !== undefined && stage.order !== null) ? stage.order : index,
+        is_fqc: Boolean(stage.is_fqc)
+    }));
+
+    collection.find({ id: req.params.id }).assign({
+        ...product,
+        stages,
+        updated_at: new Date().toISOString()
+    }).write();
+
+    res.json(stages);
+}));
+
 // 本地离线判定引擎：用于在网络离线或未配置大模型时，生成符合业务规范的质检报告
 const generateOfflineInspectionResult = (standard, supplementaryPrompt) => {
     const standardName = (standard && standard.name) || '通用待检项';
@@ -214,6 +312,9 @@ const getModelSearchDirs = () => {
 };
 
 const getModelFileInfo = (file) => {
+    const isPt = file && file.endsWith('.pt');
+    const onnxFile = isPt ? file.replace('.pt', '.onnx') : file;
+
     for (const dir of getModelSearchDirs()) {
         const candidate = path.join(dir, file);
         if (fs.existsSync(candidate)) {
@@ -222,6 +323,16 @@ const getModelFileInfo = (file) => {
                 exists: true,
                 file_size: stat.size,
                 local_path: candidate
+            };
+        }
+
+        const onnxCandidate = path.join(dir, onnxFile);
+        if (isPt && fs.existsSync(onnxCandidate)) {
+            const stat = fs.statSync(onnxCandidate);
+            return {
+                exists: true,
+                file_size: stat.size,
+                local_path: onnxCandidate
             };
         }
     }
