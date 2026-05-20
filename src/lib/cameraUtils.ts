@@ -11,6 +11,8 @@ export interface CameraDevice {
   kind: string;
   isVirtual?: boolean; // 标识是否为虚拟流媒体摄像头
   streamSource?: StreamSource; // 如果是虚拟摄像头，保存流媒体源信息
+  facingMode?: 'user' | 'environment';
+  alternateDeviceIds?: string[];
 }
 
 export interface GetCameraDevicesOptions {
@@ -28,16 +30,22 @@ export const buildCameraVideoConstraints = (
   } = {}
 ): MediaTrackConstraints => {
   const { width = 1280, height = 720, facingMode } = options;
+  const syntheticFacingMode =
+    deviceId === 'mobile-facing-user'
+      ? 'user'
+      : deviceId === 'mobile-facing-environment'
+        ? 'environment'
+        : undefined;
   const constraints: MediaTrackConstraints = {
     width: { ideal: width },
     height: { ideal: height },
   };
 
-  if (deviceId) {
+  if (deviceId && !syntheticFacingMode) {
     constraints.deviceId = { exact: deviceId };
   }
-  if (facingMode) {
-    constraints.facingMode = { ideal: facingMode };
+  if (facingMode || syntheticFacingMode) {
+    constraints.facingMode = { ideal: facingMode || syntheticFacingMode };
   }
 
   return constraints;
@@ -51,11 +59,13 @@ export const isCameraSecureContext = (): boolean => {
 
 const normalizePhysicalCamera = (device: MediaDeviceInfo): CameraDevice => {
   const nativeDeviceId = device.deviceId?.trim() || '';
+  const facingMode = getFacingModeFromLabel(device.label);
   return {
     deviceId: nativeDeviceId,
     label: device.label || (nativeDeviceId ? `摄像头 ${nativeDeviceId.slice(0, 8)}...` : '未授权摄像头'),
     kind: device.kind,
     isVirtual: false,
+    facingMode,
   };
 };
 
@@ -70,6 +80,7 @@ export const cameraFromTrack = (track?: MediaStreamTrack): CameraDevice | null =
     label: track.label || `摄像头 ${nativeDeviceId.slice(0, 8)}...`,
     kind: 'videoinput',
     isVirtual: false,
+    facingMode: getFacingModeFromLabel(track.label),
   };
 };
 
@@ -77,6 +88,65 @@ const pushUniqueCamera = (devices: CameraDevice[], camera: CameraDevice) => {
   if (!devices.some((item) => item.deviceId === camera.deviceId)) {
     devices.push(camera);
   }
+};
+
+const getFacingModeFromLabel = (label?: string): CameraDevice['facingMode'] => {
+  const normalized = (label || '').toLowerCase();
+  if (/(facing\s+front|front|user|前置)/i.test(normalized)) return 'user';
+  if (/(facing\s+back|back|rear|environment|后置)/i.test(normalized)) return 'environment';
+  return undefined;
+};
+
+const shouldCollapseAndroidFacingCameras = (devices: CameraDevice[]): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const hasAndroidCameraLabels = devices.some((device) =>
+    /camera\s*\d+,\s*facing\s+(front|back)/i.test(device.label)
+  );
+  return /android/i.test(navigator.userAgent) && hasAndroidCameraLabels;
+};
+
+const collapseAndroidFacingCameras = (devices: CameraDevice[]): CameraDevice[] => {
+  if (!shouldCollapseAndroidFacingCameras(devices)) {
+    return devices;
+  }
+
+  const grouped = devices.reduce(
+    (result, device) => {
+      if (device.facingMode === 'user') result.user.push(device);
+      else if (device.facingMode === 'environment') result.environment.push(device);
+      else result.unknown.push(device);
+      return result;
+    },
+    {
+      user: [] as CameraDevice[],
+      environment: [] as CameraDevice[],
+      unknown: [] as CameraDevice[],
+    }
+  );
+
+  const collapsed: CameraDevice[] = [];
+  if (grouped.user.length > 0) {
+    collapsed.push({
+      deviceId: 'mobile-facing-user',
+      label: '前置摄像头',
+      kind: 'videoinput',
+      isVirtual: false,
+      facingMode: 'user',
+      alternateDeviceIds: grouped.user.map((device) => device.deviceId),
+    });
+  }
+  if (grouped.environment.length > 0) {
+    collapsed.push({
+      deviceId: 'mobile-facing-environment',
+      label: '后置摄像头',
+      kind: 'videoinput',
+      isVirtual: false,
+      facingMode: 'environment',
+      alternateDeviceIds: grouped.environment.map((device) => device.deviceId),
+    });
+  }
+
+  return [...collapsed, ...grouped.unknown];
 };
 
 /**
@@ -128,7 +198,7 @@ export const checkCameraAccess = async (): Promise<{
 
       return {
         isAvailable: true,
-        devices: videoDevices,
+        devices: collapseAndroidFacingCameras(videoDevices),
         isHttpAccess: false
       };
     } catch (permissionError) {
@@ -255,6 +325,8 @@ export const getCameraDevices = async (
         if (authorizedCamera) {
           pushUniqueCamera(allDevices, authorizedCamera);
         }
+        const collapsedPhysicalCameras = collapseAndroidFacingCameras(allDevices);
+        allDevices.splice(0, allDevices.length, ...collapsedPhysicalCameras);
       } catch (error) {
         console.warn('获取物理摄像头失败:', error);
       }

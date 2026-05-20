@@ -2,6 +2,7 @@
 import type { AIConfig, Standard, InspectionResult } from '@/types';
 import { apiRequest, apiFetch, directBackendFetch } from './config';
 import { composeInspectionSystemPrompt } from './llmPrompt';
+import { onnxYoloDetector } from './onnxYoloDetector';
 
 // 本地模型分析接口
 export async function analyzeImageLocal(
@@ -190,6 +191,23 @@ export async function yoloDetectBackend(
     requestStartTime = now;
 
     try {
+        if ((window as any).__IS_MOBILE_APP__) {
+            console.log('[yoloDetectBackend] 📱 移动端 App 环境下拦截 YOLO 检测请求，使用本地 ONNX 进行推理');
+            try {
+                // 如果是移动端 App，使用 ONNX Runtime WASM
+                const detections = await onnxYoloDetector.detect(imageBase64);
+                
+                // 根据传入置信度过滤
+                const filtered = detections.filter(d => d.confidence >= conf);
+                console.log(`[yoloDetectBackend] 📱 本地 ONNX 推理成功，检出 ${filtered.length} 个目标`);
+                
+                isRequestInProgress = false;
+                return filtered;
+            } catch (onnxError) {
+                console.error('[yoloDetectBackend] 📱 本地 ONNX 推理失败，降级网络请求:', onnxError);
+            }
+        }
+
         const payload: any = {
             image: imageBase64,
             conf: conf

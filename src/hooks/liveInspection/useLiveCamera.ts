@@ -84,6 +84,23 @@ export const useLiveCamera = ({
     });
   }, [globalFps, globalQuality, globalWidth, isCameraOn, selectedDeviceId]);
 
+  useEffect(() => {
+    return () => {
+      mjpegPlayerRef.current?.destroy();
+      mjpegPlayerRef.current = null;
+      streamPlayerRef.current?.destroy();
+      streamPlayerRef.current = null;
+      hlsPlayerRef.current?.destroy();
+      hlsPlayerRef.current = null;
+
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      stream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [videoRef]);
+
   // 切换摄像头
   const toggleCamera = useCallback(async () => {
     if (isCameraOn) {

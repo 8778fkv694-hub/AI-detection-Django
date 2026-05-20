@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { yoloDetectBackend } from '@/lib/api';
 import { buildApiUrl } from '@/lib/config';
+import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
+import { useModelPool } from '@/hooks/useModelPool';
 import type { BackendYoloDetection } from '@/types';
 
 export interface UseLiveYoloDetectionOptions {
@@ -124,6 +126,30 @@ export const useLiveYoloDetection = ({
   getTargetChineseName,
 }: UseLiveYoloDetectionOptions): UseLiveYoloDetectionResult => {
   const backendLoopOwnerRef = useRef(`live:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const isDetectingRef = useRef(false);
+  const lastDetectTimeRef = useRef(0);
+
+  const { activeModelId } = useModelPool();
+
+  // 当移动端离线激活模型变化时，自动切换本地 ONNX 模型，不硬编码
+  useEffect(() => {
+    if ((window as any).__IS_MOBILE_APP__ && activeModelId) {
+      console.log(`[ONNX] 移动端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
+      const { modelPath, classNames } = onnxYoloDetector.getModelConfigById(activeModelId);
+      
+      onnxYoloDetector.switchModel(modelPath, classNames).then((success) => {
+        if (success) {
+          console.log(`[ONNX] 本地模型加载成功: ${modelPath}`);
+          toast.success(`本地模型切换为: ${activeModelId === 'yolov8n' ? 'YOLOv8N轻量模型' : 'PPE检测模型'}`);
+        } else {
+          console.error(`[ONNX] 本地模型加载失败: ${modelPath}`);
+          toast.error('本地推理模型切换失败');
+        }
+      }).catch((err) => {
+        console.error('[ONNX] 切换模型发生错误:', err);
+      });
+    }
+  }, [activeModelId]);
 
   // 性能指标状态（推理耗时与帧率）
   const [perfStats, setPerfStats] = useState<{ inferenceMs: number | null; fps: number | null }>({
@@ -142,11 +168,25 @@ export const useLiveYoloDetection = ({
   const performYoloDetection = useCallback(async () => {
     if (!videoRef.current || !isCameraOn || !isYoloActive) return;
 
+    // 避免并发推理，防止 main thread 被多个 ONNX 实例占满导致极度卡顿
+    if (isDetectingRef.current) {
+      return;
+    }
+
+    // 移动端环境下，如果距离上次推理完成小于 3 秒，则跳过（主动引入降采样/冷却，留出 CPU 让 WebView 渲染画面）
+    if ((window as any).__IS_MOBILE_APP__) {
+      const now = Date.now();
+      if (now - lastDetectTimeRef.current < 3000) {
+        return;
+      }
+    }
+
     // 如果已经抓拍过且正在等待AI结果，则跳过检测
     if (hasCapturedForDetection && isWaitingForAIResult) {
       return;
     }
 
+    isDetectingRef.current = true;
     try {
       const useBackendDetection = import.meta.env.VITE_BACKEND_DETECTION !== 'false';
       let detections: BackendYoloDetection[] = [];
@@ -169,6 +209,31 @@ export const useLiveYoloDetection = ({
           }
         } catch (e) {
           console.error('拉取后端检测结果失败:', e);
+        }
+      } else if ((window as any).__IS_MOBILE_APP__) {
+        // 移动端模式：使用前端 ONNX 推理（避免后端 501）
+        try {
+          const startTime = performance.now();
+          detections = await onnxYoloDetector.detectFromVideo(videoRef.current);
+          const elapsed = performance.now() - startTime;
+          
+          // 按置信度过滤
+          detections = detections.filter(d => d.confidence >= detectionConfidence);
+          
+          setPerfStats({
+            inferenceMs: Math.round(elapsed),
+            fps: Math.round(1000 / elapsed),
+          });
+        } catch (e) {
+          console.error('[移动端] ONNX 推理失败，降级到后端 API:', e);
+          // 降级到后端 API
+          const canvas = document.createElement('canvas');
+          canvas.width = videoRef.current.videoWidth;
+          canvas.height = videoRef.current.videoHeight;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+          detections = await yoloDetectBackend(base64Image, detectionConfidence);
         }
       } else {
         // 传统模式：前端截图上传
@@ -361,6 +426,9 @@ export const useLiveYoloDetection = ({
 
     } catch (error) {
       console.error('YOLO检测失败:', error);
+    } finally {
+      isDetectingRef.current = false;
+      lastDetectTimeRef.current = Date.now();
     }
   }, [
     isCameraOn,

@@ -1,11 +1,11 @@
-import * as tf from '@tensorflow/tfjs';
-import '@tensorflow/tfjs-backend-webgl';
+/**
+ * ONNX YOLO Detector — 前端端侧 YOLO 推理（Web Worker 线程版）
+ *
+ * 将重算力推理移至 Worker 线程，彻底释放 UI 线程，让摄像头预览和 React 渲染 100% 流畅。
+ */
 
-export interface YoloDetection {
-  class: string;
-  confidence: number;
-  bbox: [number, number, number, number]; // [x, y, width, height]
-}
+import type { BackendYoloDetection } from '@/types';
+import YoloWorker from './yolo.worker?worker';
 
 export interface OnnxYoloConfig {
   modelPath: string;
@@ -13,302 +13,260 @@ export interface OnnxYoloConfig {
   confidenceThreshold: number;
   nmsThreshold: number;
   maxDetections: number;
+  classNames: string[];
 }
 
+// PPE 模型 10 个类别
+export const PPE_CLASS_NAMES = [
+  'Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest',
+  'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'
+];
+
+// COCO 80 个类别 (用于 YOLOv8n)
+export const COCO_CLASSES = [
+  'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
+  'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
+  'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
+  'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard',
+  'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+  'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
+  'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone',
+  'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear',
+  'hair drier', 'toothbrush'
+];
+
 class OnnxYoloDetector {
-  private ort: any = null;
-  private session: any = null;
+  private worker: Worker | null = null;
   private isLoaded = false;
   private isLoading = false;
   private config: OnnxYoloConfig;
 
-  // COCO数据集80个类别
-  private readonly classNames = [
-    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
-    'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
-    'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-    'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-    'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-    'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
-    'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-    'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
-    'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
-    'toothbrush'
-  ];
+  // 挂起的 Promise 解析器
+  private initResolver: ((value: boolean) => void) | null = null;
+  private detectResolver: ((value: BackendYoloDetection[]) => void) | null = null;
 
   constructor(config: Partial<OnnxYoloConfig> = {}) {
     this.config = {
-      modelPath: '/models/yolov8n.onnx',
+      modelPath: '/models/ppe.onnx',
       inputSize: 640,
       confidenceThreshold: 0.5,
       nmsThreshold: 0.45,
       maxDetections: 100,
+      classNames: PPE_CLASS_NAMES,
       ...config
     };
   }
 
-  // 初始化ONNX Runtime
-  private async initOnnxRuntime(): Promise<boolean> {
-    try {
-      // 检查全局ONNX Runtime
-      if (typeof window !== 'undefined' && (window as any).ort) {
-        this.ort = (window as any).ort;
-        console.log('ONNX Runtime已加载，版本:', this.ort.version);
-        return true;
-      }
-
-      // 尝试动态导入
-      console.log('尝试动态导入ONNX Runtime...');
-      const onnxModule = await import('onnxruntime-web');
-      this.ort = onnxModule;
-      console.log('ONNX Runtime动态导入成功');
-      return true;
-    } catch (error) {
-      console.error('ONNX Runtime初始化失败:', error);
-      return false;
+  // 根据模型ID获取对应的路径和类别
+  getModelConfigById(modelId: string): { modelPath: string; classNames: string[] } {
+    if (modelId === 'yolov8n') {
+      return {
+        modelPath: '/models/yolov8n.onnx',
+        classNames: COCO_CLASSES
+      };
+    } else {
+      // 默认使用 ppe.onnx (167MB Custom Model)
+      return {
+        modelPath: '/models/ppe.onnx',
+        classNames: PPE_CLASS_NAMES
+      };
     }
   }
 
-  // 检查WebGL支持
-  private checkWebGLSupport(): boolean {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) {
-        console.error('WebGL不可用');
-        return false;
-      }
-      console.log('WebGL可用，版本:', gl.getParameter(gl.VERSION));
-      return true;
-    } catch (error) {
-      console.error('WebGL检查失败:', error);
-      return false;
-    }
-  }
-
-  // 加载模型
+  // 加载模型 (初始化 Worker)
   async loadModel(): Promise<boolean> {
-    if (this.isLoaded || this.isLoading) {
-      return this.isLoaded;
+    if (this.isLoaded) return true;
+    if (this.isLoading) {
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!this.isLoading) {
+            clearInterval(checkInterval);
+            resolve(this.isLoaded);
+          }
+        }, 200);
+      });
     }
 
     this.isLoading = true;
-    console.log('开始加载ONNX YOLO模型...');
+    console.log('[OnnxYolo] 正在主线程中创建 YoloWorker...');
 
     try {
-      // 1. 初始化ONNX Runtime
-      const onnxReady = await this.initOnnxRuntime();
-      if (!onnxReady) {
-        throw new Error('ONNX Runtime初始化失败');
-      }
+      // 实例化 Vite 编译的 Web Worker
+      this.worker = new YoloWorker();
 
-      // 2. 检查WebGL支持
-      if (!this.checkWebGLSupport()) {
-        throw new Error('WebGL不支持');
-      }
+      // 设置 Worker 消息监听
+      this.worker.onmessage = (e: MessageEvent) => {
+        const { type, payload } = e.data;
 
-      // 3. 加载模型
-      console.log('加载模型文件:', this.config.modelPath);
-      this.session = await this.ort.InferenceSession.create(this.config.modelPath, {
-        executionProviders: ['webgl'],
-        graphOptimizationLevel: 'all'
+        if (type === 'init_done') {
+          this.isLoading = false;
+          if (payload.success) {
+            console.log('[OnnxYolo] Worker 初始化模型完毕');
+            if (payload.inputSize) {
+              this.config.inputSize = payload.inputSize;
+              console.log(`[OnnxYolo] 自动从模型同步输入尺寸到主线程: ${this.config.inputSize}`);
+            }
+            this.isLoaded = true;
+            this.initResolver?.(true);
+          } else {
+            console.error('[OnnxYolo] Worker 初始化模型失败:', payload.error);
+            this.isLoaded = false;
+            this.initResolver?.(false);
+          }
+        } 
+        
+        else if (type === 'result') {
+          const { detections, inferenceMs } = payload;
+          console.log(`[OnnxYolo] Worker 推理完成，耗时: ${inferenceMs}ms，检出 ${detections.length} 个目标`);
+          
+          // 裁剪并限制最大检出数量
+          const limited = detections.slice(0, this.config.maxDetections);
+          this.detectResolver?.(limited);
+          this.detectResolver = null;
+        } 
+        
+        else if (type === 'error') {
+          console.error('[OnnxYolo] Worker 抛出异常:', payload);
+          this.detectResolver?.([]);
+          this.detectResolver = null;
+        }
+      };
+
+      // 发送初始化配置消息
+      const initPromise = new Promise<boolean>((resolve) => {
+        this.initResolver = resolve;
       });
 
-      console.log('模型加载成功');
-      console.log('输入名称:', this.session.inputNames);
-      console.log('输出名称:', this.session.outputNames);
+      this.worker.postMessage({
+        type: 'init',
+        payload: {
+          modelPath: this.config.modelPath,
+          inputSize: this.config.inputSize,
+          confidenceThreshold: this.config.confidenceThreshold,
+          nmsThreshold: this.config.nmsThreshold,
+          classNames: this.config.classNames
+        }
+      });
 
-      this.isLoaded = true;
-      return true;
+      return initPromise;
     } catch (error) {
-      console.error('模型加载失败:', error);
+      console.error('[OnnxYolo] 创建 Web Worker 失败:', error);
+      this.isLoading = false;
       this.isLoaded = false;
       return false;
-    } finally {
-      this.isLoading = false;
     }
   }
 
-  // 图像预处理
-  private preprocessImage(imageData: ImageData): Float32Array {
-    const { inputSize } = this.config;
-    const input = new Float32Array(inputSize * inputSize * 3);
-    let pixelIndex = 0;
-
-    // 重新排列数据为CHW格式 (Channel, Height, Width)
-    for (let c = 0; c < 3; c++) {
-      for (let h = 0; h < inputSize; h++) {
-        for (let w = 0; w < inputSize; w++) {
-          const srcIndex = (h * inputSize + w) * 4 + c;
-          input[pixelIndex++] = imageData.data[srcIndex] / 255.0; // 归一化到0-1
-        }
-      }
-    }
-
-    return input;
-  }
-
-  // 非极大值抑制 (NMS)
-  private nonMaxSuppression(detections: any[], threshold: number): any[] {
-    if (detections.length === 0) return [];
-
-    // 按置信度排序
-    detections.sort((a, b) => b.confidence - a.confidence);
-
-    const filtered: any[] = [];
-    const used = new Set<number>();
-
-    for (let i = 0; i < detections.length; i++) {
-      if (used.has(i)) continue;
-
-      filtered.push(detections[i]);
-      used.add(i);
-
-      // 计算IoU并过滤重叠检测
-      for (let j = i + 1; j < detections.length; j++) {
-        if (used.has(j)) continue;
-
-        const iou = this.calculateIoU(detections[i].bbox, detections[j].bbox);
-        if (iou > threshold) {
-          used.add(j);
-        }
-      }
-    }
-
-    return filtered;
-  }
-
-  // 计算IoU (Intersection over Union)
-  private calculateIoU(box1: number[], box2: number[]): number {
-    const [x1, y1, w1, h1] = box1;
-    const [x2, y2, w2, h2] = box2;
-
-    const xLeft = Math.max(x1, x2);
-    const yTop = Math.max(y1, y2);
-    const xRight = Math.min(x1 + w1, x2 + w2);
-    const yBottom = Math.min(y1 + h1, y2 + h2);
-
-    if (xRight < xLeft || yBottom < yTop) return 0;
-
-    const intersectionArea = (xRight - xLeft) * (yBottom - yTop);
-    const box1Area = w1 * h1;
-    const box2Area = w2 * h2;
-    const unionArea = box1Area + box2Area - intersectionArea;
-
-    return intersectionArea / unionArea;
-  }
-
-  // 解析YOLO输出
-  private parseYoloOutput(output: any): YoloDetection[] {
-    const outputData = output.data as Float32Array;
-    const outputShape = output.dims;
-    
-    console.log('YOLO输出形状:', outputShape);
-    console.log('输出数据长度:', outputData.length);
-
-    const detections: any[] = [];
-    const numClasses = this.classNames.length;
-    const numBoxes = outputShape[2]; // 8400个候选框
-
-    for (let i = 0; i < numBoxes; i++) {
-      const boxIndex = i * (4 + numClasses);
-      
-      // 获取边界框坐标
-      const x = outputData[boxIndex];
-      const y = outputData[boxIndex + 1];
-      const w = outputData[boxIndex + 2];
-      const h = outputData[boxIndex + 3];
-      
-      // 获取类别概率
-      let maxClassIndex = 0;
-      let maxConfidence = 0;
-      
-      for (let j = 0; j < numClasses; j++) {
-        const confidence = outputData[boxIndex + 4 + j];
-        if (confidence > maxConfidence) {
-          maxConfidence = confidence;
-          maxClassIndex = j;
-        }
-      }
-      
-      // 过滤低置信度检测
-      if (maxConfidence > this.config.confidenceThreshold) {
-        detections.push({
-          class: this.classNames[maxClassIndex] || `class_${maxClassIndex}`,
-          confidence: maxConfidence,
-          bbox: [x, y, w, h]
-        });
-      }
-    }
-
-    // 应用NMS
-    const filteredDetections = this.nonMaxSuppression(detections, this.config.nmsThreshold);
-    
-    // 限制检测数量
-    return filteredDetections.slice(0, this.config.maxDetections);
-  }
-
-  // 执行检测
-  async detect(imageData: string): Promise<YoloDetection[]> {
+  /**
+   * 执行检测 (Base64 图片)
+   */
+  async detect(imageBase64: string): Promise<BackendYoloDetection[]> {
     if (!this.isLoaded) {
-      console.warn('模型未加载');
+      const loaded = await this.loadModel();
+      if (!loaded) return [];
+    }
+
+    if (!this.worker) return [];
+
+    try {
+      // 1. 加载图像并转换成 ImageData 以提取像素
+      const img = new Image();
+      img.src = `data:image/jpeg;base64,${imageBase64}`;
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = (e) => reject(e);
+      });
+
+      const imgWidth = img.naturalWidth;
+      const imgHeight = img.naturalHeight;
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
+      canvas.width = this.config.inputSize;
+      canvas.height = this.config.inputSize;
+      ctx.drawImage(img, 0, 0, this.config.inputSize, this.config.inputSize);
+
+      const imageDataObj = ctx.getImageData(0, 0, this.config.inputSize, this.config.inputSize);
+      
+      // 2. 获取像素数据 Buffer
+      const pixelData = new Uint8ClampedArray(imageDataObj.data.buffer);
+
+      // 3. 挂起 Promise 并发送到 Worker
+      const detectPromise = new Promise<BackendYoloDetection[]>((resolve) => {
+        this.detectResolver = resolve;
+      });
+
+      this.worker.postMessage(
+        {
+          type: 'detect',
+          payload: { pixelData, width: imgWidth, height: imgHeight }
+        },
+        [pixelData.buffer] // 转移 Buffer 所有权，零拷贝
+      );
+
+      return detectPromise;
+    } catch (error) {
+      console.error('[OnnxYolo] Base64 检测失败:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 从 video 元素直接检测（不卡 UI 主线程）
+   */
+  async detectFromVideo(video: HTMLVideoElement): Promise<BackendYoloDetection[]> {
+    if (!this.isLoaded) {
+      const loaded = await this.loadModel();
+      if (!loaded) return [];
+    }
+
+    if (!this.worker) return [];
+
+    // 避免在上一个推理尚未返回时再次发送，防止 Worker 队列溢出
+    if (this.detectResolver !== null) {
+      console.warn('[OnnxYolo] 上一帧推理尚未返回，跳过当前帧');
       return [];
     }
 
     try {
-      console.log('开始ONNX YOLO检测...');
+      const imgWidth = video.videoWidth;
+      const imgHeight = video.videoHeight;
+      if (imgWidth === 0 || imgHeight === 0) return [];
 
-      // 1. 加载图像
-      const img = new Image();
-      img.src = `data:image/jpeg;base64,${imageData}`;
-      
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-
-      // 2. 预处理图像
+      // 1. 高速截图并生成 inputSize 尺寸的像素数据
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d')!;
       canvas.width = this.config.inputSize;
       canvas.height = this.config.inputSize;
-      ctx?.drawImage(img, 0, 0, this.config.inputSize, this.config.inputSize);
+      ctx.drawImage(video, 0, 0, this.config.inputSize, this.config.inputSize);
 
-      const imageDataObj = ctx?.getImageData(0, 0, this.config.inputSize, this.config.inputSize);
-      if (!imageDataObj) {
-        throw new Error('无法获取图像数据');
-      }
+      const imageDataObj = ctx.getImageData(0, 0, this.config.inputSize, this.config.inputSize);
+      const pixelData = new Uint8ClampedArray(imageDataObj.data.buffer);
 
-      // 3. 预处理
-      const input = this.preprocessImage(imageDataObj);
+      // 2. 挂起 Promise 并发送至 Worker 推理
+      const detectPromise = new Promise<BackendYoloDetection[]>((resolve) => {
+        this.detectResolver = resolve;
+      });
 
-      // 4. 创建输入tensor
-      const inputTensor = new this.ort.Tensor('float32', input, [1, 3, this.config.inputSize, this.config.inputSize]);
+      this.worker.postMessage(
+        {
+          type: 'detect',
+          payload: { pixelData, width: imgWidth, height: imgHeight }
+        },
+        [pixelData.buffer] // 转移 Buffer 所有权，零拷贝
+      );
 
-      // 5. 执行推理
-      const feeds = { [this.session.inputNames[0]]: inputTensor };
-      const results = await this.session.run(feeds);
-
-      // 6. 解析输出
-      const output = results[this.session.outputNames[0]];
-      const detections = this.parseYoloOutput(output);
-
-      console.log('检测完成，找到', detections.length, '个目标');
-      return detections;
-
+      return detectPromise;
     } catch (error) {
-      console.error('ONNX YOLO检测失败:', error);
+      console.error('[OnnxYolo] 视频帧检测失败:', error);
       return [];
     }
   }
 
-  // 获取模型状态
+  // 模型状态
   getModelStatus(): { isLoaded: boolean; isLoading: boolean } {
-    return {
-      isLoaded: this.isLoaded,
-      isLoading: this.isLoading
-    };
+    return { isLoaded: this.isLoaded, isLoading: this.isLoading };
   }
 
   // 获取配置
@@ -316,21 +274,42 @@ class OnnxYoloDetector {
     return { ...this.config };
   }
 
-  // 更新配置
+  // 更新配置（需要重新发送给 Worker）
   updateConfig(newConfig: Partial<OnnxYoloConfig>): void {
     this.config = { ...this.config, ...newConfig };
+    if (this.worker && this.isLoaded) {
+      this.worker.postMessage({
+        type: 'init',
+        payload: {
+          modelPath: this.config.modelPath,
+          inputSize: this.config.inputSize,
+          confidenceThreshold: this.config.confidenceThreshold,
+          nmsThreshold: this.config.nmsThreshold,
+          classNames: this.config.classNames
+        }
+      });
+    }
+  }
+
+  // 切换模型
+  async switchModel(modelPath: string, classNames: string[]): Promise<boolean> {
+    this.unloadModel();
+    this.config.modelPath = modelPath;
+    this.config.classNames = classNames;
+    return this.loadModel();
   }
 
   // 卸载模型
   unloadModel(): void {
-    if (this.session) {
-      this.session.release();
-      this.session = null;
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
     }
     this.isLoaded = false;
     this.isLoading = false;
+    this.detectResolver = null;
+    this.initResolver = null;
   }
 }
 
-// 导出实例
-export const onnxYoloDetector = new OnnxYoloDetector(); 
+export const onnxYoloDetector = new OnnxYoloDetector();

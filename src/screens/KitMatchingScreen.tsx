@@ -1123,7 +1123,7 @@ const KitMatchingScreen: React.FC = () => {
     let mounted = true;
     (async () => {
       try {
-        const devices = await getCameraDevices();
+        const devices = await getCameraDevices({ requestPermission: true });
         if (mounted) {
           setVideoDevices(devices);
           console.log(`[${windowId}] 获取到 ${devices.length} 个摄像头设备:`, devices);

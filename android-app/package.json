@@ -1,0 +1,26 @@
+{
+  "name": "wyl-inspection-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WYL AI 检测系统安卓客户端 — 离线评估与学习",
+  "scripts": {
+    "build:web": "cd .. && npm run build:mobile",
+    "cap:sync": "npx cap sync android",
+    "build:full": "npm run build:web && npm run cap:sync",
+    "open:android": "npx cap open android",
+    "run:android": "npx cap run android",
+    "build:apk:debug": "bash scripts/build-apk.sh debug",
+    "build:apk:release": "bash scripts/build-apk.sh release"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/splash-screen": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1",
+    "nodejs-mobile-cordova": "^0.4.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "typescript": "~5.9.3"
+  }
+}

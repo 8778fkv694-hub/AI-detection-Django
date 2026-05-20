@@ -248,7 +248,7 @@ const LiveInspectionScreen: React.FC = () => {
   useEffect(() => {
     const getDevices = async () => {
       try {
-        const devices = await getCameraDevices();
+        const devices = await getCameraDevices({ requestPermission: true });
         setAvailableDevices(devices);
         const urlParams = new URLSearchParams(window.location.search);
         const preferredCamera = urlParams.get('camera');

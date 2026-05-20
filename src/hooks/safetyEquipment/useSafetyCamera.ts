@@ -122,7 +122,7 @@ export const useSafetyCamera = ({
     let mounted = true;
     (async () => {
       try {
-        const devices = await getCameraDevices();
+        const devices = await getCameraDevices({ requestPermission: true });
         if (mounted) {
           setVideoDevices(devices);
           if (!selectedDeviceId && devices.length > 0) {

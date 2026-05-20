@@ -412,7 +412,7 @@ export const useOCRCamera = ({
   // 获取可用摄像头设备
   const getAvailableDevices = useCallback(async () => {
     try {
-      const devices = await getCameraDevices();
+      const devices = await getCameraDevices({ requestPermission: true });
       setAvailableDevices(devices);
 
       // 从URL参数获取首选摄像头

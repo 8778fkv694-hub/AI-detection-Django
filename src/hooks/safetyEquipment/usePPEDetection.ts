@@ -126,11 +126,17 @@ export const usePPEDetection = ({
     return thresholdValues.length > 0 ? Math.min(...thresholdValues) : 0.5;
   }, [ppeThresholds]);
 
-  const mapBackendDetection = useCallback((d: BackendYoloDetection): YoloDetection => ({
-    class: d.label,
-    confidence: d.confidence,
-    bbox: [d.bbox.x1, d.bbox.y1, d.bbox.x2 - d.bbox.x1, d.bbox.y2 - d.bbox.y1],
-  }), []);
+  const mapBackendDetection = useCallback((d: BackendYoloDetection): YoloDetection => {
+    let label = d.label;
+    if (label === 'Person') label = 'person';
+    else if (label === 'Mask') label = 'mask';
+    else if (label === 'Safety Vest') label = 'safety-vest';
+    return {
+      class: label,
+      confidence: d.confidence,
+      bbox: [d.bbox.x1, d.bbox.y1, d.bbox.x2 - d.bbox.x1, d.bbox.y2 - d.bbox.y1],
+    };
+  }, []);
 
   const filterDetections = useCallback(
     (
@@ -138,7 +144,12 @@ export const usePPEDetection = ({
       fallbackThreshold: number,
       useClassThresholds = false
     ) => detections.filter((detection) => {
-      const classThreshold = ppeThresholds[detection.class as keyof typeof ppeThresholds];
+      let key = detection.class;
+      if (key === 'Hardhat' || key === 'NO-Hardhat') key = 'helmet';
+      else if (key === 'NO-Mask') key = 'mask';
+      else if (key === 'NO-Safety Vest') key = 'safety-vest';
+
+      const classThreshold = ppeThresholds[key as keyof typeof ppeThresholds];
       const threshold = useClassThresholds && typeof classThreshold === 'number'
         ? classThreshold
         : fallbackThreshold;

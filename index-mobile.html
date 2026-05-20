@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>AI 检测系统</title>
+    <script>
+      window.__IS_MOBILE_APP__ = true;
+    </script>
+    <script src="./node-launcher.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; background: #0b0f19; }
+      #app-loading {
+        position: fixed; inset: 0; background: linear-gradient(135deg, #090d16 0%, #111827 100%);
+        z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        color: #fff; font-family: system-ui, -apple-system, sans-serif; transition: opacity .5s;
+      }
+      #app-loading.hidden { opacity: 0; pointer-events: none; }
+      #app-loading .spinner {
+        width: 50px; height: 50px; border: 3px solid rgba(59, 130, 246, 0.1);
+        border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+      }
+      #app-loading .title { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: .5px; }
+      #app-loading .subtitle { font-size: 13px; color: #9ca3af; margin-bottom: 24px; }
+      #app-loading .bar { width: 200px; height: 3px; background: rgba(255,255,255,.08); border-radius: 1.5px; overflow: hidden; }
+      #app-loading .bar-inner { height: 100%; background: linear-gradient(90deg, #3b82f6, #6366f1); border-radius: 1.5px; width: 0; transition: width .4s ease; }
+      #app-loading .version { position: absolute; bottom: 20px; font-size: 11px; color: #4b5563; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="app-loading">
+      <div class="spinner"></div>
+      <div class="title">AI 智能检测系统</div>
+      <div class="subtitle" id="app-loading-text">正在启动本地离线服务...</div>
+      <div class="bar"><div class="bar-inner" id="app-loading-bar"></div></div>
+      <div class="version">移动端离线客户端 v1.0.0</div>
+    </div>
+    <div id="root" style="height:100%"></div>
+    <script>
+      (function(){
+        var texts = ['正在启动本地服务...', '正在加载离线数据库...', '正在初始化系统...', '即将就绪...'];
+        var bar = document.getElementById('app-loading-bar');
+        var txt = document.getElementById('app-loading-text');
+        var i = 0;
+        var interval = setInterval(function(){
+          i++;
+          var pct = Math.min(i * 12, 95);
+          if (bar) bar.style.width = pct + '%';
+          if (txt && i < texts.length) txt.textContent = texts[i];
+          if (i > 15) clearInterval(interval);
+        }, 400);
+        window._hideAppLoading = function(){
+          clearInterval(interval);
+          if (bar) bar.style.width = '100%';
+          setTimeout(function(){
+            var el = document.getElementById('app-loading');
+            if (el) {
+              el.classList.add('hidden');
+              setTimeout(function(){ el.remove() }, 600);
+            }
+          }, 400);
+        };
+      })();
+    </script>
+    <script type="module" src="/src/main-mobile.tsx"></script>
+  </body>
+</html>

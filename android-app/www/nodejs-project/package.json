@@ -1,0 +1,18 @@
+{
+  "name": "wyl-inspection-mobile-node",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WYL AI 检测系统安卓客户端嵌入式 Node 服务",
+  "main": "main.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "lowdb": "1.0.0",
+    "node-fetch": "^2.7.0"
+  },
+  "overrides": {
+    "glob": "^7.2.3",
+    "brain": "^5.1.6",
+    "rimraf": "^3.0.2"
+  }
+}

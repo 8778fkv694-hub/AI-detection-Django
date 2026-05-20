@@ -6,6 +6,27 @@ const isHTTPS = window.location.protocol === 'https:';
 // v2: 基于端口的动态环境检测
 // 支持 Jetson Nano 生产部署
 export const API_BASE_URL = (() => {
+  // 1. 检查 LocalStorage 是否有自定义配置
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('API_SERVER_URL');
+    if (saved) {
+      console.log('📡 [Config] 使用自定义 API 服务地址:', saved);
+      return saved.replace(/\/$/, '') + '/api';
+    }
+  }
+
+  // 2. 检查是否为移动端客户端环境
+  const isMobileApp = typeof window !== 'undefined' && (
+    (window as any).cordova ||
+    (window as any).Capacitor ||
+    (window as any).__IS_MOBILE_APP__
+  );
+  if (isMobileApp) {
+    const localNodePort = (window as any).__NODE_SERVER_PORT || 5001;
+    console.log(`📱 [Config] 移动端 App 模式: 默认连接本地服务端口 ${localNodePort}`);
+    return `http://127.0.0.1:${localNodePort}/api`;
+  }
+
   const port = window.location.port;
 
   // 开发模式检测:
@@ -36,6 +57,13 @@ export const API_BASE_URL = (() => {
 
 // Ollama 长请求绕过静态服务器代理，直接命中 Django 8000 端口
 export const DIRECT_BACKEND_API_BASE_URL = (() => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('API_SERVER_URL');
+    if (saved) {
+      return saved.replace(/\/$/, '') + '/api';
+    }
+  }
+
   if (window.location.port === '8000') {
     return `${window.location.origin}/api`;
   }
