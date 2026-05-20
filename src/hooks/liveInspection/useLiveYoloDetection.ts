@@ -13,6 +13,7 @@ import { buildApiUrl, isLocalOfflineMode } from '@/lib/config';
 import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
 import { useModelPool } from '@/hooks/useModelPool';
 import type { BackendYoloDetection } from '@/types';
+import { isNativeYoloSupported, initNativeYolo, detectFrameNative } from '@/lib/yoloNativeBridge';
 
 export interface UseLiveYoloDetectionOptions {
   /** 视频流ID */
@@ -138,9 +139,13 @@ export const useLiveYoloDetection = ({
       console.log(`[ONNX] 客户端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
       const { modelPath, classNames } = onnxYoloDetector.getModelConfigById(activeModelId);
       
-      onnxYoloDetector.switchModel(modelPath, classNames).then((success) => {
+      const loadModelPromise = isNativeYoloSupported()
+        ? initNativeYolo(modelPath, classNames, 4, false) // 4 threads, no NNAPI for stability
+        : onnxYoloDetector.switchModel(modelPath, classNames);
+
+      loadModelPromise.then((success) => {
         if (success) {
-          console.log(`[ONNX] 本地模型加载成功: ${modelPath}`);
+          console.log(`[ONNX] 本地模型加载成功: ${modelPath} (Native: ${isNativeYoloSupported()})`);
           toast.success(`本地模型切换为: ${activeModelId === 'yolov8n' ? 'YOLOv8N轻量模型' : 'PPE检测模型'}`);
         } else {
           console.error(`[ONNX] 本地模型加载失败: ${modelPath}`);
@@ -217,21 +222,33 @@ export const useLiveYoloDetection = ({
           console.error('拉取后端检测结果失败:', e);
         }
       } else if (isMobile || isElectron) {
-        // 移动端/桌面端离线模式：使用前端 ONNX 推理
+        // 移动端/桌面端离线模式：使用前端 ONNX 推理或原生 Android YOLO 插件
         try {
           const startTime = performance.now();
-          detections = await onnxYoloDetector.detectFromVideo(videoRef.current);
-          const elapsed = performance.now() - startTime;
           
-          // 按置信度过滤
-          detections = detections.filter(d => d.confidence >= detectionConfidence);
+          if (isNativeYoloSupported()) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 320;
+            const ctx = canvas.getContext('2d');
+            if (ctx && videoRef.current) {
+              ctx.drawImage(videoRef.current, 0, 0, 320, 320);
+            }
+            detections = await detectFrameNative(canvas, detectionConfidence, 0.45);
+          } else {
+            detections = await onnxYoloDetector.detectFromVideo(videoRef.current);
+            // 按置信度过滤 (原生插件已在 Java 端过滤，WASM 需在 JS 过滤)
+            detections = detections.filter(d => d.confidence >= detectionConfidence);
+          }
+          
+          const elapsed = performance.now() - startTime;
           
           setPerfStats({
             inferenceMs: Math.round(elapsed),
             fps: Math.round(1000 / elapsed),
           });
         } catch (e) {
-          console.error('[移动端] ONNX 推理失败，降级到后端 API:', e);
+          console.error('[离线模式] 推理失败，降级到后端 API:', e);
           // 降级到后端 API
           const canvas = document.createElement('canvas');
           canvas.width = videoRef.current.videoWidth;
