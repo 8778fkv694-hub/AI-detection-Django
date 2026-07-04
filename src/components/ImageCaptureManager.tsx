@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/Label';
 import { Input } from '@/components/ui/Input';
 import { Progress } from '@/components/ui/Progress';
 import toast from 'react-hot-toast';
-import { Camera, FolderOpen, Trash2, Download, FileImage, CheckCircle2, XCircle } from 'lucide-react';
+import { Camera, FolderOpen, Trash2, Download, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ImageCaptureManagerProps {

@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/Label';
 import { Progress } from '@/components/ui/Progress';
 import toast from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
-import { Upload, Layers, CheckCircle2, XCircle, Sparkles, FileImage, Trash2, Loader2, Clock, AlertCircle } from 'lucide-react';
+import { Upload, Layers, XCircle, Sparkles, FileImage, Trash2, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { analyzeImage } from '@/lib/api';
 import { processAndEncodeImage } from '@/lib/imageProcessor';
@@ -175,7 +175,7 @@ import ModelModeSwitch from '@/components/ModelModeSwitch';
             switch(item.status) {
                 case 'processing': return <Loader2 className="h-5 w-5 text-accent animate-spin" />;
                 case 'done': return <span className={cn("font-semibold", item.result?.overallQuality === '合格' ? 'text-green-400' : 'text-red-400')}>{item.result?.overallQuality} ({item.result?.score})</span>;
-                case 'error': return <XCircle className="h-5 w-5 text-red-500" title={item.error} />;
+                case 'error': return <span title={item.error}><XCircle className="h-5 w-5 text-red-500" /></span>;
                 default: return <FileImage className="h-5 w-5 text-slate-500" />;
             }
         };

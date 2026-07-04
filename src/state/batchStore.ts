@@ -7,7 +7,7 @@
     }), {
         name: 'batch-inspection-storage',
         // 批处理结果包含大图，避免持久化到 localStorage
-        partialize: ({ batchResults, ...rest }) => rest,
+        partialize: (state) => ({ ...state, batchResults: [] }),
         storage: createJSONStorage(() => localStorage),
     }));
   

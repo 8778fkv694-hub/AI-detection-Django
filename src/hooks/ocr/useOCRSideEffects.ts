@@ -38,14 +38,11 @@ export const useOCRSideEffects = ({
   isCameraOn,
   videoRef,
   setVideoInfo,
-  enableBarcodeDetection,
-  barcodeConfigs,
   standards,
   selectedStandardId,
   setSelectedStandardId,
   setKeywords,
   updateKeywordConfigs,
-  setEnableBarcodeDetection,
   fetchStandards,
   setTemplates
 }: UseOCRSideEffectsProps) => {

@@ -18,7 +18,7 @@ import {
   Eye
 } from 'lucide-react';
 import { ImageQualityAnalyzer, ImageQualityMetrics, PreprocessingRecommendation } from '@/lib/imageQualityAnalyzer';
-import { analyzeImageQuality, smartPreprocess, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
+import { analyzeImageQuality } from '@/lib/imagePreprocessingApi';
 
 interface SmartRecommendationProps {
   imageData: ImageData | null;
@@ -39,7 +39,6 @@ const QualityIndicator: React.FC<QualityIndicatorProps> = ({
   value, 
   threshold, 
   icon, 
-  color 
 }) => {
   const isGood = value >= threshold;
   

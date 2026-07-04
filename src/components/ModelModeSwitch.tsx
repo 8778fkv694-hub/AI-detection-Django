@@ -19,7 +19,6 @@ const ModelModeSwitch: React.FC<ModelModeSwitchProps> = ({
   showStatus = true 
 }) => {
   const { 
-    mode, 
     isOnlineMode, 
     isLocalMode, 
     setMode, 

@@ -58,6 +58,8 @@ export interface TestResult {
     filtered_text: string;
     keywords_found: string[];
     confidence_score: number;
+    isQualified?: boolean;
+    matchStatus?: 'qualified' | 'unqualified' | 'none';
     keyword_match_details?: Array<{
       keyword: string;
       textMatched: boolean;

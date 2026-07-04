@@ -104,7 +104,7 @@ export class HLSPlayer {
         this.hls.attachMedia(this.videoElement);
 
         // 监听清单加载事件，检测播放列表类型
-        this.hls.on(Hls.Events.MANIFEST_LOADED, (event, data) => {
+        this.hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => {
           if (isFirstLoad) {
             isFirstLoad = false;
             console.log('HLSPlayer: 首次清单加载完成', data);
@@ -142,7 +142,7 @@ export class HLSPlayer {
           });
         });
 
-        this.hls.on(Hls.Events.ERROR, (event, data) => {
+        this.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
@@ -188,7 +188,7 @@ export class HLSPlayer {
           }
         });
 
-        this.hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        this.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
           console.log(`HLSPlayer: 切换到质量级别 ${data.level}`);
         });
 

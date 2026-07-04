@@ -8,7 +8,6 @@ import {
   fetchDashboard,
   transitionAnomaly,
   type AnomalyRecord,
-  type AnomalyStatus,
 } from '@/lib/anomalyApi';
 import { enqueueAnomalyTransition, flushAnomalyOfflineQueue, getAnomalyOfflineQueue } from '@/lib/anomalyOfflineQueue';
 

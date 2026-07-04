@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ArrowLeft, CheckCircle2, XCircle, AlertCircle, Trash2, Eye, Download, FileText, Brain, X, Percent, Zap } from 'lucide-react';
 import { format } from 'date-fns';
@@ -13,22 +13,22 @@ import type { InspectionResult } from '@/types';
 // --- 新增的UI组件 ---
 
 // 结果状态图标组件
-const ResultStatusIcon: React.FC<{ quality?: '合格' | '存疑' | '需复检' | '存疑' }> = ({ quality }) => {
+const ResultStatusIcon: React.FC<{ quality?: '合格' | '存疑' | '需复检' }> = ({ quality }) => {
   if (quality === '合格') return <CheckCircle2 className="h-4 w-4 text-green-400" />;
   if (quality === '存疑') return <XCircle className="h-4 w-4 text-red-400" />;
-  if (quality === '存疑') return <AlertCircle className="h-4 w-4 text-yellow-400" />;
+  if (quality === '需复检') return <AlertCircle className="h-4 w-4 text-yellow-400" />;
   return <AlertCircle className="h-4 w-4 text-amber-400" />;
 };
 
 // 结果状态徽章组件
-const ResultStatusBadge: React.FC<{ quality?: '合格' | '存疑' | '需复检' | '存疑' }> = ({ quality }) => (
+const ResultStatusBadge: React.FC<{ quality?: '合格' | '存疑' | '需复检' }> = ({ quality }) => (
   <Badge
     variant="outline"
     className={cn(
       "text-xs font-semibold",
       quality === '合格' ? 'border-green-400/50 text-green-400' :
         quality === '存疑' ? 'border-red-400/50 text-red-400' :
-          quality === '存疑' ? 'border-yellow-400/50 text-yellow-400' :
+          quality === '需复检' ? 'border-yellow-400/50 text-yellow-400' :
             'border-amber-400/50 text-amber-400'
     )}
   >

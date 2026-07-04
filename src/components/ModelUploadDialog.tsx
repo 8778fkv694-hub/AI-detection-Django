@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Progress } from '@/components/ui/Progress';
 import { Upload, X, CheckCircle, AlertCircle } from 'lucide-react';
-import { uploadModel, getUploadProgress, ModelUpload } from '@/lib/api';
+import { uploadModel, getUploadProgress } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface ModelUploadDialogProps {

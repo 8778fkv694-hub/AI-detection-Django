@@ -67,17 +67,6 @@ export const useModelMode = () => {
     }
   }, []);
 
-  // 保存配置到localStorage
-  const saveConfig = (newConfig: Partial<ModelModeConfig>) => {
-    const updatedConfig = { ...config, ...newConfig };
-    setConfig(updatedConfig);
-    
-    try {
-      localStorage.setItem('modelModeConfig', JSON.stringify(updatedConfig));
-    } catch (error) {
-      console.error('保存模型模式配置失败:', error);
-    }
-  };
 
   // 切换模型模式
   const setMode = (mode: ModelMode) => {

@@ -44,7 +44,7 @@ const InfoRow: React.FC<{ label: string; children: React.ReactNode; className?: 
 
 const BatchInspectionResultsScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { results, fetchResults, deleteResult, clearResultsByType } = useAppStore();
+  const { results, fetchResults, deleteResult } = useAppStore();
   const [filteredResults, setFilteredResults] = useState<InspectionResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<InspectionResult | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);

@@ -218,14 +218,14 @@ const OCRDetectionScreen: React.FC = () => {
   // 保存后端返回的增量 trace_context 字段（如 candidateCount / fallbackRecommended）
   const [lastSavedTraceContext, setLastSavedTraceContext] = useState<Record<string, any> | null>(null);
   const [lastSavedTracePreview, setLastSavedTracePreview] = useState<{
-    traceConclusion?: string;
+    traceConclusion?: '合格' | '存疑' | '需复检';
     traceConclusionReason?: string;
     traceRuleSummary?: string;
     relatedStages?: Array<{
       stageCode?: string;
       stageName?: string;
       businessCode?: string;
-      status?: string;
+      status?: 'completed' | 'pending' | 'failed';
       resultId?: string;
       timestamp?: string;
       pageInstanceId?: string;
@@ -963,7 +963,7 @@ const OCRDetectionScreen: React.FC = () => {
     evaluateDetections, evaluateDebounce, batchManager: batchManager as any,
     stitchROISnapshots, stitchMultipleROIs, captureFrameData, processCapturedImage: processCapturedImage as any,
     detectedElements, elementDetectionStartTime, detectionStats, nonGridTargets,
-    streamId: backendStreamId,
+    streamId: backendStreamId ?? undefined,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
     setDetectionStats, setCurrentSharpness, setIsInPostDetectionDelay,
     setWorkflowState: setWorkflowState as any, setSelectedImage, setImagePreview, setIsWaitingForSpace,

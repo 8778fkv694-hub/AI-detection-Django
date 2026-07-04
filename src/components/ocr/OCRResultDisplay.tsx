@@ -101,7 +101,6 @@ export const OCRResultDisplay: React.FC<OCRResultDisplayProps> = ({
   setShowHistoryDetails,
   expandedHistoryId,
   setExpandedHistoryId,
-  keywordConfigs,
   refreshHistory,
   exportResults,
   getTargetChineseName,

@@ -66,7 +66,11 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
     useManualConfig: false,
     useAutoDiscovery: true
   });
-  const [healthSystemStatus, setHealthSystemStatus] = useState({
+  const [healthSystemStatus, setHealthSystemStatus] = useState<{
+    connected: boolean;
+    message: string;
+    lastChecked: string | null;
+  }>({
     connected: false,
     message: '',
     lastChecked: null
@@ -545,7 +549,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
     try {
       const response = await fetch(`http://${ipAddress}:${port}/api/status`, {
         method: 'GET',
-        timeout: 5000
+        // 注：fetch 无 timeout 选项（原 timeout: 5000 从未生效，移除不改变行为）
       });
       
       if (response.ok) {
@@ -566,7 +570,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
     } catch (error) {
       setHealthSystemStatus({
         connected: false,
-        message: `连接失败: ${ipAddress}:${port} (错误: ${error.message})`,
+        message: `连接失败: ${ipAddress}:${port} (错误: ${error instanceof Error ? error.message : String(error)})`,
         lastChecked: new Date().toISOString()
       });
       return false;

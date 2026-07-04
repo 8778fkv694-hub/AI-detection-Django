@@ -14,7 +14,7 @@
 import { useCallback } from 'react';
 import { performKeywordAnalysis as analyzeKeywords } from '@/lib/ocr/keywordAnalyzer';
 import { buildBarcodeAnalysis } from '@/lib/ocr/barcodeRuleEvaluator';
-import type { TestResult, KeywordConfig } from '@/types/ocr';
+import type { TestResult, KeywordConfig, BarcodeConfig } from '@/types/ocr';
 import type { InspectionResult } from '@/types';
 import type { BarcodeDetectionResult } from '@/lib/barcode/barcodeAnalyzer';
 import { extractText } from '@/services/ocr';
@@ -31,7 +31,7 @@ export interface OCRProcessingOptions {
 
   // 二维码检测
   enableBarcodeDetection: boolean;
-  barcodeConfigs: Array<{ enabled?: boolean; targetRoi?: string }>;
+  barcodeConfigs: BarcodeConfig[];
 
   // 融合模式
   fusionModeEnabled: boolean;

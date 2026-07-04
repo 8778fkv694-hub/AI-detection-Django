@@ -200,10 +200,15 @@ export const executeDetectionCore = async (
                       const maxArea = 1920 * 1080;
                       const normalizedArea = Math.min(1, roiArea / maxArea);
                       let existingArea = 0;
-                      if (existing.detection.bbox.width && existing.detection.bbox.height) {
-                        existingArea = existing.detection.bbox.width * existing.detection.bbox.height;
-                      } else if (existing.detection.bbox.x1 !== undefined && existing.detection.bbox.x2 !== undefined) {
-                        existingArea = (existing.detection.bbox.x2 - existing.detection.bbox.x1) * (existing.detection.bbox.y2 - existing.detection.bbox.y1);
+                      // 兼容两种 bbox 形态：{width,height}（历史数据）与 {x1,y1,x2,y2}
+                      const existingBbox = existing.detection.bbox as {
+                        x1: number; y1: number; x2: number; y2: number;
+                        width?: number; height?: number;
+                      };
+                      if (existingBbox.width && existingBbox.height) {
+                        existingArea = existingBbox.width * existingBbox.height;
+                      } else if (existingBbox.x1 !== undefined && existingBbox.x2 !== undefined) {
+                        existingArea = (existingBbox.x2 - existingBbox.x1) * (existingBbox.y2 - existingBbox.y1);
                       }
                       const normalizedExistingArea = Math.min(1, existingArea / maxArea);
 

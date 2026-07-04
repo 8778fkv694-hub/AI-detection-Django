@@ -4,8 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import { 
   Home, Camera, Layers, BarChart2, Shield, FileText, 
   Eye, ExternalLink, HelpCircle, AlertTriangle, Cpu, 
-  Video, Menu, X, Wifi, Sliders 
-} from 'lucide-react';
+  Video, Menu, X } from 'lucide-react';
 import { useAppStore } from '@/state/appStore';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';

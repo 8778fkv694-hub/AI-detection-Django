@@ -5,7 +5,6 @@ import { Input } from './ui/Input';
 import { Label } from './ui/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/Select';
 import { Textarea } from './ui/Textarea';
-import { Badge } from './ui/Badge';
 
 // 默认数据
 const DEFAULT_DEFECT_TYPES: DefectType[] = [
@@ -44,7 +43,6 @@ export const TemplateDefectTypeManager: React.FC<TemplateDefectTypeManagerProps>
     const [activeTab, setActiveTab] = useState<'types' | 'severities'>('types');
     const [editingType, setEditingType] = useState<DefectType | null>(null);
     const [editingSeverity, setEditingSeverity] = useState<DefectSeverity | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
     
     // 分类管理状态
     const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);

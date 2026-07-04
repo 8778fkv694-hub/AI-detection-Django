@@ -164,7 +164,7 @@ const LiveInspectionScreen: React.FC = () => {
   });
 
   const { performYoloDetection: _performYoloDetection, toggleYoloDetection } = useLiveYoloDetection({
-    streamId: backendStreamId,
+    streamId: backendStreamId ?? undefined,
     videoRef,
     canvasRef,
     isCameraOn,

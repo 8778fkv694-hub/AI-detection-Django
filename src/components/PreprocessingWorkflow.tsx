@@ -13,12 +13,10 @@ import {
   CheckCircle, 
   ArrowRight,
   RotateCw,
-  Eye,
-  Download,
   BarChart3
 } from 'lucide-react';
 import { ImageQualityAnalyzer, ImageQualityMetrics, PreprocessingRecommendation } from '@/lib/imageQualityAnalyzer';
-import { preprocessImage, smartPreprocess, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
+import { preprocessImage, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
 
 interface WorkflowStep {
   id: string;
@@ -90,7 +88,7 @@ const PreprocessingWorkflow: React.FC<PreprocessingWorkflowProps> = ({
 
   const [qualityMetrics, setQualityMetrics] = useState<ImageQualityMetrics | null>(null);
   const [recommendation, setRecommendation] = useState<PreprocessingRecommendation | null>(null);
-  const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [, setProcessedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // 更新步骤状态

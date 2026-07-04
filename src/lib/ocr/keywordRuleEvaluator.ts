@@ -32,7 +32,8 @@ export const countKeywordMatches = (text: string, keyword: string, mode: 'contai
 interface BuildKeywordAnalysisParams {
   details: OCRDetailLike[];
   fullText: string;
-  keywordConfigs: KeywordConfig[];
+  // id 未参与评估，放宽以兼容 keywordAnalyzer 的本地 KeywordConfig（无 id）
+  keywordConfigs: Array<Omit<KeywordConfig, 'id'> & { id?: string }>;
   keywordMatchMode: 'contains' | 'exact';
 }
 

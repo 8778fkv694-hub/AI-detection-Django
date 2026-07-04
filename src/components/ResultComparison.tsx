@@ -78,7 +78,7 @@ const ResultComparison: React.FC<ResultComparisonProps> = ({
     isImprovement?: boolean;
     icon: React.ReactNode;
     color: string;
-  }> = ({ title, originalValue, processedValue, unit = '', isImprovement = false, icon, color }) => {
+  }> = ({ title, originalValue, processedValue, unit = '', isImprovement = false, icon }) => {
     const improvementValue = typeof originalValue === 'number' && typeof processedValue === 'number' 
       ? processedValue - originalValue 
       : 0;

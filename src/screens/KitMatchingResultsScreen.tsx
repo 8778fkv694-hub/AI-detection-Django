@@ -14,22 +14,22 @@ import type { InspectionResult } from '@/types';
 // --- 新增的UI组件 ---
 
 // 结果状态图标组件
-const ResultStatusIcon: React.FC<{ quality?: '合格' | '存疑' | '需复检' | '存疑' }> = ({ quality }) => {
+const ResultStatusIcon: React.FC<{ quality?: '合格' | '存疑' | '需复检' }> = ({ quality }) => {
   if (quality === '合格') return <CheckCircle2 className="h-4 w-4 text-green-400" />;
   if (quality === '存疑') return <XCircle className="h-4 w-4 text-red-400" />;
-  if (quality === '存疑') return <AlertCircle className="h-4 w-4 text-amber-400" />;
+  if (quality === '需复检') return <AlertCircle className="h-4 w-4 text-amber-400" />;
   return <AlertCircle className="h-4 w-4 text-amber-400" />;
 };
 
 // 结果状态徽章组件
-const ResultStatusBadge: React.FC<{ quality?: '合格' | '存疑' | '需复检' | '存疑' }> = ({ quality }) => (
+const ResultStatusBadge: React.FC<{ quality?: '合格' | '存疑' | '需复检' }> = ({ quality }) => (
   <Badge
     variant="outline"
     className={cn(
       "text-xs font-semibold",
       quality === '合格' ? 'border-green-400/50 text-green-400' :
       quality === '存疑' ? 'border-red-400/50 text-red-400' :
-      quality === '存疑' ? 'border-amber-400/50 text-amber-400' :
+      quality === '需复检' ? 'border-amber-400/50 text-amber-400' :
       'border-amber-400/50 text-amber-400'
     )}
   >
@@ -353,8 +353,8 @@ const ResultCard: React.FC<{
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-400">{format(new Date(result.timestamp), 'MM-dd HH:mm:ss')}</span>
             <div className="flex items-center gap-2">
-              <ResultStatusIcon quality={result.overallQuality as '合格' | '存疑' | '需复检' | '存疑'} />
-              <ResultStatusBadge quality={result.overallQuality as '合格' | '存疑' | '需复检' | '存疑'} />
+              <ResultStatusIcon quality={result.overallQuality as '合格' | '存疑' | '需复检'} />
+              <ResultStatusBadge quality={result.overallQuality as '合格' | '存疑' | '需复检'} />
             </div>
           </div>
         </CardHeader>
@@ -532,8 +532,8 @@ const DetailPanel: React.FC<{
                 </InfoRow>
                 <InfoRow label="检测结果">
                   <div className="flex items-center gap-2">
-                    <ResultStatusIcon quality={result.overallQuality as '合格' | '存疑' | '需复检' | '存疑'} />
-                    <ResultStatusBadge quality={result.overallQuality as '合格' | '存疑' | '需复检' | '存疑'} />
+                    <ResultStatusIcon quality={result.overallQuality as '合格' | '存疑' | '需复检'} />
+                    <ResultStatusBadge quality={result.overallQuality as '合格' | '存疑' | '需复检'} />
                   </div>
                 </InfoRow>
                 <InfoRow label="综合评分">{result.score}分</InfoRow>

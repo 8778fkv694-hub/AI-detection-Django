@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 
-import { Trash2, Plus, Edit3, Eye, EyeOff, Settings } from 'lucide-react';
+import { Trash2, Edit3, Eye, EyeOff, Settings } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { DefectTypeSelector } from './DefectTypeSelector';
 
@@ -56,7 +56,7 @@ const ROISelector: React.FC<ROISelectorProps> = ({ imageUrl, areas, onAreasChang
     
     if (!showAreas) return;
     
-    areas.forEach((area, index) => {
+    areas.forEach((area) => {
       const x = area.x * canvas.width;
       const y = area.y * canvas.height;
       const width = area.width * canvas.width;

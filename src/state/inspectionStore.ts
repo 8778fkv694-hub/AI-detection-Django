@@ -8,7 +8,7 @@
     }), {
         name: 'inspection-results-storage',
         // 结果图片体积大，不做持久化，避免占满 localStorage
-        partialize: ({ results, ...rest }) => rest,
+        partialize: (state) => ({ ...state, results: [] }),
         storage: createJSONStorage(() => localStorage),
     }));
   

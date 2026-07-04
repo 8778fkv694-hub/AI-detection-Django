@@ -544,12 +544,11 @@ export async function stitchMultipleROIs(
 
         // 绘制各个区域
         let currentX = 0;
-        let currentY = 0;
         let currentRow = 0;
         let currentCol = 0;
         const cols = Math.ceil(Math.sqrt(regions.length));
 
-        regions.forEach((region, index) => {
+        regions.forEach((region) => {
           if (regions.length === 1) {
             // 单个区域，居中显示
             const scaleX = canvasWidth / region.width;

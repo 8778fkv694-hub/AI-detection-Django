@@ -101,7 +101,7 @@ interface OCRResultsSectionProps {
   exportOCRResults: (ocrResult: any, imagePreview?: string) => void;
 
   // 工装码行内补录
-  onScrollToFixtureSupplement?: () => void;
+  onScrollToFixtureSupplement?: (target?: 'scanner' | 'nfc' | 'manual') => void;
   fixtureQrInput?: string;
   onFixtureQrInputChange?: (value: string) => void;
   onFixtureQrSourceChange?: (source: 'vision' | 'scanner' | 'nfc' | 'manual') => void;

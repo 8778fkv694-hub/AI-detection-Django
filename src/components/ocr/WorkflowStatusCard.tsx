@@ -87,8 +87,6 @@ export const WorkflowStatusCard: React.FC<WorkflowStatusCardProps> = ({
   detectedElementsRef,
   elementDetectionStartTimeRef,
   getTargetChineseName,
-  getConfidenceIcon,
-  getConfidenceColor,
   imageSaveMode = 'roi',
   currentSharpness = 0,
 }) => {

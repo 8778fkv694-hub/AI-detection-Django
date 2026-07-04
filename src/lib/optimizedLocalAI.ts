@@ -124,8 +124,6 @@ function parseMoondreamOutput(content: string, image: string, standard?: Standar
 
   // 改进的质量分析逻辑 - 更精确的评分机制
   let score = 50; // 默认分数
-  let overallQuality: '合格' | '存疑' | '需复检' | '存疑' = '需复检';
-  let reason = 'Moondream文本分析';
 
   // 通用质量检测关键词（不限于PPE）
   const qualityKeywords = {
@@ -150,24 +148,14 @@ function parseMoondreamOutput(content: string, image: string, standard?: Standar
   // 分析检测结果
   if (qualityKeywords.excellent.some(keyword => textContent.includes(keyword))) {
     score = 90;
-    overallQuality = '合格';
-    reason = 'Moondream分析: 检测到优秀质量';
   } else if (qualityKeywords.good.some(keyword => textContent.includes(keyword))) {
     score = 80;
-    overallQuality = '合格';
-    reason = 'Moondream分析: 检测到良好质量';
   } else if (qualityKeywords.acceptable.some(keyword => textContent.includes(keyword))) {
     score = 70;
-    overallQuality = '合格';
-    reason = 'Moondream分析: 质量可接受';
   } else if (qualityKeywords.poor.some(keyword => textContent.includes(keyword))) {
     score = 40;
-    overallQuality = '存疑';
-    reason = 'Moondream分析: 检测到质量问题';
   } else if (qualityKeywords.defective.some(keyword => textContent.includes(keyword))) {
     score = 20;
-    overallQuality = '存疑';
-    reason = 'Moondream分析: 检测到缺陷';
   }
 
   // 检查是否检测到目标特征

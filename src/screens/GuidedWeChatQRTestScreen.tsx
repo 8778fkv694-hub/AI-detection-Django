@@ -3,7 +3,7 @@
  * 评估二维码检测算法的性能和优化效果
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -14,7 +14,6 @@ import {
   AlertCircle, 
   Settings, 
   Play, 
-  RotateCcw,
   ArrowRight,
   Zap,
   Eye,
@@ -42,12 +41,6 @@ const toastWarning = (msg: string) => {
 import { detectBarcodesWithRetry, BarcodeDetectionResult } from '@/lib/barcodeDetector';
 import { preprocessImage, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
 
-interface BarcodeConfig {
-  id: string;
-  expectedText: string;
-  matchMode: 'contains' | 'exact';
-  enabled: boolean;
-}
 
 interface TestResult {
   detectedCodes: BarcodeDetectionResult[];
@@ -161,8 +154,8 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [useWeChatQR, setUseWeChatQR] = useState(true);
-  const [maxRetries, setMaxRetries] = useState(5);
+  const [useWeChatQR] = useState(true);
+  const [maxRetries] = useState(5);
   
   // 智能检测流程状态
   const [currentStep, setCurrentStep] = useState(1);
@@ -197,9 +190,6 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
   const [bestPreset, setBestPreset] = useState<PreprocessingPreset | null>(null);
   
   // 二维码配置 - 只要检测到二维码就算合格
-  const [barcodeConfigs, setBarcodeConfigs] = useState<BarcodeConfig[]>([
-    { id: '1', expectedText: '', matchMode: 'contains', enabled: true } // 空字符串表示检测到任何二维码都算成功
-  ]);
   
   // 图片压缩配置状态
   const [compressionEnabled, setCompressionEnabled] = useState<boolean>(false);
@@ -211,7 +201,6 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
   });
   const [showCompressionSettings, setShowCompressionSettings] = useState<boolean>(false);
   
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 处理图片选择
   const handleImageSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -408,7 +397,7 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
       }];
 
       let maskPadding = currentMaskPadding;
-      let retryResult = null;
+      let retryResult: Awaited<ReturnType<typeof detectBarcodesWithRetry>> | null = null;
       let attempts = 0;
       const maxAttempts = 3;
 
@@ -434,10 +423,6 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
 
         // 检查检测结果
         if (retryResult && retryResult.allResults && retryResult.allResults.length > 0) {
-          // 检测成功，保存过程图片
-          if (retryResult.processImages) {
-            setProcessImages(retryResult.processImages);
-          }
           break;
         } else {
           // 检测失败，调整遮罩范围
@@ -452,12 +437,18 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
 
       const processingTime = Date.now() - startTime;
 
+      // 循环至少执行一次，detectBarcodesWithRetry 必有返回；防御性兜底走统一失败路径
+      if (!retryResult) {
+        throw new Error('二维码检测未返回结果');
+      }
+      const detectedAny = retryResult.allResults.length > 0;
+
       // 修改匹配结果：只要检测到二维码就算成功
       const modifiedMatchResults = retryResult.matchResults.map(match => ({
         ...match,
-        matched: retryResult.allResults.length > 0, // 检测到任何二维码就算匹配成功
-        detectedData: retryResult.allResults.length > 0 ? retryResult.allResults[0].data : null,
-        confidence: retryResult.allResults.length > 0 ? retryResult.allResults[0].confidence : 0
+        matched: detectedAny, // 检测到任何二维码就算匹配成功
+        detectedData: detectedAny ? retryResult!.allResults[0].data : undefined,
+        confidence: detectedAny ? retryResult!.allResults[0].confidence : 0
       }));
 
       const result: TestResult = {
@@ -465,10 +456,10 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
         matchResults: modifiedMatchResults,
         retrySummary: {
           ...retryResult.retrySummary,
-          successfulDetections: retryResult.allResults.length > 0 ? 1 : 0,
-          failedDetections: retryResult.allResults.length > 0 ? 0 : 1,
-          totalDetected: retryResult.retrySummary.totalDetected || retryResult.allResults.length,
-          iterations: retryResult.retrySummary.iterations || 1
+          successfulDetections: detectedAny ? 1 : 0,
+          failedDetections: detectedAny ? 0 : 1,
+          totalDetected: retryResult.allResults.length,
+          iterations: 1
         },
         modelUsed: useWeChatQR ? '微信二维码检测器 (WeChatQRCode)' : '前端二维码检测器 (jsQR)',
         processingTime
@@ -832,7 +823,10 @@ const GuidedWeChatQRTestScreen: React.FC = () => {
       }
       setProcessedResult(processedResult);
       
-      // 生成评估结论
+      // 生成评估结论（原图检测失败时走统一的 catch 失败提示，与原运行时行为一致）
+      if (!originalResult) {
+        throw new Error('原图检测失败');
+      }
       const conclusion = generateEvaluationConclusion(originalResult, processedResult, preprocessingTestResults);
       setEvaluationConclusion(conclusion);
       

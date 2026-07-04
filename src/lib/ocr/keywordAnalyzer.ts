@@ -145,6 +145,7 @@ export function performKeywordAnalysis(
     config => config.expectedOrientation !== undefined && config.expectedOrientation !== null
   );
   if (!hasOrientationConstraints) {
+    // 评估器运行时必返回 isQualified/matchStatus（见 keywordRuleEvaluator），类型层为可选故断言
     return buildKeywordAnalysis({
       details: result.detailed_results.map(item => ({
         text: item.text,
@@ -153,7 +154,7 @@ export function performKeywordAnalysis(
       fullText: result.full_text || '',
       keywordConfigs,
       keywordMatchMode,
-    });
+    }) as KeywordAnalysisResult;
   }
 
   // 分离正面关键词和排除清单关键词

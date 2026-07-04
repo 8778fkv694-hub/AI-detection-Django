@@ -11,7 +11,6 @@
     import { v4 as uuidv4 } from 'uuid';
     import { Sparkles, Upload, Layers } from 'lucide-react';
     import { useNavigate } from 'react-router-dom';
-    import { toBase64 } from '@/lib/utils';
 import { processAndEncodeImage } from '@/lib/imageProcessor';
     
     const InspectionScreen: React.FC = () => {

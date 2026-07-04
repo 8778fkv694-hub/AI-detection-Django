@@ -16,7 +16,6 @@ export const ProgressDisplay: React.FC<ProgressDisplayProps> = ({
   isInspecting,
   totalImages,
   completedImages,
-  currentImageIndex,
   currentStatus,
   errors = []
 }) => {

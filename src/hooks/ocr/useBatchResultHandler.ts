@@ -231,7 +231,7 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
                 return targetRoi === roiLabel;
               }
               if (matchedRois.length > 0) {
-                return matchedRois.some((matchedLabel: string) => matchedLabel === roiLabel);
+                return matchedRois.some((matchedLabel: any) => matchedLabel === roiLabel);
               }
               const firstLabel = result.details?.[0]?.label || '';
               return roiLabel === firstLabel;
@@ -276,7 +276,7 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
       delete (ocrResultData as any).ai_analysis;
     }
 
-    setOcrResult(ocrResultData);
+    setOcrResult(ocrResultData as TestResult);
 
     if (result.stitched_image) {
       setImagePreview(result.stitched_image);

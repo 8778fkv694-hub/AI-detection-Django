@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getActiveStreams, getStreamFrame } from '@/api/streamApi';
-import type { StreamSource, VirtualCameraDevice } from '@/types/stream';
+import type { VirtualCameraDevice } from '@/types/stream';
 
 export interface UseVirtualCamerasOptions {
   refreshInterval?: number; // 刷新间隔（毫秒）

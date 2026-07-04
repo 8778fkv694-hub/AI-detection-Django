@@ -3,11 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Label } from '@/components/ui/Label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Upload, Eye, Zap, CheckCircle, Brain, Settings, RotateCcw, Download, ArrowLeft, ArrowRight, RefreshCw, AlertCircle, FileText, Target, BarChart3, TrendingUp } from 'lucide-react';
+import { Upload, Eye, Zap, CheckCircle, Brain, Settings, RotateCcw, Download, ArrowLeft, ArrowRight, AlertCircle, FileText, Target, BarChart3, TrendingUp } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { preprocessImage, analyzeImageQuality, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
-import { ImageQualityAnalyzer } from '@/lib/imageQualityAnalyzer';
 import { extractText } from '@/services/ocr';
 
 // 添加滑块样式
@@ -151,8 +149,7 @@ const OCRGuidedTestScreen: React.FC = () => {
   // 检测结果
   const [originalResult, setOriginalResult] = useState<OCRTestResult | null>(null);
   const [processedResult, setProcessedResult] = useState<OCRTestResult | null>(null);
-  const [showComparison, setShowComparison] = useState(false);
-  const [processImages, setProcessImages] = useState<any[]>([]);
+  const [, setShowComparison] = useState(false);
 
   // 评估结论
   const [evaluationConclusion, setEvaluationConclusion] = useState<EvaluationConclusion | null>(null);
@@ -412,7 +409,7 @@ const OCRGuidedTestScreen: React.FC = () => {
   }, []);
 
   // 计算检测评分
-  const calculateDetectionScore = useCallback((result: OCRTestResult, presetId?: string): number => {
+  const calculateDetectionScore = useCallback((result: OCRTestResult, _presetId?: string): number => {
     let score = 0;
 
     // 基础检测成功率
@@ -849,12 +846,6 @@ const OCRGuidedTestScreen: React.FC = () => {
     }
   }, [currentStep, steps.length]);
 
-  // 上一步
-  const prevStep = useCallback(() => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
-    }
-  }, [currentStep]);
 
   return (
     <>

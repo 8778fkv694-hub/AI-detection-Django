@@ -186,12 +186,13 @@ self.onmessage = async (e: MessageEvent) => {
 
       // 设置 WASM 路径，确保 Capacitor 容器环境能正确从本地加载 WebAssembly 依赖
       const origin = self.location.origin;
+      // ORT 当前版本的 WasmFilePaths 类型不含旧版文件名键，但运行时接受该映射（类型断言不改行为）
       ort.env.wasm.wasmPaths = {
         'ort-wasm.wasm': `${origin}/ort-wasm.wasm`,
         'ort-wasm-threaded.wasm': `${origin}/ort-wasm-threaded.wasm`,
         'ort-wasm-simd.wasm': `${origin}/ort-wasm-simd.wasm`,
         'ort-wasm-simd-threaded.wasm': `${origin}/ort-wasm-simd-threaded.wasm`
-      };
+      } as unknown as typeof ort.env.wasm.wasmPaths;
 
       console.log(`[YoloWorker] WASM 性能优化参数: numThreads=${numThreads}, simd=true, hasSharedArrayBuffer=${hasSharedArrayBuffer}`);
 
@@ -208,7 +209,8 @@ self.onmessage = async (e: MessageEvent) => {
       });
 
       // 从模型第一个输入元数据对象中推断输入分辨率 inputSize (inputMetadata 是数组)
-      const inputMeta = session.inputMetadata[0];
+      // ORT 类型声明的 ValueMetadata 不含 shape 字段，但运行时张量元数据带有（类型断言不改行为）
+      const inputMeta = session.inputMetadata[0] as unknown as { shape?: Array<number | string> } | undefined;
       if (inputMeta && inputMeta.shape && inputMeta.shape[2]) {
         const dim2 = inputMeta.shape[2];
         if (typeof dim2 === 'number') {
@@ -261,7 +263,8 @@ self.onmessage = async (e: MessageEvent) => {
       );
 
       // 5. 将结果发送回主线程，同时回收 pixelData buffer
-      self.postMessage(
+      // Worker 环境的 postMessage 支持 transfer 参数；DOM lib 类型签名不匹配（断言不改行为）
+      (self.postMessage as (message: unknown, transfer: Transferable[]) => void)(
         { type: 'result', payload: { detections, inferenceMs: Math.round(elapsed) } },
         [pixelData.buffer] // 转移所有权，零内存拷贝
       );

@@ -2,35 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Input } from '@/components/ui/Input';
-import { Label } from '@/components/ui/Label';
-import { Switch } from '@/components/ui/Switch';
 import {
-  Settings,
   Download,
   Upload,
   Trash2,
   Play,
-  Pause,
   CheckCircle,
-  XCircle,
   AlertCircle,
   HardDrive,
   Cpu,
   Zap,
   RefreshCw,
-  FileText,
-  Clock,
-  User,
   Menu,
   X,
   ChevronDown,
   ChevronUp,
-  Smartphone,
-  Monitor
+  Smartphone
 } from 'lucide-react';
-import { useAIConfigStore } from '@/state/aiConfigStore';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 import ModelUploadDialog from '@/components/ModelUploadDialog';
@@ -38,12 +26,7 @@ import ModelUploadDialog from '@/components/ModelUploadDialog';
 import { useModelPool } from '@/hooks/useModelPool';
 import {
   getModelVersions,
-  activateModel,
   //   deactivateModel,
-  deleteModel,
-  downloadModel,
-  exportModelConfig,
-  importModelConfig,
   getAvailableModels,
   ModelVersion,
   switchPPEModel
@@ -94,8 +77,8 @@ const STORAGE_KEYS = {
 
 const ModelManagementScreen: React.FC = () => {
   // const { config } = useAIConfigStore();
-  const [models, setModels] = useState<YoloModel[]>([]);
-  const [backendModels, setBackendModels] = useState<ModelVersion[]>([]);
+  const [, setModels] = useState<YoloModel[]>([]);
+  const [, setBackendModels] = useState<ModelVersion[]>([]);
   const [ppeModels, setPpeModels] = useState<PPEModel[]>([]);
   const [currentPPEModel, setCurrentPPEModel] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -112,10 +95,6 @@ const ModelManagementScreen: React.FC = () => {
 
   // 对话框状态
   const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showExportDialog, setShowExportDialog] = useState(false);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<YoloModel | null>(null);
 
   // 检测移动端
   useEffect(() => {
@@ -164,15 +143,6 @@ const ModelManagementScreen: React.FC = () => {
     return {};
   };
 
-  // 保存模型参数到 localStorage
-  const saveModelParamsToStorage = (params: Record<string, { confidence: number; iou: number }>) => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.MODEL_PARAMS, JSON.stringify(params));
-    } catch (error) {
-      console.error('保存模型参数失败:', error);
-    }
-  };
-
   // 获取当前活跃模型ID
   const getActiveModelId = (): string | null => {
     try {
@@ -180,19 +150,6 @@ const ModelManagementScreen: React.FC = () => {
     } catch (error) {
       console.error('获取活跃模型ID失败:', error);
       return null;
-    }
-  };
-
-  // 设置当前活跃模型ID
-  const setActiveModelId = (modelId: string | null) => {
-    try {
-      if (modelId) {
-        localStorage.setItem(STORAGE_KEYS.ACTIVE_MODEL, modelId);
-      } else {
-        localStorage.removeItem(STORAGE_KEYS.ACTIVE_MODEL);
-      }
-    } catch (error) {
-      console.error('设置活跃模型ID失败:', error);
     }
   };
 
@@ -446,188 +403,6 @@ const ModelManagementScreen: React.FC = () => {
     }
   };
 
-  // 切换模型
-  /*
-  const switchModel = async (modelId: string) => {
-    setIsLoading(true);
-    try {
-      // 更新前端模型状态
-      const updatedModels = models.map(model => ({
-        ...model,
-        isActive: model.id === modelId,
-        lastUsed: model.id === modelId ? new Date().toISOString() : model.lastUsed
-      }));
-
-      setModels(updatedModels);
-      saveModelsToStorage(updatedModels);
-      setActiveModelId(modelId);
-
-      // 尝试激活后端模型
-      try {
-        const backendModel = backendModels.find(m => m.name.toLowerCase().includes(modelId.toLowerCase()));
-        if (backendModel) {
-          await activateModel(backendModel.id);
-          toast.success(`已切换到 ${models.find(m => m.id === modelId)?.name}`);
-        } else {
-          toast.success(`已切换到 ${models.find(m => m.id === modelId)?.name} (仅前端)`);
-        }
-      } catch (error) {
-        toast.error(`前端切换成功，但后端模型激活失败`);
-      }
-    } catch (error) {
-      toast.error('模型切换失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 更新模型参数
-  const updateModelParams = (modelId: string, params: Partial<YoloModel>) => {
-    const updatedModels = models.map(model =>
-      model.id === modelId ? { ...model, ...params } : model
-    );
-
-    setModels(updatedModels);
-    saveModelsToStorage(updatedModels);
-
-    // 保存参数到 localStorage
-    const currentParams = loadModelParamsFromStorage();
-    const newParams = {
-      ...currentParams,
-      }
-    };
-    saveModelParamsToStorage(newParams);
-  };
-  */
-
-  // 删除模型
-  const handleDeleteModel = async () => {
-    if (!selectedModel) return;
-
-    setIsLoading(true);
-    try {
-      // 尝试删除后端模型
-      try {
-        const backendModel = backendModels.find(m => m.name.toLowerCase().includes(selectedModel.id.toLowerCase()));
-        if (backendModel) {
-          await deleteModel(backendModel.id);
-        }
-      } catch (error) {
-        console.warn('后端模型删除失败:', error);
-      }
-
-      // 删除前端模型
-      const updatedModels = models.filter(model => model.id !== selectedModel.id);
-      setModels(updatedModels);
-      saveModelsToStorage(updatedModels);
-
-      // 如果删除的是当前活跃模型，清除活跃模型ID
-      if (selectedModel.isActive) {
-        setActiveModelId(null);
-      }
-
-      toast.success(`模型 ${selectedModel.name} 已删除`);
-    } catch (error) {
-      toast.error('删除模型失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    } finally {
-      setIsLoading(false);
-      setShowDeleteDialog(false);
-      setSelectedModel(null);
-    }
-  };
-
-  // 下载模型
-  const handleDownloadModel = async (modelId: string) => {
-    try {
-      const backendModel = backendModels.find(m => m.name.toLowerCase().includes(modelId.toLowerCase()));
-      if (backendModel) {
-        const blob = await downloadModel(backendModel.id);
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${backendModel.name}_v${backendModel.version}.pt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        toast.success('模型下载成功');
-      } else {
-        toast.error('未找到对应的后端模型');
-      }
-    } catch (error) {
-      toast.error('下载模型失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  // 导出配置
-  const handleExportConfig = async () => {
-    try {
-      const blob = await exportModelConfig();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `model_config_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      toast.success('配置导出成功');
-      setShowExportDialog(false);
-    } catch (error) {
-      toast.error('导出配置失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  // 导入配置
-  const handleImportConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      await importModelConfig(file);
-      toast.success('配置导入成功');
-      await loadBackendModels(); // 重新加载数据
-      setShowImportDialog(false);
-    } catch (error) {
-      toast.error('导入配置失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  // 获取模型状态图标
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'available':
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'loading':
-        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
-      case 'error':
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <XCircle className="h-4 w-4 text-gray-500" />;
-    }
-  };
-
-  // 获取模型大小标签
-  const getSizeBadge = (size: string) => {
-    const sizeMap = {
-      nano: { color: 'bg-green-500', text: 'Nano' },
-      small: { color: 'bg-blue-500', text: 'Small' },
-      medium: { color: 'bg-yellow-500', text: 'Medium' },
-      large: { color: 'bg-orange-500', text: 'Large' },
-      xlarge: { color: 'bg-red-500', text: 'XLarge' }
-    };
-    const config = sizeMap[size as keyof typeof sizeMap] || sizeMap.medium;
-    return <Badge className={cn("text-xs", config.color)}>{config.text}</Badge>;
-  };
-
-  // 格式化文件大小
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
 
   return (
     <div className={cn(

@@ -338,7 +338,7 @@ export class ImageQualityAnalyzer {
   /**
    * 计算透视变形程度
    */
-  private static calculatePerspective(imageData: ImageData): number {
+  private static calculatePerspective(_imageData: ImageData): number {
     // 简化实现，检测图像边缘的直线性
     return Math.random() * 30; // 占位实现
   }
