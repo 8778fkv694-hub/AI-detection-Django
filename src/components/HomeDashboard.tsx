@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAIConfigStore } from '@/state/aiConfigStore';
 import { useAppStore } from '@/state/appStore';
 import { apiRequest, apiFetch, isLocalOfflineMode } from '@/lib/config';
-import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
+import { getLocalEngineInfo } from '@/services/detect';
 import { getDataStats, getYoloStatus, getModelPoolStatus, testAIConnection } from '@/lib/api';
 import { getStreamManagerStatus } from '@/api/streamApi';
 import { getPreprocessingStatus } from '@/lib/imagePreprocessingApi';
@@ -150,9 +150,9 @@ const HomeDashboard: React.FC = () => {
 
     const yoloPromise = (async () => {
       if (isOffline) {
-        const config = onnxYoloDetector.getConfig();
-        const activeModelName = config.modelPath.split('/').pop() || 'ppe.onnx';
-        return { ok: true, detail: `WASM 引擎已就绪 (${activeModelName})` };
+        const engineInfo = getLocalEngineInfo();
+        const engineLabel = engineInfo.engine === 'native' ? '原生' : 'WASM';
+        return { ok: true, detail: `${engineLabel} 引擎已就绪 (${engineInfo.modelFileName})` };
       }
       try {
         const status = await getYoloStatus();

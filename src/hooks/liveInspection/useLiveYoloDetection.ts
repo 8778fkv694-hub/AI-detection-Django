@@ -8,12 +8,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { yoloDetectBackend } from '@/lib/api';
-import { buildApiUrl, isLocalOfflineMode } from '@/lib/config';
-import { onnxYoloDetector } from '@/lib/onnxYoloDetector';
+import { buildApiUrl } from '@/lib/config';
 import { useModelPool } from '@/hooks/useModelPool';
 import type { BackendYoloDetection } from '@/types';
-import { isNativeYoloSupported, initNativeYolo, detectFrameNative } from '@/lib/yoloNativeBridge';
+import {
+  detectImage,
+  detectVideoFrame,
+  ensureLocalModel,
+  fetchStreamDetections,
+  getLocalEngineInfo,
+  isOfflineEngineActive,
+  startStreamDetectionLoop,
+  stopStreamDetectionLoop,
+} from '@/services/detect';
 
 export interface UseLiveYoloDetectionOptions {
   /** 视频流ID */
@@ -132,23 +139,18 @@ export const useLiveYoloDetection = ({
 
   const { activeModelId } = useModelPool();
 
-  // 当移动端/桌面端离线激活模型变化时，自动切换本地 ONNX 模型，不硬编码
+  // 当移动端/桌面端离线激活模型变化时，自动切换本地推理模型（native/WASM 由抽象层路由）
   useEffect(() => {
     const isOfflineClient = (window as any).__IS_MOBILE_APP__ || (window as any).__IS_ELECTRON__;
     if (isOfflineClient && activeModelId) {
       console.log(`[ONNX] 客户端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
-      const { modelPath, classNames } = onnxYoloDetector.getModelConfigById(activeModelId);
-      
-      const loadModelPromise = isNativeYoloSupported()
-        ? initNativeYolo(modelPath, classNames, 4, false) // 4 threads, no NNAPI for stability
-        : onnxYoloDetector.switchModel(modelPath, classNames);
-
-      loadModelPromise.then((success) => {
+      ensureLocalModel(activeModelId).then((success) => {
+        const engineInfo = getLocalEngineInfo();
         if (success) {
-          console.log(`[ONNX] 本地模型加载成功: ${modelPath} (Native: ${isNativeYoloSupported()})`);
+          console.log(`[ONNX] 本地模型加载成功: ${engineInfo.modelPath} (引擎: ${engineInfo.engine})`);
           toast.success(`本地模型切换为: ${activeModelId === 'yolov8n' ? 'YOLOv8N轻量模型' : 'PPE检测模型'}`);
         } else {
-          console.error(`[ONNX] 本地模型加载失败: ${modelPath}`);
+          console.error(`[ONNX] 本地模型加载失败: ${engineInfo.modelPath}`);
           toast.error('本地推理模型切换失败');
         }
       }).catch((err) => {
@@ -199,65 +201,25 @@ export const useLiveYoloDetection = ({
 
     isDetectingRef.current = true;
     try {
-      const useBackendDetection = !isLocalOfflineMode();
+      const useBackendDetection = !isOfflineEngineActive();
       let detections: BackendYoloDetection[] = [];
       let currentFrameId = 0;
 
       if (useBackendDetection && streamId) {
         // 解耦模式：拉取后端最新 JSON 结果
         try {
-          const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
-          if (response.ok) {
-            const result = await response.json();
-            detections = result.boxes || [];
-            currentFrameId = result.frame_id || 0;
-            
-            // 更新性能指标
-            setPerfStats({
-              inferenceMs: result.inference_ms || null,
-              fps: result.detect_fps || null,
-            });
-          }
+          const result = await fetchStreamDetections(streamId);
+          detections = result.detections;
+          currentFrameId = result.frameId || 0;
+          setPerfStats({ inferenceMs: result.inferenceMs, fps: result.fps });
         } catch (e) {
           console.error('拉取后端检测结果失败:', e);
         }
       } else if (isMobile || isElectron) {
-        // 移动端/桌面端离线模式：使用前端 ONNX 推理或原生 Android YOLO 插件
-        try {
-          const startTime = performance.now();
-          
-          if (isNativeYoloSupported()) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 320;
-            canvas.height = 320;
-            const ctx = canvas.getContext('2d');
-            if (ctx && videoRef.current) {
-              ctx.drawImage(videoRef.current, 0, 0, 320, 320);
-            }
-            detections = await detectFrameNative(canvas, detectionConfidence, 0.45);
-          } else {
-            detections = await onnxYoloDetector.detectFromVideo(videoRef.current);
-            // 按置信度过滤 (原生插件已在 Java 端过滤，WASM 需在 JS 过滤)
-            detections = detections.filter(d => d.confidence >= detectionConfidence);
-          }
-          
-          const elapsed = performance.now() - startTime;
-          
-          setPerfStats({
-            inferenceMs: Math.round(elapsed),
-            fps: Math.round(1000 / elapsed),
-          });
-        } catch (e) {
-          console.error('[离线模式] 推理失败，降级到后端 API:', e);
-          // 降级到后端 API
-          const canvas = document.createElement('canvas');
-          canvas.width = videoRef.current.videoWidth;
-          canvas.height = videoRef.current.videoHeight;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-          const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
-          detections = await yoloDetectBackend(base64Image, detectionConfidence);
-        }
+        // 移动端/桌面端离线模式：抽象层内部路由 native 插件 / WASM / 降级服务器
+        const result = await detectVideoFrame(videoRef.current, detectionConfidence);
+        detections = result.detections;
+        setPerfStats({ inferenceMs: result.inferenceMs, fps: result.fps });
       } else {
         // 传统模式：前端截图上传
         const canvas = document.createElement('canvas');
@@ -268,9 +230,9 @@ export const useLiveYoloDetection = ({
         const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
 
         const startTime = performance.now();
-        detections = await yoloDetectBackend(base64Image, detectionConfidence);
+        detections = await detectImage(base64Image, detectionConfidence);
         const elapsed = performance.now() - startTime;
-        
+
         // 更新性能指标
         setPerfStats({
           inferenceMs: Math.round(elapsed),
@@ -500,36 +462,26 @@ export const useLiveYoloDetection = ({
 
   // ====== 后端检测循环生命周期管理 ======
   useEffect(() => {
-    const useBackendDetection = !isLocalOfflineMode();
+    const useBackendDetection = !isOfflineEngineActive();
     if (!useBackendDetection || !streamId) return;
 
     if (isCameraOn && isYoloActive) {
       console.log(`🚀 正在请求后端启动Live YOLO检测循环: stream=${streamId}`);
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conf_threshold: detectionConfidence,
-          ...(modelId ? { model_id: modelId } : {}),
-          owner_id: backendLoopOwnerRef.current,
-        }),
+      startStreamDetectionLoop(streamId, {
+        confThreshold: detectionConfidence,
+        modelId,
+        ownerId: backendLoopOwnerRef.current,
       }).catch(e => console.error('启动后端Live YOLO检测循环失败:', e));
     } else {
       console.log(`🛑 正在请求后端停止Live YOLO检测循环: stream=${streamId}`);
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
-      }).catch(e => console.error('停止后端Live YOLO检测循环失败:', e));
+      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+        .catch(e => console.error('停止后端Live YOLO检测循环失败:', e));
     }
 
     return () => {
       if (useBackendDetection && streamId) {
-        fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
-        }).catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
+        stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+          .catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
       }
     };
   }, [isCameraOn, isYoloActive, streamId, detectionConfidence, modelId]);
@@ -539,7 +491,7 @@ export const useLiveYoloDetection = ({
     if (!isYoloActive || !isCameraOn) return;
 
     let active = true;
-    const useBackendDetection = !isLocalOfflineMode();
+    const useBackendDetection = !isOfflineEngineActive();
     // 远程 Jetson 后端模式下轮询间隔 50ms (20 FPS)，本地 ONNX 模式下设置极小延时 (16ms = 60fps 刷新率) 以获取最大流畅度
     const loopInterval = useBackendDetection ? 50 : 16;
 
