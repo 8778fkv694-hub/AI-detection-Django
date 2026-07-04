@@ -17,7 +17,7 @@ import { buildBarcodeAnalysis } from '@/lib/ocr/barcodeRuleEvaluator';
 import type { TestResult, KeywordConfig } from '@/types/ocr';
 import type { InspectionResult } from '@/types';
 import type { BarcodeDetectionResult } from '@/lib/barcode/barcodeAnalyzer';
-import { apiFetch } from '@/lib/config';
+import { extractText } from '@/services/ocr';
 
 export interface OCRProcessingOptions {
   // 基础配置
@@ -178,24 +178,12 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
       );
       console.log(`🧭 方向检测: ${needsAngleDetection ? '开启' : '关闭'} (根据关键词配置自动决定)`);
 
-      // 执行OCR检测
-      const ocrResult = await apiFetch('/ocr/extract/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64Data,
-          model: selectedModel,
-          use_angle_cls: needsAngleDetection,
-        })
+      // 执行OCR检测（统一走 OCR 抽象层）
+      const ocrData = await extractText({
+        image: base64Data,
+        model: selectedModel,
+        use_angle_cls: needsAngleDetection,
       });
-
-      if (!ocrResult.ok) {
-        throw new Error(`OCR检测失败: ${ocrResult.status} ${ocrResult.statusText}`);
-      }
-
-      const ocrData = await ocrResult.json();
       let finalResult = ocrData;
 
       let currentMatchStatus = 'none';
@@ -408,24 +396,12 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
         config => config.expectedOrientation !== undefined && config.expectedOrientation !== null
       );
 
-      // 调用OCR API
-      const response = await apiFetch('/ocr/extract/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64,
-          model: selectedModel,
-          use_angle_cls: needsAngleDetection,
-        }),
+      // 调用OCR API（统一走 OCR 抽象层）
+      const result = await extractText<TestResult>({
+        image: base64,
+        model: selectedModel,
+        use_angle_cls: needsAngleDetection,
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result: TestResult = await response.json();
       let currentMatchStatus: 'none' | 'qualified' | 'unqualified' = 'none';
 
       if (result.orientation_match === false) {

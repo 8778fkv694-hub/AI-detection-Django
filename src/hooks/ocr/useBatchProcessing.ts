@@ -10,6 +10,7 @@
 
 import { useState, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
+import { runBatchDetection, getRoiCacheStats as fetchRoiCacheStats, cleanupRoiCache } from '@/services/ocr';
 
 // 批处理配置接口
 export interface BatchProcessingConfig {
@@ -98,28 +99,15 @@ export function useBatchProcessing() {
 
             console.log(`🚀 开始批处理: ${roi_id_list.length}个ROI`);
 
-            const response = await fetch('/api/ocr/batch-detection/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    roi_ids: roi_id_list,
-                    apply_rules: config.applyRules,
-                    enable_barcode: config.enableBarcode,
-                    target_configs: config.targetConfigs || {},
-                    keyword_configs: config.keywordConfigs || [],
-                    barcode_configs: config.barcodeConfigs || [],
-                    non_grid_targets: config.nonGridTargets || []
-                })
+            const data = await runBatchDetection<BatchProcessingResult>({
+                roi_ids: roi_id_list,
+                apply_rules: config.applyRules,
+                enable_barcode: config.enableBarcode,
+                target_configs: config.targetConfigs || {},
+                keyword_configs: config.keywordConfigs || [],
+                barcode_configs: config.barcodeConfigs || [],
+                non_grid_targets: config.nonGridTargets || []
             });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
-            }
-
-            const data: BatchProcessingResult = await response.json();
 
             if (!data.success) {
                 throw new Error(data.reason || '批处理失败');
@@ -161,13 +149,7 @@ export function useBatchProcessing() {
      */
     const getCacheStats = useCallback(async (): Promise<ROICacheStats | null> => {
         try {
-            const response = await fetch('/api/ocr/roi-cache-stats/');
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const stats: ROICacheStats = await response.json();
+            const stats = await fetchRoiCacheStats<ROICacheStats>();
             return stats;
 
         } catch (err) {
@@ -185,19 +167,7 @@ export function useBatchProcessing() {
         mode: 'expired' | 'all' = 'expired'
     ): Promise<boolean> => {
         try {
-            const response = await fetch('/api/ocr/cleanup-roi-cache/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ mode })
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
+            const data = await cleanupRoiCache<{ success: boolean; cleaned_count: number; remaining_count: number }>(mode);
 
             if (data.success) {
                 toast.success(`缓存清理完成: 已清理${data.cleaned_count}个ROI，剩余${data.remaining_count}个`);

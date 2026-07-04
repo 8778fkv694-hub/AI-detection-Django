@@ -3,6 +3,7 @@ import { useAIConfigStore } from '@/state/aiConfigStore';
 import { useAppStore } from '@/state/appStore';
 import { apiRequest, apiFetch, isLocalOfflineMode } from '@/lib/config';
 import { getLocalEngineInfo } from '@/services/detect';
+import { extractText, getOcrStatus } from '@/services/ocr';
 import { getDataStats, getYoloStatus, getModelPoolStatus, testAIConnection } from '@/lib/api';
 import { getStreamManagerStatus } from '@/api/streamApi';
 import { getPreprocessingStatus } from '@/lib/imagePreprocessingApi';
@@ -93,23 +94,18 @@ async function triggerQRModelLoad(): Promise<{ ok: boolean; detail?: string }> {
 
 async function triggerOCRModelLoad(): Promise<{ ok: boolean; detail?: string }> {
   try {
-    const res = await apiFetch('/ocr/status/');
-    if (!res.ok) return { ok: false, detail: '不可用' };
-    const data = await res.json();
-    if (data.available) return { ok: true, detail: data.engine || data.model || '可用' };
+    const data = await getOcrStatus();
+    if (data.available) return { ok: true, detail: String(data.engine || data.model || '可用') };
     try {
-      const detectRes = await apiFetch('/ocr/extract/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: COMPACT_SAMPLE_IMAGE }),
+      const detectData = await extractText<{ success?: boolean; text?: string; engine?: string; error?: string }>({
+        image: COMPACT_SAMPLE_IMAGE,
       });
-      const detectData = await detectRes.json();
       if (detectData.success || detectData.text !== undefined) {
-        return { ok: true, detail: detectData.engine || data.engine || '已激活' };
+        return { ok: true, detail: String(detectData.engine || data.engine || '已激活') };
       }
       return { ok: false, detail: detectData.error || '不可用' };
     } catch {
-      return { ok: false, detail: data.engine || '不可用' };
+      return { ok: false, detail: String(data.engine || '不可用') };
     }
   } catch {
     return { ok: false, detail: '服务未响应' };
@@ -192,13 +188,11 @@ const HomeDashboard: React.FC = () => {
     const ocrPromise = (async () => {
       if (isOffline) return { ok: false, detail: '未配置' };
       try {
-        const res = await apiFetch('/ocr/status/');
-        if (!res.ok) throw new Error('ocr status error');
-        const data = await res.json();
+        const data = await getOcrStatus();
         if (data.available) {
-          return { ok: true, detail: data.engine || data.model || '可用' };
+          return { ok: true, detail: String(data.engine || data.model || '可用') };
         }
-        return { ok: false, detail: data.engine || '不可用' };
+        return { ok: false, detail: String(data.engine || '不可用') };
       } catch { return { ok: false, detail: '不可用' }; }
     })();
 

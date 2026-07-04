@@ -8,6 +8,7 @@ import { Upload, Eye, Zap, CheckCircle, Brain, Settings, RotateCcw, Download, Ar
 import { toast } from 'react-hot-toast';
 import { preprocessImage, analyzeImageQuality, PreprocessingOptions } from '@/lib/imagePreprocessingApi';
 import { ImageQualityAnalyzer } from '@/lib/imageQualityAnalyzer';
+import { extractText } from '@/services/ocr';
 
 // 添加滑块样式
 const sliderStyles = `
@@ -283,23 +284,11 @@ const OCRGuidedTestScreen: React.FC = () => {
         console.log(`✅ 图片压缩完成: ${originalSize}KB -> ${compressedSize}KB (压缩率: ${Math.round((1 - compressedSize / originalSize) * 100)}%)`);
       }
 
-      // 调用OCR API
-      const response = await fetch('/api/ocr/extract/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64,
-          model: 'auto'  // 让后端自动选择最佳引擎
-        }),
+      // 调用OCR API（统一走 OCR 抽象层）
+      const result = await extractText({
+        image: base64,
+        model: 'auto'  // 让后端自动选择最佳引擎
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
 
       // 计算平均置信度
       const avgConfidence = result.detailed_results && result.detailed_results.length > 0

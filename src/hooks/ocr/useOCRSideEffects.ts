@@ -1,4 +1,5 @@
 import { useEffect, useRef, MutableRefObject } from 'react';
+import { getOcrStatus } from '@/services/ocr';
 
 interface UseOCRSideEffectsProps {
   // Sync refs
@@ -118,12 +119,9 @@ export const useOCRSideEffects = ({
   useEffect(() => {
     const checkOCRStatus = async () => {
       try {
-        const response = await fetch('/api/ocr/status/');
-        if (response.ok) {
-          const status = await response.json();
-          if (status.available) {
-            console.log('OCR服务可用');
-          }
+        const status = await getOcrStatus();
+        if (status.available) {
+          console.log('OCR服务可用');
         }
       } catch (error) {
         console.error('检查OCR服务状态失败:', error);
