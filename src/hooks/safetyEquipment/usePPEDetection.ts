@@ -19,6 +19,7 @@ import {
   stopStreamDetectionLoop,
 } from '@/services/detect';
 import type { YoloDetection } from '@/lib/yoloDetector';
+import { computePpeVerdict, type PpeVerdict } from '@/lib/safetyEquipment/ppeVerdict';
 
 export interface DetectionStats {
   totalDetections: number;
@@ -83,7 +84,8 @@ export interface UsePPEDetectionResult {
   drawDetections: (
     detections: YoloDetection[],
     canvas: HTMLCanvasElement,
-    sourceSize?: { width: number; height: number }
+    sourceSize?: { width: number; height: number },
+    perfStats?: { inferenceMs: number | null; fps: number | null }
   ) => void;
   /** 检测统计 */
   detectionStats: DetectionStats;
@@ -97,6 +99,10 @@ export interface UsePPEDetectionResult {
   setLastCaptureTime: (time: number) => void;
   /** 执行单次实时PPE检测 */
   runPpeDetection: () => Promise<string[] | null>;
+  /** 推理耗时/帧率（全屏 HUD 用） */
+  perfStats: { inferenceMs: number | null; fps: number | null };
+  /** 最近一次检测的全屏判定（A1.3） */
+  latestVerdict: PpeVerdict | null;
 }
 
 export const usePPEDetection = ({
@@ -126,6 +132,21 @@ export const usePPEDetection = ({
     personDetections: 0,
     equipmentDetections: 0,
   });
+  // 性能指标状态（推理耗时与帧率），供全屏 HUD 使用
+  const [perfStats, setPerfStats] = useState<{ inferenceMs: number | null; fps: number | null }>({
+    inferenceMs: null,
+    fps: null,
+  });
+  // 最近一次检测的全屏判定（A1.3），供 SafetyCameraPanel 全屏徽章使用
+  const [latestVerdict, setLatestVerdict] = useState<PpeVerdict | null>(null);
+
+  // 监听状态，关闭时清除指标（对齐 useLiveYoloDetection 的行为）
+  useEffect(() => {
+    if (!isPpeActive || !isCameraOn) {
+      setPerfStats({ inferenceMs: null, fps: null });
+      setLatestVerdict(null);
+    }
+  }, [isPpeActive, isCameraOn]);
 
   // 在离线/Native平台下，当进入PPE检测屏幕且开启了PPE检测时，确保加载了 ppe_detection 模型
   useEffect(() => {
@@ -278,7 +299,8 @@ export const usePPEDetection = ({
     (
       detections: YoloDetection[],
       canvas: HTMLCanvasElement,
-      sourceSize?: { width: number; height: number }
+      sourceSize?: { width: number; height: number },
+      perfStatsForHud?: { inferenceMs: number | null; fps: number | null }
     ) => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -323,6 +345,30 @@ export const usePPEDetection = ({
           y * scaleY - 5
         );
       });
+
+      // 绘制右下角推理耗时与帧率（样式对齐 useLiveYoloDetection）
+      if (perfStatsForHud && perfStatsForHud.inferenceMs !== null) {
+        const text = `推理: ${perfStatsForHud.inferenceMs}ms | 帧率: ${perfStatsForHud.fps || 0} FPS`;
+        ctx.font = 'bold 14px monospace';
+        const textWidth = ctx.measureText(text).width;
+        const padding = 8;
+        const rectWidth = textWidth + padding * 2;
+        const rectHeight = 26;
+        const rectX = canvas.width - rectWidth - 10;
+        const rectY = canvas.height - rectHeight - 10;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(rectX, rectY, rectWidth, rectHeight, 4);
+        } else {
+          ctx.rect(rectX, rectY, rectWidth, rectHeight);
+        }
+        ctx.fill();
+
+        ctx.fillStyle = '#4ade80';
+        ctx.fillText(text, rectX + padding, rectY + 17);
+      }
     },
     []
   );
@@ -376,6 +422,9 @@ export const usePPEDetection = ({
       let detections: YoloDetection[] = [];
       let sourceSize: { width: number; height: number } | undefined;
       let currentFrameId = 0;
+      // 本帧的性能指标：用局部变量而非直接读 state，避免 setState 异步导致
+      // 画布绘制时读到上一帧的旧值（HUD 落后一帧）
+      let framePerfStats: { inferenceMs: number | null; fps: number | null } = perfStats;
 
       if (useBackendDetection && streamId) {
         try {
@@ -389,6 +438,9 @@ export const usePPEDetection = ({
           if (result.sourceSize) {
             sourceSize = result.sourceSize;
           }
+          // stream-loop 模式下后端已计好推理耗时/帧率，直接采用
+          framePerfStats = { inferenceMs: result.inferenceMs, fps: result.fps };
+          setPerfStats(framePerfStats);
         } catch (error) {
           console.error('拉取PPE后端检测结果失败:', error);
         }
@@ -416,7 +468,12 @@ export const usePPEDetection = ({
           return null;
         }
 
+        // TODO(P2): 路径统一后改用 FrameDetectionResult.inferenceMs，此处临时自行计时
+        const startTime = performance.now();
         detections = await performCaptureDetection(base64Data);
+        const elapsed = performance.now() - startTime;
+        framePerfStats = { inferenceMs: Math.round(elapsed), fps: Math.round(1000 / elapsed) };
+        setPerfStats(framePerfStats);
       }
 
       const personCount = detections.filter((d) => d.class === 'person').length;
@@ -440,6 +497,9 @@ export const usePPEDetection = ({
         equipmentDetections: equipmentCount,
       });
 
+      // A1.3: 全屏判定复用拍照评估同一套口径，仅用于展示，不影响保存流程
+      setLatestVerdict(computePpeVerdict(detections));
+
       if (detectionCanvasRef.current && videoRef.current && showDetections) {
         const videoWidth = videoRef.current.videoWidth;
         const videoHeight = videoRef.current.videoHeight;
@@ -447,7 +507,7 @@ export const usePPEDetection = ({
         if (videoWidth > 0 && videoHeight > 0) {
           detectionCanvasRef.current.width = videoWidth;
           detectionCanvasRef.current.height = videoHeight;
-          drawDetections(detections, detectionCanvasRef.current, sourceSize);
+          drawDetections(detections, detectionCanvasRef.current, sourceSize, framePerfStats);
         }
       }
 
@@ -522,6 +582,7 @@ export const usePPEDetection = ({
     handleAutoCapture,
     captureCurrentFrame,
     fetchBackendSnapshotBase64,
+    perfStats,
   ]);
 
   // 画布尺寸设置
@@ -550,5 +611,7 @@ export const usePPEDetection = ({
     lastCaptureTime,
     setLastCaptureTime,
     runPpeDetection,
+    perfStats,
+    latestVerdict,
   };
 };

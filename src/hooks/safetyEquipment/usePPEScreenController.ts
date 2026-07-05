@@ -293,6 +293,7 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
           videoDevices: camera.videoDevices,
           selectedDeviceId: camera.selectedDeviceId,
           detectionStats: detection.detectionStats,
+          latestVerdict: detection.latestVerdict,
           onToggleCamera: camera.toggleCamera,
           onToggleMonitoring: camera.toggleMonitoring,
           onSwitchCamera: camera.switchCamera,

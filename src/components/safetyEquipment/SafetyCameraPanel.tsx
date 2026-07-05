@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils';
 import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 import type { DetectionStats } from '@/hooks/safetyEquipment/usePPEDetection';
+import type { PpeVerdict } from '@/lib/safetyEquipment/ppeVerdict';
+import { FullscreenVerdictBadge } from '@/components/detection/FullscreenVerdictBadge';
 
 export interface SafetyCameraPanelProps {
   /** 窗口ID */
@@ -48,6 +50,8 @@ export interface SafetyCameraPanelProps {
   selectedDeviceId: string | undefined;
   /** 检测统计 */
   detectionStats: DetectionStats;
+  /** 最近一次检测的全屏判定（A1.3），全屏时渲染右上角徽章 */
+  latestVerdict?: PpeVerdict | null;
   /** 切换摄像头开关 */
   onToggleCamera: () => void;
   /** 切换监控状态 */
@@ -67,6 +71,7 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
   videoDevices,
   selectedDeviceId,
   detectionStats,
+  latestVerdict,
   onToggleCamera,
   onToggleMonitoring,
   onSwitchCamera,
@@ -129,6 +134,11 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
           )}
         />
         {!isCameraOn && <CameraOff className="h-16 w-16" />}
+
+        {/* 全屏时显示的判定徽章（渲染在被全屏的容器内，否则全屏时不可见） */}
+        {isCameraOn && isFullscreen && latestVerdict && (
+          <FullscreenVerdictBadge verdict={latestVerdict.overallQuality} score={latestVerdict.score} />
+        )}
 
         {/* 全屏按钮 */}
         {isCameraOn && (
