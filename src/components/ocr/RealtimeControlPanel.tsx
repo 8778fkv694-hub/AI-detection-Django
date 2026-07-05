@@ -24,6 +24,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { VideoOverlayIndicators } from '@/components/ocr/VideoOverlayIndicators';
+import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 
 interface RealtimeControlPanelProps {
@@ -98,6 +99,7 @@ export const RealtimeControlPanel: React.FC<RealtimeControlPanelProps> = ({
   isDetecting,
   detectionStats,
 }) => {
+  const videoAspect = useVideoAspect(videoRef);
   return (
     <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-600">
       <div className="space-y-3">
@@ -206,10 +208,11 @@ export const RealtimeControlPanel: React.FC<RealtimeControlPanelProps> = ({
         </Button>
       </div>
 
-      {/* 视频显示区域 */}
+      {/* 视频显示区域：容器比例跟随视频原始分辨率（规范化坐标系），避免竖屏下检测框被 CSS 拉伸变形 */}
       <div
         id="video-container"
         className="aspect-video bg-black rounded-lg flex items-center justify-center text-slate-500 overflow-hidden relative"
+        style={videoAspect ? { aspectRatio: String(videoAspect) } : undefined}
       >
         <video
           ref={videoRef}

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import ModelSelector from '@/components/ModelSelector';
 import { VideoOverlayIndicators } from '@/components/ocr/VideoOverlayIndicators';
+import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 import type { TestResult } from '@/types/ocr';
 import type { InspectionResult } from '@/types';
@@ -125,6 +126,7 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
   loadModelConfig,
   onModelSwitch,
 }) => {
+  const videoAspect = useVideoAspect(videoRef);
   const selectedDevice = availableDevices.find((device) => device.deviceId === selectedDeviceId);
   const isVirtualStream = selectedDeviceId.startsWith('stream-');
   const virtualStreamPlayMode = selectedDevice?.streamSource?.play_mode;
@@ -266,10 +268,11 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
         </Button>
       </div>
 
-      {/* 视频显示区域 */}
+      {/* 视频显示区域：容器比例跟随视频原始分辨率（规范化坐标系），避免竖屏下检测框被 CSS 拉伸变形 */}
       <div
         id="video-container"
         className="aspect-video bg-black rounded-lg flex items-center justify-center text-slate-500 overflow-hidden relative"
+        style={videoAspect ? { aspectRatio: String(videoAspect) } : undefined}
       >
         <video
           ref={videoRef}

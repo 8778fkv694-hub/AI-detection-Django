@@ -23,6 +23,7 @@ import {
   Minimize,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 import type { DetectionStats } from '@/hooks/safetyEquipment/usePPEDetection';
 
@@ -71,6 +72,7 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
   onSwitchCamera,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const videoAspect = useVideoAspect(videoRef);
 
   // 全屏切换功能
   const toggleFullscreen = () => {
@@ -110,6 +112,7 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
       <div
         id="video-container"
         className="aspect-video bg-black rounded-lg flex items-center justify-center text-slate-500 overflow-hidden relative"
+        style={videoAspect ? { aspectRatio: String(videoAspect) } : undefined}
       >
         <video
           ref={videoRef}

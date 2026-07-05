@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils';
 import ModelModeSwitch from '@/components/ModelModeSwitch';
 import ModelSelector from '@/components/ModelSelector';
+import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 
 export interface LiveCameraPanelProps {
@@ -93,6 +94,7 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
   capturedImagesCount,
   isInspecting,
 }) => {
+  const videoAspect = useVideoAspect(videoRef);
   return (
     <Card className="flex flex-col h-full">
       <CardHeader className="pb-3">
@@ -161,6 +163,7 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
             'bg-black rounded-lg flex items-center justify-center text-slate-500 overflow-hidden relative',
             isFullscreen ? 'flex-1' : 'aspect-video'
           )}
+          style={!isFullscreen && videoAspect ? { aspectRatio: String(videoAspect) } : undefined}
         >
           <video
             ref={videoRef}
