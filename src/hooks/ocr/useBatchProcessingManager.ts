@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
+import { cacheRoiToBackend } from '@/lib/api';
 import { useOCRDetectionStore } from '@/state/ocrDetectionStore';
 import { useBatchProcessing, type BatchProcessingResult } from './useBatchProcessing';
 import type { KeywordConfig, BarcodeConfig } from '@/types/ocr';
@@ -62,17 +63,11 @@ export function useBatchProcessingManager({
     ): Promise<string | null> => {
         try {
             // 调用后端API缓存ROI
-            const response = await fetch('/api/yolo/cache-roi/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    label,
-                    roi_image: roiImageDataUrl,
-                    bbox,
-                    detection: detection || {}
-                })
+            const response = await cacheRoiToBackend({
+                label,
+                roi_image: roiImageDataUrl,
+                bbox,
+                detection: detection || {}
             });
 
             if (!response.ok) {

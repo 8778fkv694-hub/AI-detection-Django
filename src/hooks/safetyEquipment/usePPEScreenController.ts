@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { getYoloStatus, preloadYolo } from '@/lib/api';
+import { getYoloStatus, preloadYolo, clearCleanroomResults } from '@/lib/api';
 import type { ActiveAlert } from '@/lib/anomalyApi';
 import { useCurrentModel } from '@/hooks/useCurrentModel';
 import { useAppStore } from '@/state/appStore';
@@ -226,14 +226,10 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
         (result) => (result as { detectionType?: string }).detectionType === 'cleanroom_ppe'
       );
 
-      const response = await fetch('/api/results/clear-cleanroom/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reason: '用户手动清空所有检测结果',
-          count: cleanroomResults.length,
-        }),
-      });
+      const response = await clearCleanroomResults(
+        cleanroomResults.length,
+        '用户手动清空所有检测结果'
+      );
 
       if (response.ok) {
         toast.success('已清空所有检测结果（包括数据库记录）');

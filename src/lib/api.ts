@@ -578,6 +578,23 @@ export async function scanHealthSystemNetwork(): Promise<Response> {
     return apiFetch('/reports/scan-health-system/', { method: 'POST' });
 }
 
+// ---- ROI 缓存（useBatchProcessingManager 收口） ----
+// 注：原调用为裸相对路径 '/api/yolo/cache-roi/'（未走 buildApiUrl），
+// 改走 apiFetch 后可正确响应用户自定义的 API_SERVER_URL 配置。
+
+export async function cacheRoiToBackend(payload: {
+    label: string;
+    roi_image: string;
+    bbox: any;
+    detection?: any;
+}): Promise<Response> {
+    return apiFetch('/yolo/cache-roi/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+}
+
 // ---- 增强分析（EnhancedInspectionScreen 收口） ----
 
 export async function enhanceAnalyzeResult(payload: {
