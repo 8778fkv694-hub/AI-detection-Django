@@ -443,6 +443,7 @@ const LiveInspectionScreen: React.FC = () => {
           onStartAIDetection={handleStartAIDetection}
           capturedImagesCount={capturedImages.length}
           isInspecting={isInspecting}
+          verdict={localResults[0]?.overallQuality ?? '待检测'}
         />
 
         {/* 检测目标选择 */}

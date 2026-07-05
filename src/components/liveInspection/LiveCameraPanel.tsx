@@ -28,6 +28,7 @@ import ModelModeSwitch from '@/components/ModelModeSwitch';
 import ModelSelector from '@/components/ModelSelector';
 import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
+import { FullscreenVerdictBadge, type FullscreenVerdict } from '@/components/detection/FullscreenVerdictBadge';
 
 export interface LiveCameraPanelProps {
   /** 视频元素引用 */
@@ -70,6 +71,8 @@ export interface LiveCameraPanelProps {
   capturedImagesCount: number;
   /** 是否正在检测 */
   isInspecting: boolean;
+  /** 全屏判定文案（A1.4），来自最近一次 AI 分析结果 */
+  verdict: FullscreenVerdict;
 }
 
 export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
@@ -93,6 +96,7 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
   onStartAIDetection,
   capturedImagesCount,
   isInspecting,
+  verdict,
 }) => {
   const videoAspect = useVideoAspect(videoRef);
   return (
@@ -187,6 +191,9 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
             }}
           />
           {!isCameraOn && <CameraOff className="h-16 w-16" />}
+
+          {/* 全屏时显示的判定徽章 */}
+          {isCameraOn && isFullscreen && <FullscreenVerdictBadge verdict={verdict} />}
         </div>
 
         {/* 摄像头控制区域 */}
