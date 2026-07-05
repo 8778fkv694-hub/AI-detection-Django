@@ -86,6 +86,36 @@ else
     echo "RPA服务器未运行"
 fi
 
+# 停止SPA生产预览服务
+if [ -f "spa.pid" ]; then
+    SPA_PID=$(cat spa.pid)
+    if ps -p $SPA_PID > /dev/null; then
+        echo "🛑 停止SPA生产预览服务 (PID: $SPA_PID)..."
+        kill $SPA_PID
+        rm spa.pid
+    else
+        echo "SPA生产预览服务未运行"
+        rm -f spa.pid
+    fi
+else
+    echo "SPA生产预览服务未运行"
+fi
+
+# 停止Node流媒体服务
+if [ -f "stream.pid" ]; then
+    STREAM_PID=$(cat stream.pid)
+    if ps -p $STREAM_PID > /dev/null; then
+        echo "🛑 停止Node流媒体服务 (PID: $STREAM_PID)..."
+        kill $STREAM_PID
+        rm stream.pid
+    else
+        echo "Node流媒体服务未运行"
+        rm -f stream.pid
+    fi
+else
+    echo "Node流媒体服务未运行"
+fi
+
 # 强制停止相关进程
 echo "🔧 强制停止相关进程..."
 pkill -f "manage.py runserver" 2>/dev/null || true
@@ -94,5 +124,7 @@ pkill -f "vite" 2>/dev/null || true
 pkill -f "ollama serve" 2>/dev/null || true
 pkill -f "ollama-proxy.js" 2>/dev/null || true
 pkill -f "rpa-server.js" 2>/dev/null || true
+pkill -f "serve_spa.py" 2>/dev/null || true
+pkill -f "nodejs-stream-service/src/index.js" 2>/dev/null || true
 
 echo "✅ 所有服务已停止"
