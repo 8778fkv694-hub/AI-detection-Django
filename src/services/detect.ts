@@ -147,6 +147,19 @@ export async function detectVideoFrame(
   }
 }
 
+/**
+ * stream-loop 模式：拉取后端 Ring Buffer 中的一帧高清原图（与检测框完全对齐）。
+ * 返回原始 Response（不解析 blob），调用方按需 .blob() / 读取 X-Frame-ID 头等，行为不变。
+ * frameId 传入时按历史帧精确请求，不传则取最新帧。
+ */
+export async function fetchStreamSnapshot(
+  streamId: string,
+  frameId?: number
+): Promise<Response> {
+  const query = frameId && frameId > 0 ? `?frame_id=${frameId}` : '';
+  return fetch(buildApiUrl(`/streams/${streamId}/snapshot/${query}`));
+}
+
 /** stream-loop 模式：拉取后端检测循环的最新结果 */
 export async function fetchStreamDetections(
   streamId: string

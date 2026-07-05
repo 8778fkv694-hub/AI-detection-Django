@@ -7,8 +7,15 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
-import { apiFetch, buildApiUrl, isLocalOfflineMode } from '@/lib/config';
+import type { BackendYoloDetection } from '@/lib/api';
+import { apiFetch, isLocalOfflineMode } from '@/lib/config';
+import {
+  detectImage,
+  fetchStreamSnapshot,
+  fetchStreamDetections,
+  startStreamDetectionLoop,
+  stopStreamDetectionLoop,
+} from '@/services/detect';
 import { calculateSharpnessAsync } from '@/lib/imageQuality/sharpnessCalculator';
 import { drawDetections } from '@/lib/ocr/detectionDrawer';
 import type { BestROIData } from '@/hooks/ocr/useROIProcessor';
@@ -201,7 +208,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         try {
           if (useBackendDetection && streamId) {
             // 解耦模式：从后端获取与检测框完全匹配的高清原图
-            const res = await fetch(buildApiUrl(`/streams/${streamId}/snapshot/`));
+            const res = await fetchStreamSnapshot(streamId);
             if (!res.ok) return;
             const blob = await res.blob();
             const objectUrl = URL.createObjectURL(blob);
@@ -350,26 +357,23 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         if (useBackendDetection && streamId) {
           // ====== 解耦模式：拉取后端最新 JSON 结果（<1KB） ======
           try {
-            const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
-            if (response.ok) {
-              const result = await response.json();
-              detections = result.boxes || [];
-              currentFrameId = result.frame_id || 0;
-              
-              // 更新性能指标
-              latestPerfStatsRef.current = {
-                inferenceMs: result.inference_ms || null,
-                fps: result.detect_fps || null,
-              };
+            const result = await fetchStreamDetections(streamId);
+            detections = result.detections;
+            currentFrameId = result.frameId || 0;
 
-              // 同步更新后端的 FPS 统计
-              if (result.detect_fps) {
-                // 将后端真实 FPS 更新到统计中
-                setDetectionStats((prev: any) => ({
-                  ...prev,
-                  fps: result.detect_fps,
-                }));
-              }
+            // 更新性能指标
+            latestPerfStatsRef.current = {
+              inferenceMs: result.inferenceMs,
+              fps: result.fps,
+            };
+
+            // 同步更新后端的 FPS 统计
+            if (result.fps) {
+              // 将后端真实 FPS 更新到统计中
+              setDetectionStats((prev: any) => ({
+                ...prev,
+                fps: result.fps,
+              }));
             }
           } catch (e) {
             console.error('拉取后端检测结果失败:', e);
@@ -438,7 +442,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           // 执行YOLO检测
           const detectionType = (modelConfig?.detection_type as 'cleanroom_ppe' | 'kit_matching' | 'ocr_inspection' | 'ocr_fusion_inspection' | 'general_quality' | undefined) || 'ocr_inspection';
           const startTime = performance.now();
-          detections = await yoloDetectBackend(base64Data, detectionConfidence, {
+          detections = await detectImage(base64Data, detectionConfidence, {
             ...(currentModelId ? { model_id: currentModelId } : {}),
             detection_type: detectionType,
           });
@@ -567,11 +571,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           if (useBackendDetection && streamId && !finalDataUrl) {
             try {
               // 通过 frame_id 从后端 Ring Buffer 请求历史帧，实现完美对齐
-              const url = currentFrameId > 0 
-                ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${currentFrameId}`)
-                : buildApiUrl(`/streams/${streamId}/snapshot/`);
-                
-              const snapRes = await fetch(url);
+              const snapRes = await fetchStreamSnapshot(streamId, currentFrameId);
               if (snapRes.ok) {
                 const snapFrameId = parseInt(snapRes.headers.get('X-Frame-ID') || '0', 10);
                 if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
@@ -727,7 +727,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           try {
             const frameDetectionType = (modelConfig?.detection_type as any) || 'ocr_inspection';
             const startTime = performance.now();
-            const frameDetections = await yoloDetectBackend(frameBase64, detectionConfidence, {
+            const frameDetections = await detectImage(frameBase64, detectionConfidence, {
               ...(currentModelId ? { model_id: currentModelId } : {}),
               detection_type: frameDetectionType,
             });
@@ -1008,7 +1008,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
         } else {
           console.log('🔍 ROI模式：没有累积ROI，对全画面图片进行YOLO检测...');
-          const captureDetections = await yoloDetectBackend(captureBase64Data, detectionConfidence, {
+          const captureDetections = await detectImage(captureBase64Data, detectionConfidence, {
             ...(currentModelId ? { model_id: currentModelId } : {}),
             detection_type: (modelConfig?.detection_type as any) || 'ocr_inspection',
           });
@@ -1186,33 +1186,23 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     if (isRealtimeActive && isCameraOn && !isPaused) {
       // 启动后端检测循环
       console.log(`🚀 正在请求后端启动检测循环: stream=${streamId}, model=${currentModelId || 'default'}`);
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model_id: currentModelId || undefined,
-          conf_threshold: detectionConfidence,
-          owner_id: backendLoopOwnerRef.current,
-        }),
+      startStreamDetectionLoop(streamId, {
+        confThreshold: detectionConfidence,
+        modelId: currentModelId || undefined,
+        ownerId: backendLoopOwnerRef.current,
       }).catch(e => console.error('启动后端检测循环失败:', e));
     } else {
       // 暂停或停止时关闭后端检测循环
       console.log(`🛑 正在请求后端停止检测循环: stream=${streamId}`);
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
-      }).catch(e => console.error('停止后端检测循环失败:', e));
+      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+        .catch(e => console.error('停止后端检测循环失败:', e));
     }
-    
+
     return () => {
       // 卸载组件时停止检测循环
       if (useBackendDetection && streamId) {
-        fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
-        }).catch(e => console.error('卸载时停止后端检测循环失败:', e));
+        stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+          .catch(e => console.error('卸载时停止后端检测循环失败:', e));
       }
     };
   }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, detectionConfidence, modelConfig]);
