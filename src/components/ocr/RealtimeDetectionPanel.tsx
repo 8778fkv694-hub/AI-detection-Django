@@ -314,16 +314,15 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
         />
         {!isCameraOn && <CameraOff className="h-16 w-16" />}
 
-        {/* 暂停状态指示器 */}
-        {isCameraOn && isRealtimeActive && isPaused && (
+        {/* 暂停/检测中状态指示器：全屏下与右上角判定徽章重复，不渲染（A1.5 降噪） */}
+        {!isFullscreen && isCameraOn && isRealtimeActive && isPaused && (
           <div className="absolute top-2 left-2 z-30 bg-yellow-600/90 backdrop-blur-sm px-3 py-1.5 rounded-md flex items-center gap-2">
             <Pause className="h-4 w-4 text-white" />
             <span className="text-sm font-medium text-white">已暂停</span>
           </div>
         )}
 
-        {/* 检测中状态指示器 */}
-        {isCameraOn && isRealtimeActive && !isPaused && (
+        {!isFullscreen && isCameraOn && isRealtimeActive && !isPaused && (
           <div className="absolute top-2 left-2 z-30 bg-green-600/90 backdrop-blur-sm px-3 py-1.5 rounded-md flex items-center gap-2">
             <div className="h-2 w-2 bg-white rounded-full animate-pulse" />
             <span className="text-sm font-medium text-white">检测中</span>
@@ -344,12 +343,14 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
           </button>
         )}
 
-        {/* 视频叠加层指示器 */}
-        <VideoOverlayIndicators
-          isRealtimeActive={isRealtimeActive}
-          isDetecting={isDetecting}
-          detectionStats={detectionStats}
-        />
+        {/* 视频叠加层指示器：全屏下不属于"判断结果"，不渲染（A1.5 降噪） */}
+        {!isFullscreen && (
+          <VideoOverlayIndicators
+            isRealtimeActive={isRealtimeActive}
+            isDetecting={isDetecting}
+            detectionStats={detectionStats}
+          />
+        )}
       </div>
     </div>
   );

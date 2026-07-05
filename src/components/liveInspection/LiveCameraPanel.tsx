@@ -103,55 +103,60 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
     <Card className="flex flex-col h-full">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <div className="flex flex-col gap-2">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              实时检测与抓拍
-              {isYoloActive && (
-                <Badge variant="outline" className="text-green-400 border-green-400 text-xs">
-                  <Zap className="h-3 w-3 mr-1" />
-                  检测中
+          {/* 全屏下标题/模型选择/键盘提示不属于"判断结果"，不渲染（A1.5 降噪） */}
+          {!isFullscreen && (
+            <div className="flex flex-col gap-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Camera className="h-5 w-5" />
+                实时检测与抓拍
+                {isYoloActive && (
+                  <Badge variant="outline" className="text-green-400 border-green-400 text-xs">
+                    <Zap className="h-3 w-3 mr-1" />
+                    检测中
+                  </Badge>
+                )}
+              </CardTitle>
+              {/* 简化的模型模式切换 */}
+              <div className="flex items-center gap-3">
+                <ModelModeSwitch showStatus={false} />
+                {isLocalMode && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={testLocalModelConnection}
+                    className="h-7 px-3 text-xs text-slate-400 hover:text-slate-300"
+                  >
+                    测试连接
+                  </Button>
+                )}
+              </div>
+              {/* YOLO模型信息显示 */}
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <Box className="h-4 w-4" />
+                <span>YOLO模型:</span>
+                <Badge variant="outline" className="text-xs">
+                  {currentYoloModel}
                 </Badge>
-              )}
-            </CardTitle>
-            {/* 简化的模型模式切换 */}
-            <div className="flex items-center gap-3">
-              <ModelModeSwitch showStatus={false} />
-              {isLocalMode && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={testLocalModelConnection}
-                  className="h-7 px-3 text-xs text-slate-400 hover:text-slate-300"
-                >
-                  测试连接
-                </Button>
-              )}
+              </div>
+              {/* YOLO 模型选择器 */}
+              <ModelSelector
+                label=""
+                placeholder="切换检测模型"
+                showActiveBadge={false}
+                showModelCount={true}
+                onModelChange={async (_modelId) => {
+                  await fetchYoloModelInfo();
+                }}
+              />
             </div>
-            {/* YOLO模型信息显示 */}
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Box className="h-4 w-4" />
-              <span>YOLO模型:</span>
-              <Badge variant="outline" className="text-xs">
-                {currentYoloModel}
-              </Badge>
-            </div>
-            {/* YOLO 模型选择器 */}
-            <ModelSelector
-              label=""
-              placeholder="切换检测模型"
-              showActiveBadge={false}
-              showModelCount={true}
-              onModelChange={async (_modelId) => {
-                await fetchYoloModelInfo();
-              }}
-            />
-          </div>
+          )}
           <div className="flex items-center gap-2">
-            <div className="text-xs text-slate-400">
-              <Keyboard size={12} />
-              <span className="ml-1">空格=抓拍 / A=AI分析 / F=全屏</span>
-            </div>
+            {!isFullscreen && (
+              <div className="text-xs text-slate-400">
+                <Keyboard size={12} />
+                <span className="ml-1">空格=抓拍 / A=AI分析 / F=全屏</span>
+              </div>
+            )}
             {isCameraOn && (
               <Button variant="outline" size="sm" onClick={() => setIsFullscreen(!isFullscreen)}>
                 {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}

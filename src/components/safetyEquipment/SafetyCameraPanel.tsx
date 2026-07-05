@@ -155,16 +155,16 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
           </button>
         )}
 
-        {/* 监控状态指示器 */}
-        {isMonitoring && (
+        {/* 监控状态指示器：全屏下不属于"判断结果"，不渲染（A1.5 降噪） */}
+        {!isFullscreen && isMonitoring && (
           <div className="absolute top-2 left-2 flex items-center gap-2 bg-red-500 text-white px-2 py-1 rounded text-xs">
             <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
             监控中
           </div>
         )}
 
-        {/* 检测统计 */}
-        {isMonitoring && (
+        {/* 检测统计：同上，全屏下不渲染 */}
+        {!isFullscreen && isMonitoring && (
           <div className="absolute bottom-2 left-2 bg-blue-500 text-white px-2 py-1 rounded text-xs">
             <div>人员: {detectionStats.personDetections}</div>
             <div>装备: {detectionStats.equipmentDetections}</div>

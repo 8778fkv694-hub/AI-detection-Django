@@ -394,8 +394,8 @@ const LiveInspectionScreen: React.FC = () => {
         isFullscreen ? 'fixed inset-0 z-50 bg-black' : 'grid-cols-1 lg:grid-cols-3'
       )}
     >
-      {/* YOLO识别目标数量显示 - 右上角 */}
-      {isYoloActive && selectedTargets.length > 0 && (
+      {/* YOLO识别目标数量显示 - 右上角：全屏下不属于"判断结果"，不渲染（A1.5 降噪） */}
+      {!isFullscreen && isYoloActive && selectedTargets.length > 0 && (
         <div className="fixed top-4 right-80 z-50">
           <div
             className={`px-4 py-2 rounded-lg border-2 shadow-lg font-semibold text-sm ${(() => {
@@ -446,52 +446,54 @@ const LiveInspectionScreen: React.FC = () => {
           verdict={localResults[0]?.overallQuality ?? '待检测'}
         />
 
-        {/* 检测目标选择 */}
-        <Card className="mt-4">
-          <CardContent className="pt-4 space-y-4">
-            <LiveTargetSelector
-              currentYoloModel={currentYoloModel}
-              modelConfig={modelConfig}
-              getAvailableTargets={getAvailableTargets}
-              getTargetChineseName={getTargetChineseName}
-              selectedTargets={selectedTargets}
-              setSelectedTargets={setSelectedTargets}
-              expandedTargetGroups={expandedTargetGroups}
-              setExpandedTargetGroups={setExpandedTargetGroups}
-              yoloDetectionMode={yoloDetectionMode}
-              setYoloDetectionMode={setYoloDetectionMode}
-              yoloTimeoutSeconds={yoloTimeoutSeconds}
-              setYoloTimeoutSeconds={setYoloTimeoutSeconds}
-              detectedElements={detectedElements}
-            />
+        {/* 隐藏的文件上传输入框：由 LiveCameraPanel 内"上传"按钮触发，全屏下也需保持挂载 */}
+        <input
+          id="file-upload-input"
+          type="file"
+          accept="image/*"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
 
-            <LiveYoloControlPanel
-              isCameraOn={isCameraOn}
-              isYoloActive={isYoloActive}
-              onToggleYoloDetection={toggleYoloDetection}
-              detectionConfidence={detectionConfidence}
-              setDetectionConfidence={setDetectionConfidence}
-            />
+        {/* 检测目标选择：不属于"判断结果"，全屏下不渲染（A1.5 降噪） */}
+        {!isFullscreen && (
+          <Card className="mt-4">
+            <CardContent className="pt-4 space-y-4">
+              <LiveTargetSelector
+                currentYoloModel={currentYoloModel}
+                modelConfig={modelConfig}
+                getAvailableTargets={getAvailableTargets}
+                getTargetChineseName={getTargetChineseName}
+                selectedTargets={selectedTargets}
+                setSelectedTargets={setSelectedTargets}
+                expandedTargetGroups={expandedTargetGroups}
+                setExpandedTargetGroups={setExpandedTargetGroups}
+                yoloDetectionMode={yoloDetectionMode}
+                setYoloDetectionMode={setYoloDetectionMode}
+                yoloTimeoutSeconds={yoloTimeoutSeconds}
+                setYoloTimeoutSeconds={setYoloTimeoutSeconds}
+                detectedElements={detectedElements}
+              />
 
-            {/* 隐藏的文件上传输入框 */}
-            <input
-              id="file-upload-input"
-              type="file"
-              accept="image/*"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
+              <LiveYoloControlPanel
+                isCameraOn={isCameraOn}
+                isYoloActive={isYoloActive}
+                onToggleYoloDetection={toggleYoloDetection}
+                detectionConfidence={detectionConfidence}
+                setDetectionConfidence={setDetectionConfidence}
+              />
 
-            <LiveCapturedImagesGrid
-              capturedImages={capturedImages}
-              imageSaveMode={imageSaveMode}
-              onClearCapturedImages={handleClearCapturedImages}
-              onSaveToTempFolder={handleSaveToTempFolder}
-              onOpenTempFolder={handleOpenTempFolder}
-              onClearTempFolder={handleClearTempFolder}
-            />
-          </CardContent>
-        </Card>
+              <LiveCapturedImagesGrid
+                capturedImages={capturedImages}
+                imageSaveMode={imageSaveMode}
+                onClearCapturedImages={handleClearCapturedImages}
+                onSaveToTempFolder={handleSaveToTempFolder}
+                onOpenTempFolder={handleOpenTempFolder}
+                onClearTempFolder={handleClearTempFolder}
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* AI分析进度弹窗 */}
@@ -501,8 +503,8 @@ const LiveInspectionScreen: React.FC = () => {
         onCancel={handleCancelAIDetection}
       />
 
-      {/* 右侧：检测结果 */}
-      <LiveDetectionResultsCard localResults={localResults} />
+      {/* 右侧：检测结果：全屏下不渲染（A1.5 降噪） */}
+      {!isFullscreen && <LiveDetectionResultsCard localResults={localResults} />}
 
       {/* 下方：配置区域 */}
       <LiveConfigPanel
