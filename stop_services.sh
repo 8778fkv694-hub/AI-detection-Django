@@ -11,6 +11,7 @@ if [ -f "django.pid" ]; then
         rm django.pid
     else
         echo "Django后端未运行"
+        rm -f django.pid
     fi
 else
     echo "Django后端未运行"
@@ -25,6 +26,7 @@ if [ -f "nodejs.pid" ]; then
         rm nodejs.pid
     else
         echo "Node.js后端未运行"
+        rm -f nodejs.pid
     fi
 else
     echo "Node.js后端未运行"
@@ -39,6 +41,7 @@ if [ -f "react.pid" ]; then
         rm react.pid
     else
         echo "React前端未运行"
+        rm -f react.pid
     fi
 else
     echo "React前端未运行"
@@ -53,6 +56,7 @@ if [ -f "ollama-proxy.pid" ]; then
         rm ollama-proxy.pid
     else
         echo "Ollama代理服务未运行"
+        rm -f ollama-proxy.pid
     fi
 else
     echo "Ollama代理服务未运行"
@@ -67,6 +71,7 @@ if [ -f "ollama.pid" ]; then
         rm ollama.pid
     else
         echo "Ollama服务未运行"
+        rm -f ollama.pid
     fi
 else
     echo "Ollama服务未运行"
@@ -81,6 +86,7 @@ if [ -f "rpa.pid" ]; then
         rm rpa.pid
     else
         echo "RPA服务器未运行"
+        rm -f rpa.pid
     fi
 else
     echo "RPA服务器未运行"

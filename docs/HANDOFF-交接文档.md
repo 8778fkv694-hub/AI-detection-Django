@@ -54,12 +54,12 @@
 | W6.7 | 本轮收尾 | `start_*.sh` 深度整合完成：Mac 开发机统一为 `start_mac.sh` + `/Users/yiliwen/项目快速启动/4启动AI检测项目.command`；Jetson 统一为 `deploy/start_jetson.sh`/systemd；Android 统一为 `android-app/scripts/build-apk.sh`；历史脚本全部归档到 `scripts/legacy-start-scripts/` |
 
 **W6.7 启动入口最终决策**：
-- Mac 开发机：用户指定 `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` 为真实入口；该文件已从旧路径 Finder alias 改为真实 shell 脚本，进入当前仓库并调用 `./启动AI检测项目.command` → `./start_mac.sh full`。
+- Mac 开发机：用户指定 `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` 为真实入口；该文件已从旧路径 Finder alias 改为真实 shell 脚本，进入当前仓库并调用 `./启动AI检测项目.command` → `./start_mac.sh full`。这是开发机入口，保持终端窗口打开；按 `Ctrl+C` 或 `./start_mac.sh stop` 停止。
 - Mac 命令行：`./start_mac.sh full|django|frontend|node|rpa|ollama|ollama-proxy|moondream|production|status|stop`。
 - 兼容入口：`./start_full_project.sh`、`./start_django_only.sh` 保留为薄包装。
 - Jetson：`bash deploy/start_jetson.sh` 或 `bash deploy/install_systemd_jetson.sh`（systemd），底层为 `serve_production.py` + `serve_spa.py`。
 - Android：`cd android-app && bash scripts/build-apk.sh debug`。
-- 真实 Web 验证（2026-07-05）：直接执行 `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` 成功启动 Django `8000`、Node API `3001`、RPA `3002`、Vite `3303`；内置浏览器验证 `/`、`/live-inspection`、`/safety-equipment`、`/ocr`、`/kit-matching`、`/stream-management` 均正常渲染，console error 为 0；`/api/results/` 与 `/api/streams/manager/status/` 经 Vite 代理可访问，`curl http://127.0.0.1:3001/health` 返回 OK。
+- 真实 Web 验证（2026-07-05）：直接执行 `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` / `./start_mac.sh full` 成功启动 Django `8000`、Node API `3001`、RPA `3002`、Vite `3303`；内置浏览器验证 `/`、`/live-inspection`、`/safety-equipment`、`/ocr`、`/kit-matching`、`/stream-management` 均正常渲染，console error 为 0；`/api/results/` 与 `/api/streams/manager/status/` 经 Vite 代理可访问，`curl http://127.0.0.1:3001/health` 返回 OK。
 
 **W3 的一个决策记录**（避免后人重做）：`ocrDetectionStore.currentModelId` 是 OCR 页面级的持久化模型记忆，`useCurrentModel` 是从后端拉的全局当前模型，**语义不同，刻意不合并**。
 

@@ -4,8 +4,10 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_ROOT"
 export PROJECT_ROOT
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 MODE="${1:-full}"
+STARTED_PIDS=()
 
 log() {
     printf '%s\n' "$*"
@@ -141,6 +143,7 @@ start_bg() {
     "$@" > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid" > "$pid_file"
+    STARTED_PIDS+=("$pid")
     log "$label PID: $pid"
 }
 
@@ -163,6 +166,19 @@ Logs:
 Stop:
   ./stop_services.sh
 EOF
+}
+
+wait_for_started_services() {
+    if [ "${START_MAC_NO_WAIT:-0}" = "1" ]; then
+        return 0
+    fi
+
+    log
+    log "Mac dev services are running. Keep this window/session open."
+    log "Press Ctrl+C to stop all local dev services."
+
+    trap 'log; log "Stopping Mac dev services..."; "$PROJECT_ROOT/stop_services.sh"; exit 0' INT TERM
+    wait "${STARTED_PIDS[@]}"
 }
 
 start_full() {
@@ -189,6 +205,7 @@ start_full() {
     if command -v open >/dev/null 2>&1; then
         open "http://localhost:3303" >/dev/null 2>&1 || true
     fi
+    wait_for_started_services
 }
 
 start_django() {

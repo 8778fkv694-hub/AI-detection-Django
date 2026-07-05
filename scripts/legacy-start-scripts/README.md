@@ -6,8 +6,8 @@
 
 | 场景 | 入口 | 说明 |
 |---|---|---|
-| Mac 开发机（双击） | `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` | 用户指定的本机入口；已改为真实 shell 脚本，进入当前仓库后调用 `./启动AI检测项目.command` |
-| Mac 开发机（命令行） | `./start_mac.sh full` | 启动 Django `8000`、Node API `3001`、RPA `3002`、Vite `3303` |
+| Mac 开发机（双击） | `/Users/yiliwen/项目快速启动/4启动AI检测项目.command` | 用户指定的本机入口；进入当前仓库后调用 `./启动AI检测项目.command`，保持终端窗口打开 |
+| Mac 开发机（命令行） | `./start_mac.sh full` | 启动 Django `8000`、Node API `3001`、RPA `3002`、Vite `3303`，并保持前台运行 |
 | Mac 仅后端/兼容旧文档 | `./start_mac.sh django` 或 `./start_django_only.sh` | `start_django_only.sh` 现在只是兼容包装 |
 | Mac 完整项目/兼容旧文档 | `./start_mac.sh full` 或 `./start_full_project.sh` | `start_full_project.sh` 现在只是兼容包装 |
 | Mac 本地生产预览 | `./start_mac.sh production` | 构建后用 `serve_spa.py` 托管 `dist/`，端口 `3005` |
