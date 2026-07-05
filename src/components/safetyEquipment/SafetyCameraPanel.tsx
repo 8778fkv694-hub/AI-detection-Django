@@ -121,7 +121,7 @@ export const SafetyCameraPanel: React.FC<SafetyCameraPanelProps> = ({
         <canvas
           ref={detectionCanvasRef}
           className={cn(
-            'absolute inset-0 w-full h-full pointer-events-none z-10',
+            'absolute inset-0 w-full h-full object-contain pointer-events-none z-10',
             { hidden: !isCameraOn || !showDetections || !isPpeActive }
           )}
         />

@@ -12,6 +12,7 @@ import type { BackendYoloDetection } from '@/lib/api';
 import { isLocalOfflineMode } from '@/lib/config';
 import {
   detectImage,
+  ensureLocalModel,
   fetchStreamSnapshot,
   fetchStreamDetections,
   startStreamDetectionLoop,
@@ -125,6 +126,16 @@ export const usePPEDetection = ({
     personDetections: 0,
     equipmentDetections: 0,
   });
+
+  // 在离线/Native平台下，当进入PPE检测屏幕且开启了PPE检测时，确保加载了 ppe_detection 模型
+  useEffect(() => {
+    if (isLocalOfflineMode() && isPpeActive) {
+      console.log('[PPEDetection] 确保加载离线 PPE 模型 (ppe_detection)');
+      ensureLocalModel('ppe_detection').catch((error) => {
+        console.error('加载离线 PPE 模型失败:', error);
+      });
+    }
+  }, [isPpeActive]);
 
   const getMinThreshold = useCallback(() => {
     const thresholdValues = Object.values(ppeThresholds).filter(

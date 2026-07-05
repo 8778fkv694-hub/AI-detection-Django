@@ -72,6 +72,11 @@ class OnnxYoloDetector {
         modelPath: '/models/yolov8n.onnx',
         classNames: COCO_CLASSES
       };
+    } else if (modelId === 'ppe_detection') {
+      return {
+        modelPath: '/models/ppe.onnx',
+        classNames: PPE_CLASS_NAMES
+      };
     } else {
       // 默认使用 best.onnx 工业检测模型
       return {

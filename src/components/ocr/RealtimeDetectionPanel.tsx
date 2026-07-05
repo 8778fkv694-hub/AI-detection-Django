@@ -291,7 +291,7 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
         />
         <canvas
           ref={detectionCanvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-none z-20"
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
         />
         {!isCameraOn && <CameraOff className="h-16 w-16" />}
 

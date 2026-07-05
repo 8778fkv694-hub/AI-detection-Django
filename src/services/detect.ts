@@ -128,17 +128,42 @@ export async function detectVideoFrame(
     let source: DetectionSource;
 
     if (isNativeYoloSupported()) {
-      // 原生路径：缩到 320 再过桥（带宽预算，见行动文档 H6）
+      // 计算等比缩放后的尺寸（保证最大边不超过 320，防止过桥宽带爆表且避免形变）
+      let targetW = 320;
+      let targetH = 320;
+      const { videoWidth, videoHeight } = video;
+      if (videoWidth > 0 && videoHeight > 0) {
+        if (videoWidth > videoHeight) {
+          targetH = Math.round(320 * (videoHeight / videoWidth));
+        } else {
+          targetW = Math.round(320 * (videoWidth / videoHeight));
+        }
+      }
+
+      // 原生路径：缩到 target 尺寸再过桥（带宽预算，见行动文档 H6）
       if (!sharedCanvas) {
         sharedCanvas = document.createElement('canvas');
       }
-      sharedCanvas.width = 320;
-      sharedCanvas.height = 320;
+      sharedCanvas.width = targetW;
+      sharedCanvas.height = targetH;
       const ctx = sharedCanvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0, 320, 320);
+        ctx.drawImage(video, 0, 0, targetW, targetH);
       }
-      detections = await detectFrameNative(sharedCanvas, conf, 0.45);
+      const rawDetections = await detectFrameNative(sharedCanvas, conf, 0.45);
+      
+      // 逆向还原坐标至原始视频分辨率空间
+      const scaleX = videoWidth / targetW;
+      const scaleY = videoHeight / targetH;
+      detections = rawDetections.map((d) => ({
+        ...d,
+        bbox: {
+          x1: d.bbox.x1 * scaleX,
+          y1: d.bbox.y1 * scaleY,
+          x2: d.bbox.x2 * scaleX,
+          y2: d.bbox.y2 * scaleY,
+        },
+      })) as unknown as BackendYoloDetection[];
       source = 'native';
     } else {
       detections = await onnxYoloDetector.detectFromVideo(video);

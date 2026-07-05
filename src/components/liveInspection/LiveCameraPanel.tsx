@@ -171,7 +171,7 @@ export const LiveCameraPanel: React.FC<LiveCameraPanelProps> = ({
           <canvas
             ref={canvasRef}
             className={cn(
-              'absolute inset-0 w-full h-full pointer-events-none z-10',
+              'absolute inset-0 w-full h-full object-contain pointer-events-none z-10',
               { hidden: !isCameraOn || !showDetections || !isYoloActive }
             )}
             style={{

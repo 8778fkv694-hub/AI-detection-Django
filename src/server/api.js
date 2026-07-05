@@ -352,83 +352,73 @@ const withModelFileInfo = (model) => {
     };
 };
 
+// v3: 包含工业质检、YOLOv8N轻量以及 PPE 安全防护检测模型
+const MOBILE_MODELS_VERSION = 3; // 递增此版本号以触发 DB 重新播种
 const getDefaultMobileModels = () => ([
     {
-        id: 'ppe_detection',
-        name: 'PPE检测专用模型',
-        file: 'ppe.pt',
-        description: 'PPE专用检测模型，需移动端推理运行时才可在手机本地执行检测',
-        version: 'v1.0.0',
-        created_at: '2024-01-15',
-        classes: ['person', 'mask', 'no_mask', 'Hardhat', 'NO-Hardhat', 'NO-Safety Vest', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'],
-        detection_type: 'cleanroom_ppe',
+        id: 'best_industrial',
+        name: '工业质检模型',
+        file: 'best.onnx',
+        description: '端侧工业质检主力模型，支持滤芯齐套化、净水机标签等 14 类目标检测',
+        version: 'v2.0.0',
+        created_at: '2025-07-05',
+        classes: ['filter', 'name_MCF', 'nsplogo', 'qrcode', 'anti_counterfeit_label', 'service_label', 'nameplate_label', 'water_efficiency_label', 'barcode_label', 'fotile_logo', 'water_outlet', 'Prompt_label', 'yellow_point', 'glod_logo'],
+        detection_type: 'kit_matching',
         confidence_threshold: 0.5,
         iou_threshold: 0.4,
         is_default: true,
+        category: 'industrial_quality',
+        class_names: {
+            filter: '滤芯',
+            name_MCF: '型号MCF',
+            nsplogo: 'NSP标志',
+            qrcode: '二维码',
+            anti_counterfeit_label: '防伪标签',
+            service_label: '服务标签',
+            nameplate_label: '铭牌标签',
+            water_efficiency_label: '水效标签',
+            barcode_label: '条码标签',
+            fotile_logo: '方太Logo',
+            water_outlet: '出水口',
+            Prompt_label: '提示标签',
+            yellow_point: '黄色标记点',
+            glod_logo: '金色Logo'
+        }
+    },
+    {
+        id: 'ppe_detection',
+        name: 'PPE检测专用模型',
+        file: 'ppe.onnx',
+        description: '端侧个人防护装备检测模型，支持安全帽、口罩、反光背心等 10 类洁净室与防护装备检测',
+        version: 'v2.0.0',
+        created_at: '2025-07-05',
+        classes: ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest', 'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'],
+        detection_type: 'cleanroom_ppe',
+        confidence_threshold: 0.5,
+        iou_threshold: 0.4,
+        is_default: false,
         category: 'ppe_specialized',
         class_names: {
-            person: '人员',
-            mask: '口罩',
-            no_mask: '未戴口罩',
             Hardhat: '安全帽/洁净帽',
+            Mask: '口罩',
             'NO-Hardhat': '未戴安全帽/洁净帽',
-            'NO-Safety Vest': '未穿安全背心',
+            'NO-Mask': '未戴口罩',
+            'NO-Safety Vest': '未穿反光背心',
+            Person: '人员',
             'Safety Cone': '安全锥',
-            'Safety Vest': '安全背心',
+            'Safety Vest': '反光背心',
             machinery: '机械设备',
             vehicle: '车辆'
         }
     },
     {
-        id: 'filter_core_detection',
-        name: '滤芯专用检测模型',
-        file: 'filter.pt',
-        description: '滤芯齐套化检测模型',
-        version: 'v1.1.0',
-        created_at: '2024-02-20',
-        classes: ['filter', 'name_MCF', 'nsplogo', 'qrcode', 'service_label', 'nameplate_label', 'security_label', 'name_MNF', 'name_CPP', 'name_MPF', 'name_NF', 'name_PCC', 'name_PCF', 'name_ZPC', 'filter package'],
-        detection_type: 'kit_matching',
-        confidence_threshold: 0.6,
-        iou_threshold: 0.3,
-        is_default: false,
-        category: 'filter_core_detection'
-    },
-    {
-        id: 'waterprifer_detection',
-        name: '净水机专用检测模型',
-        file: 'waterprifer.pt',
-        description: '净水机标签识别模型',
-        version: 'v1.0.0',
-        created_at: '2024-01-20',
-        classes: ['anti_counterfeit_label', 'service_label', 'nameplate_label', 'water_efficiency_label', 'barcode_label', 'fotile_logo', 'water_outlet', 'Prompt_label', 'yellow_point', 'glod_logo'],
-        detection_type: 'ocr_inspection',
-        confidence_threshold: 0.5,
-        iou_threshold: 0.3,
-        is_default: false,
-        category: 'water_purifier_detection'
-    },
-    {
-        id: 'yolo8_general',
-        name: 'YOLO8通用检测模型',
-        file: 'yolo10x.pt',
-        description: '通用目标检测模型',
-        version: 'v1.0.0',
-        created_at: '2024-01-15',
-        classes: ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat'],
-        detection_type: 'general_quality',
-        confidence_threshold: 0.4,
-        iou_threshold: 0.3,
-        is_default: false,
-        category: 'general_detection'
-    },
-    {
         id: 'yolov8n',
         name: 'YOLOv8N轻量模型',
-        file: 'yolov8n.pt',
-        description: '轻量级通用模型，主要用于端侧模型文件验证',
+        file: 'yolov8n.onnx',
+        description: '轻量级 COCO 通用检测模型 (12MB)，可用于端侧快速验证和通用物体检测',
         version: 'v1.0.0',
-        created_at: '2024-01-15',
-        classes: ['person'],
+        created_at: '2025-07-05',
+        classes: ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'],
         detection_type: 'general_quality',
         confidence_threshold: 0.5,
         iou_threshold: 0.3,
@@ -439,10 +429,14 @@ const getDefaultMobileModels = () => ([
 
 const getModelsWithSeeding = (db) => {
     let models = db.get('modelVersions').value() || [];
+    const seedVersion = db.get('modelSeedVersion').value() || 0;
     const hasLegacyPlaceholder = models.some((model) => model.id === 'ppe-yolov8n' || model.file === 'ppe_yolov8n.pt');
-    if (models.length === 0 || hasLegacyPlaceholder) {
+    // 当 DB 为空、存在旧版占位符、或种子版本落后时，强制重新播种
+    if (models.length === 0 || hasLegacyPlaceholder || seedVersion < MOBILE_MODELS_VERSION) {
         models = getDefaultMobileModels();
         db.set('modelVersions', models).write();
+        db.set('modelSeedVersion', MOBILE_MODELS_VERSION).write();
+        console.log(`[Models] 已重新播种端侧模型列表 (v${MOBILE_MODELS_VERSION})，共 ${models.length} 个模型`);
     }
     return models.map(withModelFileInfo);
 };
@@ -451,7 +445,7 @@ const getActiveModelId = (db) => {
     let activeId = db.get('activeModelId').value();
     const models = getModelsWithSeeding(db);
     if (!activeId || !models.some((model) => model.id === activeId)) {
-        activeId = 'ppe_detection';
+        activeId = 'best_industrial';
         db.set('activeModelId', activeId).write();
     }
     return activeId;
@@ -536,7 +530,8 @@ router.post('/results/remove-model/?', asyncHandler(async (req, res) => {
 
 router.get('/results/ppe-model-status/?', asyncHandler(async (req, res) => {
     const db = getDb();
-    const model = getModelsWithSeeding(db).find((item) => item.id === 'ppe_detection');
+    const activeId = getActiveModelId(db);
+    const model = getModelsWithSeeding(db).find((item) => item.id === activeId);
     const status = db.get('ppeModelStatus').value() || {
         isLoaded: false,
         lastUpdated: null,
