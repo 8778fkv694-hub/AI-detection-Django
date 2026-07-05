@@ -61,7 +61,8 @@ export interface UseROIProcessorResult {
     frameDataUrl: string,
     detections: BackendYoloDetection[],
     validSelectedTargets: string[],
-    localBestROIs: Map<string, BestROIData>
+    localBestROIs: Map<string, BestROIData>,
+    onSharpnessUpdate?: (current: number, best: number) => void
   ) => Promise<void>;
   /** 合并延时期间的ROI和实时检测累积的ROI */
   mergeROIs: (
@@ -285,7 +286,8 @@ export const useROIProcessor = ({
     frameDataUrl: string,
     detections: BackendYoloDetection[],
     validSelectedTargets: string[],
-    localBestROIs: Map<string, BestROIData>
+    localBestROIs: Map<string, BestROIData>,
+    onSharpnessUpdate?: (current: number, best: number) => void
   ): Promise<void> => {
     // 过滤出目标检测
     const targetDetections = detections.filter(detection =>
@@ -323,13 +325,18 @@ export const useROIProcessor = ({
             roiCtx.drawImage(img, x1, y1, roiWidth, roiHeight, 0, 0, roiWidth, roiHeight);
 
             // 计算清晰度
-            // 计算清晰度
             const roiImageData = roiCtx.getImageData(0, 0, roiWidth, roiHeight);
             const sharpness = calculateROISharpness(roiImageData);
-            // const roiArea = roiWidth * roiHeight;
+            
+            const existing = localBestROIs.get(detection.label);
+            const currentBestSharpness = Math.max(
+              0,
+              ...Array.from(localBestROIs.values()).map(r => r.sharpness),
+              sharpness
+            );
+            onSharpnessUpdate?.(sharpness, currentBestSharpness);
 
             // 检查是否需要更新最清晰的ROI
-            const existing = localBestROIs.get(detection.label);
             if (shouldUpdateROI({ detection, sharpness }, existing)) {
               const roiDataUrl = roiCanvas.toDataURL('image/png');
               localBestROIs.set(detection.label, {

@@ -30,6 +30,7 @@ export const useOCRLocalState = () => {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [videoInfo, setVideoInfo] = useState<{ width: number, height: number, readyState: number } | null>(null);
   const [currentSharpness, setCurrentSharpness] = useState<number>(0);
+  const [bestSharpness, setBestSharpness] = useState<number>(0);
 
   // 窗口标识符
   const [windowId] = useState<string>(() => {
@@ -85,6 +86,8 @@ export const useOCRLocalState = () => {
     setVideoInfo,
     currentSharpness,
     setCurrentSharpness,
+    bestSharpness,
+    setBestSharpness,
 
     // Identifiers
     windowId,

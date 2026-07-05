@@ -62,7 +62,8 @@ export interface UseRealtimeDetectionLoopOptions {
     frameDataUrl: string,
     detections: BackendYoloDetection[],
     validTargets: string[],
-    localBestROIs: Map<string, BestROIData>
+    localBestROIs: Map<string, BestROIData>,
+    onSharpnessUpdate?: (current: number, best: number) => void
   ) => Promise<void>;
   mergeROIs: (
     delayROIs: Map<string, BestROIData>,
@@ -118,6 +119,7 @@ export interface UseRealtimeDetectionLoopOptions {
   setElementDetectionStartTime: (value: number | null) => void;
   setDetectionStats: (value: any) => void;
   setCurrentSharpness: (value: number) => void;
+  setBestSharpness?: (value: number) => void;
   setIsInPostDetectionDelay: (value: boolean) => void;
   setWorkflowState: (value: string) => void;
   setSelectedImage: (value: File | null) => void;
@@ -146,7 +148,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     enableParallelQrDetection, qrDetectIntervalMs, fixtureQrInput, fixtureQrPrefixes, fixtureQrPattern,
     onFixtureQrDetected, streamId,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
-    setDetectionStats, setCurrentSharpness, setIsInPostDetectionDelay,
+    setDetectionStats, setCurrentSharpness, setBestSharpness, setIsInPostDetectionDelay,
     setWorkflowState, setSelectedImage, setImagePreview,
     setIsWaitingForSpace, setMatchStatus, setWorkflowResult,
     setAiAnalysisResult, setFinalResult,
@@ -688,6 +690,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       console.log(`⏱️ 延时 ${captureDelaySeconds} 秒，期间持续捕获并选择最清晰ROI...`);
       setIsInPostDetectionDelay(true);
       setWorkflowState('searching_best_frame');
+      setBestSharpness?.(0);
 
       const captureInterval = 200;
       const totalFrames = Math.max(1, Math.floor((captureDelaySeconds * 1000) / captureInterval));
@@ -755,7 +758,17 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
               }
             }
 
-            await captureAndEvaluateFrame(videoRef, frameDataUrl, frameTargetDetections, validSelectedTargets, bestROIs);
+            await captureAndEvaluateFrame(
+              videoRef,
+              frameDataUrl,
+              frameTargetDetections,
+              validSelectedTargets,
+              bestROIs,
+              (cur: number, best: number) => {
+                setCurrentSharpness(cur);
+                setBestSharpness?.(best);
+              }
+            );
           } catch (error) {
             console.error('延时期间检测失败:', error);
           }
@@ -779,6 +792,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
                       sharpness: sharpness,
                       fullImageDataUrl: frameDataUrl
                     });
+                    setBestSharpness?.(sharpness);
                     console.log(`📸 更新全画面的最清晰照片，清晰度: ${sharpness.toFixed(2)}`);
                   }
                   resolve();
