@@ -1,9 +1,10 @@
-# HANDOFF 交接文档 — 检测架构重构（Web 主线）
+# HANDOFF 交接文档 — 检测架构重构（Web 主线 + APK 第二梯队）
 
 > **最后更新**：2026-07-05
 > **总纲领**：`docs/检测架构重构-行动文档-Web主线与APK落地.md`（先读它，再读本文档）
 > **战略**：Web 端权重更高（主线）；APK 是二线离线方案，第一梯队（Phase W）全部完成前不启动。
-> **接手规则**：一次只做一个任务，单独 commit，commit message 以任务编号开头（如 `W6: ...`）；单次 commit 涉及文件 > 8 个就停下拆分；每次改完跑 `npx tsc --noEmit` 必须零错误。
+> **本文档分区**：第 1 节 = Phase W 完成明细；**第 2 节 = APK 第二梯队现状审计与缺口**（接手 APK 必读，不要再按行动文档 Phase 0 从零做）；**第 3 节 = 下一阶段（全屏检测反馈 A1）的具体方案**。
+> **接手规则**：一次只做一个任务，单独 commit，commit message 以任务编号开头（如 `W6: `/`P1: `/`A1.3: `）；单次 commit 涉及文件 > 8 个就停下拆分；每次改完跑 `npx tsc --noEmit` 必须零错误。
 
 ---
 
@@ -85,16 +86,98 @@
 
 ---
 
-## 2. W6 剩余项
+## 2. 第二梯队（APK）现状审计（2026-07-05）
 
-无。Phase W（行动文档"阶段1 Web端优化"）已全部完成。
+> 行动文档 `docs/检测架构重构-行动文档-Web主线与APK落地.md` 把 APK 分 Phase 0–4。Phase W 全部完成后，第二梯队工作量集中在 Phase 0–3，已有 8 个 APK commit 落地（见下表）。本节是对落地情况的实测审计，作为接手者的真实起点——**不要再按行动文档 Phase 0 从零做，按本节缺口表续做**。
 
-## 3. 之后（W7+，Phase W 已全部完成）
+### 2.1 APK 已落地的 8 个 commit（时间序）
 
-## 4. 再之后（按行动文档顺序）
+| Commit | 说明 | Phase |
+|---|---|---|
+| `f0d9b14` | native `benchmark()` 接口 + 5001 重定向桥 + 真机基准记录 | P0 |
+| `8d2f053` | 等比 letterbox 预处理 + 高精度逆映射 + 拍照走原生引擎 | P1 |
+| `237e6cf` | 共享 canvas 防 GC 卡顿 + 100ms 背压冷却 | P2 |
+| `a80914f` | 集成离线 ML Kit 中文 OCR 插件 + 前端路由 | P3 |
+| `3a4bf4e` | 严格 ONNX assets 白名单，APK 体积 734→216MB | P4 |
+| `091324f` | 默认客户端模型改 best.onnx + 工业标签 + 平台识别强化 | P1/P3 |
+| `15159fa` | 等比 native 检测坐标 + canvas `object-contain` + PPE 模型预加载 | P2 |
+| `56db0d2` | **容器 aspect-ratio 跟随视频原始比例**（H5 规范化解法，竖屏框不再变形） | P2 |
+
+### 2.2 各 Phase 实测状态与缺口
+
+| Phase | 状态 | 关键证据（file:line） | 待补缺口 |
+|---|---|---|---|
+| **P0 基准** | ✅ 基本完成 | `YoloNativePlugin.java:100-175`；附录 A 有真机数字 | `benchmark()` 未在 `yoloNativeBridge.ts:14-27` 里暴露 TS 方法，无法从 app 内复测。**接手者**想再测就把桥方法加上 |
+| **P1 拍照检测闭环** | ⚠️ 大体完成，有缺口 | `YoloNativeDetector.java:140-262`；`detect.ts:96-114`；`android-app/.../api.js:125-134` 低 DB 落地 | ①**缺 EXIF 拉伸矫正**（H10）：`YoloNativePlugin.java:77-86` 无 `ExifInterface` / `rotationDegrees`，竖拍会被拉错 ②**缺 per-class NMS**：现行整体 NMS 会跨类抑制 ③**`inferMs` / `source` 未从 native 返回**：双引擎结果不相等（H9 只是类型 cast，非真同构） |
+| **P2 半实时检测** | ⚠️ 部分完成，路径不一致 | `detect.ts:121-193`（共享 canvas + 320 letterbox + 逆映射）；`useLiveYoloDetection.ts:181-220` 走 `detectVideoFrame` | **PPE（`usePPEDetection.ts:396-413`）和 OCR（`useRealtimeDetectionLoop.ts:405-456`）绕开了 `detectVideoFrame`，还在直传原生分辨率**——竖屏框形变在 PPE/OCR 可能复发。**接手者**：把这两条线也走 `detectVideoFrame`，统一背压与逆映射。后续建议用 `requestVideoFrameCallback` 代替 setTimeout 节流 |
+| **P3 OCR 端侧化** | ⚠️ 部分完成 | `TextRecognitionPlugin.java` 已移植注册（`MainActivity.java:11`）；`ocr.ts:25-32` 有 NativeEngine 分支 | ①**条码未走 ML Kit**：现有并行 QR 检测在离线模式 404（`useRealtimeDetectionLoop.ts:278-282` 调用 `/wechat-qr/detect/`，APK node 端无该路由）。需补 `BarcodeScanner` 原生插件 ②**`source: 'native'\|'server'` 字段未加** YOLO/OCR 结果上，LLM 融合阶段无法区分来源（H9 缺口落地） |
+| **P4 体积/发布** | ❌ 未达目标 | `build-apk.sh:153,166-194`；`build.gradle:13-15,23-27` | ①体积 **216MB > 150MB 目标**。**已知原因**：ONNX 模型文件被复制到 5 个目录（`build-apk.sh` 的多目标拷贝未收敛）。建议先合并为 ≤2 处 ②**R8 未启用**（`minifyEnabled false`）③冷启动未记录 |
+| **H1 v8/v11 解析** | ✅ 无问题 | `YoloNativeDetector.java:205-225` 已正确转置 `(1,4+nc,N)` | — |
+| **H5 三坐标系映射** | ✅ Live 路径无问题；**PPE 路径未用逆映射** | `detect.ts:156-166`；`useLiveYoloDetection.ts:526-527`；`usePPEDetection.ts:295-318` 自己用 `sourceSize.scaleX/Y` | 与 P2 同根：PPE 绕过 `detectVideoFrame` → 逆映射不复用。统一到 `detectVideoFrame` 后自动解决 |
+| **H8 nodejs-mobile 语法** | ✅ 无问题 | grep `nodejs-project/src/` 与 `main.js` 无 `?.` / `??` | — |
+| **H10 旋转/镜像** | ❌ 缺失 | `YoloNativePlugin.java:77-86`、`TextRecognitionPlugin.java:47` 均**无** `ExifInterface` / `rotationDegrees` | 与 P1 同一缺。前置摄像头自拍镜像处理也未做。**接手者**视为 P1 子任务 |
+
+### 2.3 已发现的明确 bug（不阻塞当前需求，记录在案）
+
+1. **离线模式下并行 QR 检测 = 死代码**：`useRealtimeDetectionLoop.ts:278-282` 调 `/wechat-qr/detect/`，APK 内嵌 Node 服务无此路由 → 404 → `fireParallelQrDetection` 静默 `.catch()`（`:313`）。P3 接 ML Kit Barcode 后自然解决。
+2. **离线 OCR 推理时间/`source` 不在结果上**：`ocr.ts` NativeEngine 分支返回结构与 server 版字面对齐但没加 `source`，融合层没法判别。P3 收尾前补。
+
+### 2.4 接手优先级（按建议执行顺序，每项独立 commit）
+
+1. **P4 急救**（最先做，体积不达标纯属工程问题）：开 R8 + ONNX 文件去重重定向 ≤2 处。预期一轮就能降到 ≤150MB。纯 `build-apk.sh` + `build.gradle` 改动，≤3 文件。
+2. **P3 收尾**：加 ML Kit `BarcodeScanner` 插件 OR 把离线并行 QR 改为 stub/丢弃；`detect.ts` / `ocr.ts` 在结果上补 `source` 字段。
+3. **P1 EXIF + per-class NMS + `inferMs/source` 返回**：飞行模式拍照距 PC `best.pt` 对齐率达标的关键。改 `YoloNativeDetector.java` / `YoloNativePlugin.java` / `yoloNativeBridge.ts` 三个文件。
+4. **P2 路径统一**：把 PPE (`usePPEDetection.ts`) 与 OCR (`useRealtimeDetectionLoop.ts`) 的检测循环也走 `detectVideoFrame`，复用 320 letterbox + 背压 + 逆映射；后续 `requestVideoFrameCallback` 替换 setTimeout。
+5. **H10 旋转**：拍照与实时都加 EXIF 矫正。
+6. **全屏检测反馈**（下一节详细方案）。
+
+---
+
+## 3. 全屏检测反馈（下一阶段，A1）
+
+> **用户原话**：手机屏幕小，检测最好全屏看；全屏反馈要简单，不要复杂。
+
+### 3.1 现状（2026-07-05 审计）
+
+- 三大视频面板（`RealtimeDetectionPanel.tsx` / `SafetyCameraPanel.tsx` / `LiveCameraPanel.tsx`）都已有全屏切换逻辑。`SafetyCameraPanel` 用 Fullscreen API（`document.fullscreenElement`，`:78-95`）；`RealtimeDetectionPanel` 同。`LiveCameraPanel.tsx:152-155,164-166` 仅 CSS `flex-1` 拉满，**不是 Fullscreen API**——需核对/统一。
+- 全屏下能看到的东西：
+  - 检测框 + 每框 `label: confidence%`：三个面板都有（`RealtimeDetectionPanel.tsx:295-298`、`SafetyCameraPanel.tsx:124-130`、`LiveCameraPanel.tsx:174-188`）。
+  - 推理耗时/FPS HUD：OCR（`detectionDrawer.ts:96-118`）与 Live（`useLiveYoloDetection.ts:570-593`）有；**PPE 缺**（`usePPEDetection.ts:277-328` 的 `drawDetections` 没传 `perfStats`）。
+  - 大字「合格/存疑/需复检」verdict：**仅 OCR**（`RealtimeDetectionPanel.tsx:318-348`）。PPE 与 Live 全屏只有框 + 文字标签，没有简化 verdict。
+  - `VideoOverlayIndicators` 的人员/装备 chip 等小信息块：全屏下也显示，造成噪音。
+
+### 3.2 设计目标（与用户要求对齐）
+
+**全屏 = 视频铺满 + 框 + 一个一眼可见的合格判定**。其余控件移出全屏或隐藏。
+
+具体清单：
+- **保留**：检测框 + 框上的 `label: confidence%`；右上角一个简洁的 `合格`/`存疑`/`需复检` 大色块徽章（绿/黄/红）。
+- **保留**：底部一条极简 HUD（推理耗时 + FPS）——只在 Live/OCR 已有的 `perfStats` 渲染基础上打通到 PPE，不动布局。
+- **隐藏**：人员/装备数量 chip、键盘提示、设置按钮、所有不属于"判断结果"的 HUD。
+- **不增**：不加测距、不加多结果列表、不加图例、不加复杂控件。
+
+### 3.3 执行计划（A1 任务编号，与 Phase W/Pxx 隔离，单独成段）
+
+- [ ] **A1.1 共享全屏反馈组件**：新建 `src/components/detection/FullscreenVerdictBadge.tsx`（接收 `overallQuality`/`score` 两个 prop），渲染 `合格`/`存疑`/`需复检` 的大色块徽章。三个面板共用，避免各自手写。≤80 行。
+- [ ] **A1.2 OCR 面板迁移到共享组件**：`RealtimeDetectionPanel.tsx:318-348` 现有内联 verdict 改为 `<FullscreenVerdictBadge>`；行为不变，只是抽组件。验收：OCR 全屏下视觉一致。
+- [ ] **A1.3 PPE 面板加 verdict**：`usePPEDetection.ts:277-328` 的 `drawDetections` 第 7 参照 OCR 那样接收 `perfStats`，画底部 HUD；`SafetyCameraPanel.tsx` 在全屏下渲染 `<FullscreenVerdictBadge>`。**PPE verdict 数据来源**：沿用现有 PPE 检测阈值评估的 pass/fail 结论（不要新增评估逻辑）。
+- [ ] **A1.4 Live 面板统一全屏入口**：`LiveCameraPanel.tsx:152-155,164-166` 改用 Fullscreen API（对齐 `SafetyCameraPanel.tsx:78-95`），并渲染 `FullscreenVerdictBadge`。Live 的 verdict 用 `useLiveYoloDetection` 现有 `aiAnalysisResult?.overallQuality`，不新增。
+- [ ] **A1.5 全屏隐藏噪音**：三个面板里 `VideoOverlayIndicators`、键盘提示、设置区在 `isFullscreen` 为 true 时不渲染（不是靠 CSS 隐藏，是直接不渲染，少 DOM）。
+- [ ] **A1.6 验收**：三个 screen 各进入全屏 → 视频铺满 + 框可见 + 右上角 verdict + 底部 HUD；切回非全屏 → 全部原控件恢复。`tsc --noEmit` 零错误。真机走一次。
+
+### 3.4 纪律红线（与 Phase W 一致）
+
+- 单 commit ≤ 8 文件；A1.x 每项独立 commit；commit message 前缀 `A1.x: `。
+- **不新增业务判定逻辑**（判定口径以现有 store/hook 为准），A1 只做"显示什么"和"在哪里显示"。
+- 改完 `npx tsc --noEmit` 必跑。
+- **不在全屏里堆 UI**——任何想往全屏加东西的人先回到本节 3.2 清单核对，符合"简单"才加。
+
+---
+
+## 4. 之后（W7+，Phase W 已全部完成）
 
 1. **Phase W+（选做）**：W7 巨型页面拆分 / W8 三套后端契约收敛 / W9 深度卫生 —— 见行动文档。
-2. **第二梯队（APK，二线）**：从 Phase 0 真机基准开始 —— **没有真机数字前不写插件业务代码**；现有原生插件 `YoloNativeDetector.java`（ONNX Runtime）是修复复用对象，不要重写；硬骨头清单 H1–H10 在行动文档第 4 章，执行到对应任务必读。
+2. **第二梯队（APK，二线）续做**：按本文件 **第 2 节** 的"接手优先级"续做，**不要按行动文档 Phase 0 从零开始**。Phase 0 已基本完成。
 
 ---
 
