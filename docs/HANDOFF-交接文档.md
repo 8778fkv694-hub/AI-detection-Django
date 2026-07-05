@@ -1,9 +1,10 @@
 # HANDOFF 交接文档 — 检测架构重构（Web 主线 + APK 第二梯队）
 
-> **最后更新**：2026-07-05（含二次独立复审 + A1 执行指引修订版 + 教练指引与路线图）
+> **最后更新**：2026-07-05（含二次独立复审 + A1 执行指引修订版 + **A1 全部完成** + 教练指引与路线图）
 > **总纲领**：`docs/检测架构重构-行动文档-Web主线与APK落地.md`（先读它，再读本文档）
 > **战略**：Web 端权重更高（主线）；APK 是二线离线方案，第一梯队（Phase W）全部完成前不启动。
-> **本文档分区**：第 1 节 = Phase W 完成明细；**第 2 节 = APK 第二梯队现状审计与缺口**（接手 APK 必读，不要再按行动文档 Phase 0 从零做）；**第 3 节 = 下一阶段（全屏检测反馈 A1）的实习生执行指引**；**第 7 节 = 未来 3–6 个月路线图与工作方法（接手前通读）**。
+> **本文档分区**：第 1 节 = Phase W 完成明细；**第 2 节 = APK 第二梯队现状审计与缺口**（接手 APK 必读，不要再按行动文档 Phase 0 从零做）；**第 3 节 = 全屏检测反馈 A1（已全部完成，含实际执行记录与环境限制说明）**；**第 7 节 = 未来 3–6 个月路线图与工作方法（接手前通读）**。
+> **当前状态速览**：Phase W（第 1 节）✅ 全部完成；A1 全屏反馈（第 3 节，commit `386d5e8`~`aefe69b`）✅ 代码全部完成，**但真机全屏视觉验证 + APK 真机走查未做**（沙盒环境无摄像头/无 Android 设备，见 3.3 的 A1.6 记录）——接手后第一件事是找真机补验收，而不是直接开始 M2。APK 第二梯队（第 2 节）待续做，优先级见 2.4。
 > **接手规则**：一次只做一个任务，单独 commit，commit message 以任务编号开头（如 `W6: `/`P1: `/`A1.3: `）；单次 commit 涉及文件 > 8 个就停下拆分；每次改完跑 `npx tsc --noEmit` 必须零错误。
 
 ## 0. 二次独立复审记录（2026-07-05，代码实测，非文档转抄）
@@ -187,35 +188,45 @@
 2. **两种"全屏"并存是现状，不是 bug**：OCR/PPE 走 Fullscreen API，Live 走页面级 CSS overlay（`LiveInspectionScreen.tsx:394` 的 `fixed inset-0`，且整个页面 grid 布局依赖 `isFullscreen` 状态切 class）。**方案修订（推荐）**：A1.4 **不要**把 Live 强改成 Fullscreen API——那会绕过页面级布局状态，牵连 `LiveInspectionScreen` 的 grid 逻辑，改动面远超 8 文件红线的精神。统一的应该是**全屏里的体验**（徽章 + HUD + 降噪），不是全屏的实现机制。如果将来真要统一机制，单独立项，先在 APK WebView 真机上验证 Fullscreen API 行为（ESC/返回手势退出时 `fullscreenchange` 同步）再动。
 3. **verdict 是"抽取复用"，不是"重新发明"**：PPE 的判定逻辑目前**埋在拍照评估循环里**（`usePPEInspection.ts:95-180`），实时全屏要用它就必须先抽成纯函数（见 A1.3 步骤）。红线是：**映射关系一个字都不许改**（合规率≥80→合格 等阈值原样搬），改了就是新增业务逻辑，违反 3.4。
 
-### 3.3 执行计划（每项独立 commit，前缀 `A1.x: `，按序做）
+### 3.3 执行计划（每项独立 commit，前缀 `A1.x: `，按序做）—— **已全部完成（2026-07-05）**
 
-- [ ] **A1.1 共享徽章组件**（半天）
+> 以下保留原计划文字（供理解设计意图），每项后附「实际执行记录」——与计划有出入的地方均已标注原因，这是本轮"教练带做"的真实交付记录，供之后类似任务参考方法，而非单纯留痕。
+
+- [x] **A1.1 共享徽章组件**（半天）
   新建 `src/components/detection/FullscreenVerdictBadge.tsx`，纯展示组件，≤80 行：
   - Props：`verdict: '合格' | '存疑' | '需复检' | '待检测' | '检测中'`（注意 OCR 现有代码里有"待检测/检测中..."中间态，`RealtimeDetectionPanel.tsx:341-343`，不能只做三态）；`score?: number` 可选小字。
   - 颜色：合格=绿、存疑=黄、需复检=红、待检测/检测中=灰。样式抄 `RealtimeDetectionPanel.tsx:319-320` 现有的 `bg-black/70 backdrop-blur` 大字块即可，不要自由发挥。
   - **判定逻辑不进组件**——组件只吃算好的 `verdict` 字符串。OCR 那段"融合模式三条件与"的 IIFE（`:321-345`）留在面板里算，算完把结果传进来。
   - 验收：组件能被 Storybook 式地单独渲染五种状态（临时页面或直接在 OCR 面板试）；`tsc` 零错误。
-- [ ] **A1.2 OCR 面板迁移**（半天）
+  - **实际执行**（commit `386d5e8`）：按计划落地；额外发现 OCR 面板还有 `'检测中...'`（带省略号）这个第 6 态未在原计划枚举中，已补进 `FullscreenVerdict` 联合类型，否则 A1.2 迁移时会丢失这个视觉状态。
+- [x] **A1.2 OCR 面板迁移**（半天）
   `RealtimeDetectionPanel.tsx:318-348` 的内联大字块替换为 `<FullscreenVerdictBadge verdict={...} />`。verdict 计算逻辑原样上移为面板内一个 `const fullscreenVerdict = useMemo(...)`——**行为零变化，纯搬家**。
   - 验收：全屏下逐状态对比（融合开/关 × qualified/unqualified/processing），视觉与改前一致；非全屏无任何变化。
-- [ ] **A1.3 PPE 面板加 verdict + HUD**（1–2 天，本阶段最难的一项）
+  - **实际执行**（commit `98d9c70`）：按计划落地，零偏差。
+- [x] **A1.3 PPE 面板加 verdict + HUD**（1–2 天，本阶段最难的一项）
   分两步，**一个 commit 内完成但先后有序**：
   1. **抽纯函数**：把 `usePPEInspection.ts:95-180` 的判定块抽到新文件 `src/lib/safetyEquipment/ppeVerdict.ts`，签名建议 `computePpeVerdict(detections: PPEDetection[]): { overallQuality: '合格'|'需复检'|'存疑'; score: number; missingItems: string[] }`。`usePPEInspection` 原地改为调用该函数，**用同一组输入前后对拍确认输出逐字段一致**（最简单：临时 console.log 新旧结果各跑一次拍照流程对比，确认后删掉）。
   2. **接到全屏**：`SafetyCameraPanel.tsx` 在全屏时对最近一帧检测结果调 `computePpeVerdict`，结果传 `<FullscreenVerdictBadge>`。**防闪烁**：逐帧算 verdict 会跳变，加一个 300–500ms 的展示节流（`useRef` 存上次更新时间即可）——这是展示层平滑，不算新增业务逻辑，但别做成多帧投票之类的花活。
   3. **HUD**：`usePPEDetection.ts:277` 的 `drawDetections` 加可选 `perfStats` 参数，绘制代码直接抄 `useLiveYoloDetection.ts:570-592`。注意：PPE 检测路径目前还没统一走 `detectVideoFrame`（见 2.2 P2 缺口），所以 `inferenceMs` 暂时要在 PPE 自己的调用点计时（`performance.now()` 前后差），等 P2 路径统一后改用 `FrameDetectionResult.inferenceMs`，届时删掉临时计时。在代码处留一行 `// TODO(P2): 路径统一后改用 FrameDetectionResult.inferenceMs`。
   - 验收：PPE 全屏 = 框 + 右上角徽章 + 底部 HUD；拍照评估功能（`usePPEInspection`）行为不变。
-- [ ] **A1.4 Live 面板加徽章（方案已修订，见 3.2 坑 2）**（半天–1 天）
+  - **实际执行**（拆成两个子提交，非计划里的"一个 commit"——理由：抽纯函数与接全屏是两类风险不同的改动，拆开更易单独回滚）：
+    - `093e5cf` A1.3a：抽 `computePpeVerdict`，用 token 级 diff（阈值/分支/文案模板逐字比对）核实抽取无逻辑漂移，比"临时 console.log 对拍"更严格且不需要事后清理。
+    - `12584b6` A1.3b：接全屏 + HUD。**未加计划中的 300–500ms 展示节流**——查实 PPE 检测循环由 `usePPEPolling` 至少 2000ms 一次驱动（非逐帧），verdict 更新频率远低于计划设想的"逐帧跳变"场景，节流是不需要的复杂度，属合理偏离而非遗漏。**顺手修了一个未写进计划的隐患**：HUD 数据若直接读 `perfStats` state 会因 `setState` 异步而落后一帧（stale closure），改用本帧局部变量 `framePerfStats` 传给 `drawDetections`。
+- [x] **A1.4 Live 面板加徽章（方案已修订，见 3.2 坑 2）**（半天–1 天）
   **保持 Live 现有 CSS overlay 全屏机制不动**，只做两件事：
   1. `LiveCameraPanel.tsx` 在 `isFullscreen` 时渲染 `<FullscreenVerdictBadge>`；verdict 数据从 `LiveInspectionScreen.tsx:150` 已解构的 `useLiveAIDetection` 结果里取 `aiAnalysisResult?.overallQuality`（无结果时传 `'待检测'`），经 props 传入面板——面板已经在收 `isFullscreen`，加一个 prop 顺路。
   2. Live 的 HUD 已存在（canvas 内绘制），不动。
   - 验收：Live 全屏出现徽章；AI 分析未开启时显示"待检测"灰色而不是空白或报错。
-- [ ] **A1.5 全屏降噪**（半天）
+  - **实际执行**（commit `0ac4f02`）：**verdict 数据源与计划不符，已修正**——`useLiveAIDetection` 的返回类型 `UseLiveAIDetectionResult` 根本不导出 `aiAnalysisResult`/`overallQuality`（那只是 `parseAIResult` 函数内部的局部变量），本节 3.3 这条计划文字本身就是错的。改为从 `LiveInspectionScreen` 已持有的 `localResults`（`useLiveInspectionStore`）取值：`localResults[0]?.overallQuality ?? '待检测'`。确认 `localResults[0]` 是最新一条的依据：`useLiveAIDetection.ts:214,371` 两处更新都是 `[result, ...localResults]` 头插。**这是"不要相信文档，要 grep 复核"（3.2 坑总纲）的又一次现身说法**——连当天刚写的计划都会凭错误记忆写错数据源，动手前的复核不是形式主义。
+- [x] **A1.5 全屏降噪**（半天）
   原则：全屏时**白名单渲染**——video、检测 canvas、徽章、HUD、退出全屏按钮，其余一律 `{!isFullscreen && ...}` 直接不渲染（不是 CSS 隐藏）。逐面板盘点：
   - OCR：`VideoOverlayIndicators`、键盘提示、"检测中"小徽标（`:311-315`，与大徽章重复）。
   - PPE / Live：进各自面板数一遍非白名单元素再动手，**先截图记录改前状态**，防止误删非全屏时也需要的东西。
   - 验收：全屏只剩白名单五件套；退出全屏后所有控件如初。
-- [ ] **A1.6 总验收**（半天）
+  - **实际执行**（commit `aefe69b`）：OCR/PPE 按计划办。**Live 的降噪比计划复杂得多**——Live 走页面级 CSS overlay 而非 Fullscreen API（3.2 坑 2），意味着容器外的兄弟元素（`LiveCameraPanel` 的 `CardHeader` 标题/模型选择/键盘提示、屏幕里的"检测目标选择"Card、`LiveDetectionResultsCard`、YOLO 识别目标浮层）**不会**像 OCR/PPE 那样被浏览器自动裁剪出画面，必须在 `LiveInspectionScreen.tsx` 里逐个显式 `{!isFullscreen && ...}`。改动时发现一个隐藏坑：被隐藏的"检测目标选择"Card 里嵌着 `<input id="file-upload-input">`（由面板"上传"按钮通过 `getElementById` 触发），若整卡片不渲染，全屏下点"上传"会因找不到元素而静默失效——已将该 `<input>` 移到条件外层单独常驻挂载。
+- [x] **A1.6 总验收**（半天）
   三个 screen 各进/出全屏一轮：视频铺满 + 框可见 + 徽章 + HUD + 降噪生效 + 退出恢复。`npx tsc --noEmit` 零错误；`./start_mac.sh full` 冒烟三页面 console 零非网络错误；**APK 真机走一遍 OCR 与 PPE 全屏**（Live 若真机没有摄像头流可跳过并在 commit message 注明）。
+  - **实际执行与环境限制说明**：`tsc --noEmit` 与 `npm run build` 均零错误通过；三页面非全屏态冒烟（含 A1.5 降噪改动的回归检查——标题/键盘提示/结果卡片等在非全屏下仍正常出现）通过，console 仅剩预期的无后端 fetch 噪音。**以下两项在本次执行环境（无摄像头、无 Android 真机的沙盒预览）中无法完成，需要接手者在有摄像头的真实设备上补做**：① 三面板真实进入全屏后的逐帧目视核对（沙盒浏览器的 Fullscreen API 因缺少用户手势被安全策略拦截，报 `Permissions check failed`，这本身印证了"必须真机验证"而非代码问题）；② APK 真机走查 OCR/PPE 全屏。**下一位接手者的第一件事**：找一台有摄像头的机器跑 `./start_mac.sh full`，三页面手动进出全屏一轮，确认徽章/HUD/降噪符合 3.1 的白名单，再继续后续任务。
 
 ### 3.4 纪律红线（与 Phase W 一致）
 
