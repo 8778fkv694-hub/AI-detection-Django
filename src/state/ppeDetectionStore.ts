@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { InspectionResult } from '@/types';
+import {
+  defaultPPEThresholds,
+  PPE_CAPTURE_THRESHOLD_DEFAULT,
+  PPE_INSPECTION_THRESHOLD_DEFAULT,
+} from './detectionDefaults';
+import type { PPEThresholds } from './detectionDefaults';
+
+// 兼容性再导出：safetyEquipmentStore 等既有代码从本文件 import 这两个名字。
+// 真源已迁移至 detectionDefaults.ts（W3），新代码请直接从那里 import。
+export { defaultPPEThresholds } from './detectionDefaults';
+export type { PPEThresholds } from './detectionDefaults';
 
 const STORAGE_VERSION = 'v2';
 const LEGACY_PPE_STORAGE_NAME = 'safety-equipment-storage';
@@ -39,46 +50,6 @@ export interface PPEBindingConfig {
   processStageName: string;
   pageInstanceId: string;
   cameraId: string;
-}
-
-export interface PPEThresholds {
-  cleanroom_cap: number;
-  mask: number;
-  person: number;
-  helmet: number;
-  'face-mask': number;
-  'safety-helmet': number;
-  'hard-hat': number;
-  gloves: number;
-  'rubber-gloves': number;
-  'work-gloves': number;
-  'safety-vest': number;
-  'protective-clothing': number;
-  'safety-goggles': number;
-  'ear-protection': number;
-  filter: number;
-  name_MCF: number;
-  nsplogo: number;
-  qrcode: number;
-  service_label: number;
-  nameplate_label: number;
-  security_label: number;
-  name_MNF: number;
-  name_CPP: number;
-  name_MPF: number;
-  name_NF: number;
-  name_PCC: number;
-  name_PCF: number;
-  name_ZPC: number;
-  'filter package': number;
-  anti_counterfeit_label: number;
-  water_efficiency_label: number;
-  barcode_label: number;
-  fotile_logo: number;
-  water_outlet: number;
-  Prompt_label: number;
-  yellow_point: number;
-  glod_logo: number;
 }
 
 export interface BestDetectionInInterval {
@@ -141,46 +112,6 @@ export interface PPEDetectionState {
   clearResults: () => void;
 }
 
-export const defaultPPEThresholds: PPEThresholds = {
-  cleanroom_cap: 0.8,
-  mask: 0.8,
-  person: 0.8,
-  helmet: 0.3,
-  'face-mask': 0.3,
-  'safety-helmet': 0.3,
-  'hard-hat': 0.3,
-  gloves: 0.3,
-  'rubber-gloves': 0.3,
-  'work-gloves': 0.3,
-  'safety-vest': 0.3,
-  'protective-clothing': 0.3,
-  'safety-goggles': 0.3,
-  'ear-protection': 0.3,
-  filter: 0.6,
-  name_MCF: 0.6,
-  nsplogo: 0.6,
-  qrcode: 0.6,
-  service_label: 0.6,
-  nameplate_label: 0.6,
-  security_label: 0.6,
-  name_MNF: 0.6,
-  name_CPP: 0.6,
-  name_MPF: 0.6,
-  name_NF: 0.6,
-  name_PCC: 0.6,
-  name_PCF: 0.6,
-  name_ZPC: 0.6,
-  'filter package': 0.6,
-  anti_counterfeit_label: 0.6,
-  water_efficiency_label: 0.6,
-  barcode_label: 0.6,
-  fotile_logo: 0.6,
-  water_outlet: 0.6,
-  Prompt_label: 0.6,
-  yellow_point: 0.6,
-  glod_logo: 0.6,
-};
-
 export const usePPEDetectionStore = create<PPEDetectionState>()(
   persist(
     (set) => ({
@@ -190,8 +121,8 @@ export const usePPEDetectionStore = create<PPEDetectionState>()(
       cameraId: '',
       autoCapture: false,
       showDetections: true,
-      captureThreshold: 0.5,
-      inspectionThreshold: 0.8,
+      captureThreshold: PPE_CAPTURE_THRESHOLD_DEFAULT,
+      inspectionThreshold: PPE_INSPECTION_THRESHOLD_DEFAULT,
       captureInterval: 5,
       autoUploadCount: 1,
       inspectionCooldownInterval: 3,

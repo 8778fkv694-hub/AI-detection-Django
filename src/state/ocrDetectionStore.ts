@@ -1,5 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import {
+  DETECTION_CONFIDENCE_DEFAULT,
+  OCR_MIN_CONFIDENCE_DEFAULT,
+} from './detectionDefaults';
 
 const STORAGE_VERSION = 'v3';
 
@@ -308,7 +312,7 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
       enableKeywordAnalysis: false,
       keywords: '',
       keywordMatchMode: 'contains',
-      minConfidence: 0.5,
+      minConfidence: OCR_MIN_CONFIDENCE_DEFAULT,
       keywordConfigs: [],
 
       // 条码检测默认值
@@ -328,7 +332,7 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
       // 实时检测默认值
       autoCapture: true,
       captureDelaySeconds: 0, // 默认不延时
-      detectionConfidence: 0.8,
+      detectionConfidence: DETECTION_CONFIDENCE_DEFAULT,
       selectedTargets: ['person'],
       targetConfidences: {},
       currentModelId: null, // 初始为空，由页面首次加载时从后端获取并保存

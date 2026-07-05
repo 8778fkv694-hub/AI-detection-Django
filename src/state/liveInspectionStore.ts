@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { InspectionResult, BackendYoloDetection } from '@/types';
+import { DETECTION_CONFIDENCE_DEFAULT } from './detectionDefaults';
 
 interface LiveInspectionState {
   // 检测配置
@@ -54,7 +55,7 @@ export const useLiveInspectionStore = create<LiveInspectionState>()(
       selectedStandardId: null,
       autoCapture: true,
       showDetections: true,
-      detectionConfidence: 0.8,
+      detectionConfidence: DETECTION_CONFIDENCE_DEFAULT,
       selectedTarget: 'bottle', // 保留用于向后兼容
       selectedTargets: ['bottle'], // 新增：默认选择瓶子
       yoloDetectionMode: 'or', // 新增：默认OR模式
