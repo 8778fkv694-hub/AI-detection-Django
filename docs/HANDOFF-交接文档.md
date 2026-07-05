@@ -17,7 +17,8 @@
 | W3 阈值单一真源 | ✅ 已完成已推送 | `8fdf88e` | `src/state/detectionDefaults.ts` 集中全部默认阈值；三个 store 字面量清零；PPEThresholds 类型迁入并在 ppeDetectionStore 兼容性再导出 |
 | B1 模型文件错配 | ✅ 已完成已推送 | `6a3e044` | `yolo8_general` 权重从 `yolo10x.pt`（实为PPE模型）改指 `yolov8n.pt` |
 | W5 API 出口收口 | ✅ 已完成已推送 | `4ddd492`~`8426676`~`ae62250` | 见下方 1.1，7 个子提交 |
-| **W6 仓库/代码卫生** | 🟡 **部分完成，本次推送** | `f7179a4`~`c406714` | 见下方 1.2，4 个子提交；剩余项见第 2 节 |
+| B2 存量 bug | ✅ 已完成已推送 | `c2b9f5d` | `LiveInspectionScreen` 临时文件夹保存改为复用 `rpa.ts`，见下方说明 |
+| **W6 仓库/代码卫生** | 🟡 **基本完成，本次推送** | `f7179a4`~`40696b9` | 见下方 1.2，6 个子提交；唯一保留项见第 2 节（需人工输入，不代为决策） |
 
 **🔴 安全事故（已止损，用户决定自行处理后续）**：排查中发现 `production/.env.bak` 泄露进 git 历史（commit `5686144`），其中 Django `SECRET_KEY` 与当前生产 `production/.env` 完全一致——即这把密钥泄露后仍在生产环境活跃使用。已执行止损（`git rm --cached` + `.gitignore` 加固为 `.env.*` 通配，commit `1d20410`）。**用户已确认知晓，自行安排**：①生产环境轮换 SECRET_KEY ②是否用 `git filter-repo` 彻底清洗历史。接手者不需要也不应该代为处理这两项，除非用户明确要求。
 
@@ -37,10 +38,10 @@
 - `GuidedWeChatQRTestScreen.tsx`（3处）、`OCRGuidedTestScreen.tsx`（2处）：`fetch(dataUrl).blob()` 是 base64→File 的浏览器技巧，与后端 API 无关。
 - `InspectionScreen.tsx`、`ResultsScreen.tsx`、`ProductionBatchScreen.tsx`：未挂载路由的死文件，**已在 W6.2 物理删除**（见下）。
 
-**⚠️ B2 存量 bug（未修，仍待人工决策）**：
-`LiveInspectionScreen.tsx` 的 `handleSaveToTempFolder`/`handleClearTempFolder` 调用 `/api/save-images`、`/api/clear-folder`（注意：**没有** `/rpa/` 前缀），全仓库搜索确认**后端不存在这两个路由**，长期 404（被 catch 静默吞掉，只提示"保存失败"）。这是**第三个独立的"临时文件夹操作"实现**（前两个已在 W5.1 收口到 `rpa.ts`），但语义不同——用的是数组批量接口 `{images: capturedImages}` 而非逐张接口，且硬编码了开发者本机绝对路径 `/Users/yiliwen/开发/打包带走/...`。**不属于机械替换范围**（后端本就不存在，直接套用 `rpa.ts` 需要改成循环调用单张接口，是行为改造不是收口），需要人工决策：①删除这个死功能 ②改造成循环调用 `saveImageToFolder` ③新增批量后端接口。
+**✅ B2 存量 bug 已修复（`c2b9f5d`）**：
+`LiveInspectionScreen.tsx` 的 `handleSaveToTempFolder`/`handleClearTempFolder` 原调用 `/api/save-images`、`/api/clear-folder`（**没有** `/rpa/` 前缀），全仓库搜索确认这两个路由从未在后端存在过，长期 404（被 catch 静默吞掉，只提示"保存失败"）。**决策依据**：该功能在 `SafetyEquipmentScreen`/`KitMatchingScreen` 两个姐妹实现里都是真实工作的需求（抓拍后导出到本地文件夹供归档/复核），判定为"该修的真实功能"而非"该删的死代码"——LiveInspectionScreen 这边只是复制实现时接口抄错了（批量数组接口而非已验证的单张循环接口）。**修复**：改为复用 `rpa.ts` 的 `saveImageToFolder`/`clearTempFolder`（W5.1 已验证），逐张保存并统计成功数。硬编码的开发者本机绝对路径 `tempFolderPath` 未改动（不确定其业务含义，只修接口层）。验证：tsc 零错误 + vite dev 冒烟正常渲染零错误。
 
-### 1.2 W6 完成明细（4 个子提交，仓库卫生进行中）
+### 1.2 W6 完成明细（6 个子提交）
 
 | 子任务 | Commit | 内容 |
 |---|---|---|
@@ -48,6 +49,8 @@
 | W6.2 | `f42e8f5` | 精确匹配确认无引用后，删除 3 个自项目最初提交起就从未被路由挂载过的死 screen 文件（`InspectionScreen`/`ResultsScreen`/`ProductionBatchScreen`），顺手清理 `App.tsx` 里对应的僵尸注释 |
 | W6.3 | `bc17b6b` | 删除 2 个内容为空的占位启动脚本（`start_docker.sh`/`start_lan_frontend.sh`） |
 | W6.4 | `c406714` | 归档 13 个无任何文档引用的历史启动脚本变体到 `scripts/legacy-start-scripts/`（`git mv`，内容未改，可追溯）；保留 10 个（3 个官方推荐入口 + 7 个被专门功能文档引用的脚本，见该目录 README.md 判定依据），未擅自合并 |
+| W6.5 | `ecd2aa9` | 出库 `backend/staticfiles/`（161 文件，Django `collectstatic` 构建产物，`STATIC_ROOT` 配置确认；三处部署脚本已含 `collectstatic` 调用，出库不影响部署） |
+| W6.6 | `40696b9` | 清理 18 个无代码/测试依赖的调试图片和检测结果截图（逐一交叉核查排除真实测试夹具，如 `edge_test_ocr.py` 依赖的 `problematic_*.png` 系列予以保留） |
 
 **W6.4 的重要限制**：`start_*.sh` 的整合目标（行动文档里"归并为 3–4 个带参数入口"）**未完成**——根目录剩余 10 个脚本之间仍有大量重复样板代码，但哪个是当前实际生产部署方式需要仓库所有者确认（`start_production*` 有过 3 个变体，只有 1 个被文档引用，另外 2 个已归档，但不代表被引用的那个就是当前真实在用的）。详见 `scripts/legacy-start-scripts/README.md`。
 
@@ -75,13 +78,13 @@
 
 ---
 
-## 2. 下一个任务：W6 剩余项
+## 2. W6 唯一剩余项（需要人工输入，不代为决策）
 
-- **`.gitignore` 补齐 + 图片资产分类**：`git ls-files` 显示 56 个 `.png` + 28 个 `.jpg` 被跟踪，尚未排查哪些是 UI 素材（应保留）、哪些是测试截图/临时图（应出库）。做法：先列出这 84 个文件的路径分布（`src/assets`/`public` 这类大概率保留，根目录零散截图大概率清理），逐一判断后 `git rm --cached` 该出库的。
-- **B2 bug**（见 1.1）：`LiveInspectionScreen.tsx` 的临时文件夹保存功能长期 404，需要人工先决定方案（删除死功能 / 改造成循环调用 rpa.ts / 新增批量后端接口），不要机械替换。
-- **`start_*.sh` 深度整合**（见 1.2 的限制说明）：需要仓库所有者确认当前实际部署用哪个脚本，才能安全做真正的去重合并，AI 不擅自判断。
+**`start_*.sh` 深度整合**（见 1.2 / `scripts/legacy-start-scripts/README.md`）：根目录剩余 10 个脚本之间仍有大量重复样板代码，行动文档"归并为 3–4 个带参数入口"的目标未完成。**未处理原因**：这不是"清理明确无用的东西"（删除死代码/空文件/无引用图片那类风险可控、AI 能独立核实的操作），而是"合并仍在使用的多个入口"——一旦把哪个脚本当作基准搞错了（比如以为 `start_production.sh` 是当前生产部署方式，实际运维用的是 Docker），破坏的是真实部署可用性，且当前开发环境里无法端到端验证 HTTPS 证书路径、Docker 构建等真实效果。这个信息只存在于仓库所有者的运维记录里，需要先确认「当前生产环境实际用哪个脚本 / 是否已被 Docker 方案取代」才能安全动手。
 
-## 3. 之后（W7+）
+其余 W6 事项（图片资产分类、死文件清理、B2 bug）均已在本轮完成，见 1.2。
+
+## 3. 之后（W7+，Phase W 已全部完成）
 
 ## 4. 再之后（按行动文档顺序）
 
@@ -115,7 +118,10 @@ cd android-app && bash scripts/build-apk.sh debug
 2. `yoloDetectBackend` 内仍保留 WASM 离线拦截分支（`isLocalOfflineMode()` → onnxYoloDetector）——这是 Electron/离线 web 的现行路径，**APK 场景将由 native 分支取代，但在第二梯队 Phase 1 之前不要删它**。
 3. 三套后端（Django / `src/server/api.js` / `android-app/www/nodejs-project`）接口语义有漂移，W8 之前改任何 API 都要三处对照。
 4. 上次失败教训（`docs/FAILED_CHANGES_2026-05-20.md`）：22 文件大爆炸。红线：单 commit ≤ 8 文件。
-5. **B2 新发现**（见 1.1）：`LiveInspectionScreen.tsx` 的临时文件夹保存长期 404，未修，需要人工决策方案。
+5. B2 存量 bug（`LiveInspectionScreen.tsx` 临时文件夹 404）**已修复**（`c2b9f5d`），见 1.1。
 6. W5.3/W5.4 过程中发现 W1 当初的"收口"并不完整——`useRealtimeDetectionLoop.ts`/`usePPEDetection.ts` 两个平行的检测循环实现被漏掉了。**教训**：以后做"收口"类任务，光 grep 关键函数名不够，还要 grep 裸 fetch + 裸 import 交叉核实，独立平行实现容易被具体调用点搜索漏掉。
 7. **安全事故**（见第 1 节顶部）：`production/.env.bak` 泄露的 Django SECRET_KEY 仍在生产环境使用，已止损但轮换/历史清洗由用户自行安排，接手者不要代为处理。
 8. **归档 ≠ 判断"该删"**（W6.4 教训）：判断一个脚本/文件是否废弃，光看"没人 import"不够——`start_ollama.sh` 等 7 个脚本不是任何地方的主入口，但仍被专门功能的用户手册（`docs/MOONDREAM_使用说明.md` 等）引用，贸然当死代码归档会打断真实使用场景。做法：至少要交叉检查 `docs/*.md` 里是否有文档级引用，而不只是代码级 import。
+9. **`backend/staticfiles/`（W6.5）已出库**：如果本地开发环境报静态资源 404（尤其是 Django admin 后台样式丢失），先跑一次 `python manage.py collectstatic`，这是预期行为，不是 bug。
+10. `docs/HANDOFF-交接文档.md` 本文档 1.1 节 B1 部分提到的验证图 `test_hik_101_normal.jpg` 已在 W6.6 清理阶段删除（确认无代码依赖），该验证结论本身不受影响，仅作历史记录说明。
+11. **Phase W（行动文档"第一梯队"）到此全部完成**：W1–W6 + B1 + B2 均已推送。第二梯队（APK）可以按行动文档 Phase 0 开始，或继续 Phase W+（选做的 W7/W8/W9）。
