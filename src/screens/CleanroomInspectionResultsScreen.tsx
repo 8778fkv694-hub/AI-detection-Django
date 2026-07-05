@@ -1,4 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import {
+  clearCleanroomResults,
+  fetchHealthSystemConfig,
+  saveHealthSystemConfig as saveHealthSystemConfigApi,
+  scanHealthSystemNetwork,
+  sendReportToHealthSystem as sendReportToHealthSystemApi,
+  probeHealthSystemStatus,
+} from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -339,16 +347,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
     if (window.confirm(`确定要永久删除所有 ${cleanroomResults.length} 条洁净用品检测结果吗？\n\n此操作不可恢复！\n\n注意：只有洁净用品检测结果会被删除，标准检测结果将保留。`)) {
       try {
         // 使用POST请求调用清除API
-        const response = await fetch('/api/results/clear-cleanroom/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            reason: '用户手动清除洁净用品检测结果',
-            count: cleanroomResults.length
-          })
-        });
+        const response = await clearCleanroomResults(cleanroomResults.length);
 
         if (response.ok) {
           const result = await response.json();
@@ -515,7 +514,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
   // 获取健康系统配置
   const getHealthSystemConfig = async () => {
     try {
-      const response = await fetch('/api/reports/health-system-config/');
+      const response = await fetchHealthSystemConfig();
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.config) {
@@ -547,11 +546,8 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
   // 测试健康系统连接
   const testHealthSystemConnection = async (ipAddress: string, port: string) => {
     try {
-      const response = await fetch(`http://${ipAddress}:${port}/api/status`, {
-        method: 'GET',
-        // 注：fetch 无 timeout 选项（原 timeout: 5000 从未生效，移除不改变行为）
-      });
-      
+      const response = await probeHealthSystemStatus(ipAddress, port);
+
       if (response.ok) {
         setHealthSystemStatus({
           connected: true,
@@ -594,13 +590,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
         }
       };
 
-      const response = await fetch('/api/reports/health-system-config/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(configData)
-      });
+      const response = await saveHealthSystemConfigApi(configData);
 
       if (response.ok) {
         alert('健康系统配置保存成功！');
@@ -626,9 +616,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
       });
 
       // 这里可以调用后端的扫描API
-      const response = await fetch('/api/reports/scan-health-system/', {
-        method: 'POST'
-      });
+      const response = await scanHealthSystemNetwork();
 
       if (response.ok) {
         const data = await response.json();
@@ -671,14 +659,8 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
     setIsSendingReport(true);
     try {
       const reportDataToSend = generateReportData();
-      
-      const response = await fetch('/api/reports/send-to-health-system/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(reportDataToSend)
-      });
+
+      const response = await sendReportToHealthSystemApi(reportDataToSend);
 
       if (response.ok) {
         const result = await response.json();
@@ -733,13 +715,7 @@ const CleanroomInspectionResultsScreen: React.FC = () => {
   // 重试发送挂起的报告
   const retryPendingReport = async (pendingReport: any) => {
     try {
-      const response = await fetch('/api/reports/send-to-health-system/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(pendingReport.reportData)
-      });
+      const response = await sendReportToHealthSystemApi(pendingReport.reportData);
 
       if (response.ok) {
         const result = await response.json();

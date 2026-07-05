@@ -547,3 +547,46 @@ export interface DataStats {
 export async function getDataStats(): Promise<DataStats> {
     return await apiRequest('/results/data-stats/');
 }
+
+// ---- 洁净用品检测结果 / 健康系统对接（行动文档 W5，从 CleanroomInspectionResultsScreen 收口） ----
+// 均为薄封装：返回原始 Response，调用方 .ok/.json() 处理逻辑保持不变。
+
+export async function clearCleanroomResults(count: number): Promise<Response> {
+    return apiFetch('/results/clear-cleanroom/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户手动清除洁净用品检测结果', count }),
+    });
+}
+
+export async function fetchHealthSystemConfig(): Promise<Response> {
+    return apiFetch('/reports/health-system-config/');
+}
+
+export async function saveHealthSystemConfig(configData: Record<string, any>): Promise<Response> {
+    return apiFetch('/reports/health-system-config/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(configData),
+    });
+}
+
+export async function scanHealthSystemNetwork(): Promise<Response> {
+    return apiFetch('/reports/scan-health-system/', { method: 'POST' });
+}
+
+export async function sendReportToHealthSystem(reportData: Record<string, any>): Promise<Response> {
+    return apiFetch('/reports/send-to-health-system/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reportData),
+    });
+}
+
+/**
+ * 探测用户手动填写的第三方健康系统地址是否可达。
+ * 注意：这是探测任意局域网 IP，不走 Django API base url，故不能用 apiFetch（会被错误加上 baseURL 前缀）。
+ */
+export async function probeHealthSystemStatus(ipAddress: string, port: string): Promise<Response> {
+    return fetch(`http://${ipAddress}:${port}/api/status`, { method: 'GET' });
+}
