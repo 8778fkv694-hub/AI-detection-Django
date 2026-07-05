@@ -9,6 +9,7 @@
  */
 
 import { apiFetch } from '@/lib/config';
+import { isNativeOcrSupported, recognizeTextNative } from '@/lib/textRecognitionBridge';
 
 export interface OcrExtractRequest {
   /** 纯 base64 图片数据（不含 data: 前缀） */
@@ -21,6 +22,14 @@ export interface OcrExtractRequest {
 
 /** 执行 OCR 文字识别（Django /ocr/extract/） */
 export async function extractText<T = any>(req: OcrExtractRequest): Promise<T> {
+  if (isNativeOcrSupported()) {
+    try {
+      const result = await recognizeTextNative(req.image);
+      return result as unknown as T;
+    } catch (err) {
+      console.error('[ocr] Native OCR failed, falling back to server:', err);
+    }
+  }
   const res = await apiFetch('/ocr/extract/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
