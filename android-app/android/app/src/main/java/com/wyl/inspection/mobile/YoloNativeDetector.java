@@ -137,10 +137,24 @@ public class YoloNativeDetector {
         int origHeight = bitmap.getHeight();
 
         try {
-            // 1. Preprocess: Resize bitmap to input size (e.g. 320x320)
-            Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true);
+            // 1. Preprocess: Resize bitmap using equal-scaling Letterbox with gray borders (RGB 114,114,114)
+            float scale = Math.min((float) inputSize / origWidth, (float) inputSize / origHeight);
+            int newW = Math.round(origWidth * scale);
+            int newH = Math.round(origHeight * scale);
+
+            Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, newW, newH, true);
+            Bitmap resizedBitmap = Bitmap.createBitmap(inputSize, inputSize, Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(resizedBitmap);
+            canvas.drawColor(android.graphics.Color.rgb(114, 114, 114));
+
+            int padX = (inputSize - newW) / 2;
+            int padY = (inputSize - newH) / 2;
+            canvas.drawBitmap(scaledBitmap, padX, padY, null);
+            scaledBitmap.recycle();
+
             int[] pixels = new int[inputSize * inputSize];
             resizedBitmap.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize);
+            resizedBitmap.recycle();
 
             // NCHW shape: [1, 3, inputSize, inputSize]
             float[] floatBuffer = new float[3 * inputSize * inputSize];
@@ -192,8 +206,6 @@ public class YoloNativeDetector {
                 int numBoxes = (int) outShape[2];
 
                 List<Detection> rawDetections = new ArrayList<>();
-                float scaleX = (float) origWidth / inputSize;
-                float scaleY = (float) origHeight / inputSize;
 
                 for (int i = 0; i < numBoxes; i++) {
                     float cx = outputData[0 * numBoxes + i];
@@ -213,10 +225,10 @@ public class YoloNativeDetector {
                     }
 
                     if (maxConf > confThreshold) {
-                        float x1 = (cx - w / 2.0f) * scaleX;
-                        float y1 = (cy - h / 2.0f) * scaleY;
-                        float x2 = (cx + w / 2.0f) * scaleX;
-                        float y2 = (cy + h / 2.0f) * scaleY;
+                        float x1 = (cx - w / 2.0f - padX) / scale;
+                        float y1 = (cy - h / 2.0f - padY) / scale;
+                        float x2 = (cx + w / 2.0f - padX) / scale;
+                        float y2 = (cy + h / 2.0f - padY) / scale;
 
                         String label = maxClassIndex < classNames.size() ? classNames.get(maxClassIndex) : "class_" + maxClassIndex;
                         rawDetections.add(new Detection(

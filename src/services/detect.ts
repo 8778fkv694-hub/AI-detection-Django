@@ -18,6 +18,7 @@ import {
   isNativeYoloSupported,
   initNativeYolo,
   detectFrameNative,
+  YoloNative,
 } from '@/lib/yoloNativeBridge';
 import type { BackendYoloDetection } from '@/types';
 
@@ -94,6 +95,18 @@ export async function detectImage(
   conf: number,
   options?: DetectImageOptions
 ): Promise<BackendYoloDetection[]> {
+  if (isNativeYoloSupported()) {
+    try {
+      const result = await YoloNative.detectFrame({
+        base64: imageBase64,
+        confidenceThreshold: conf,
+        nmsThreshold: 0.45,
+      });
+      return (result.boxes || []) as unknown as BackendYoloDetection[];
+    } catch (err) {
+      console.error('[detect] Native image detection failed, falling back:', err);
+    }
+  }
   return yoloDetectBackend(imageBase64, conf, options);
 }
 
