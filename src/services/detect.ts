@@ -34,6 +34,8 @@ export interface FrameDetectionResult {
   fps: number | null;
   /** stream-loop 模式下的帧 ID，用于抓拍时按帧取图 */
   frameId?: number;
+  /** stream-loop 模式下后端上报的原始帧尺寸，用于检测框坐标缩放 */
+  sourceSize?: { width: number; height: number };
 }
 
 export interface DetectImageOptions {
@@ -177,6 +179,9 @@ export async function fetchStreamDetections(
     inferenceMs: result.inference_ms || null,
     fps: result.detect_fps || null,
     frameId: result.frame_id || 0,
+    sourceSize: result.frame_width && result.frame_height
+      ? { width: result.frame_width, height: result.frame_height }
+      : undefined,
   };
 }
 

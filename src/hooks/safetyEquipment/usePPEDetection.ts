@@ -8,8 +8,15 @@
 
 import { useCallback, useRef, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { yoloDetectBackend, type BackendYoloDetection } from '@/lib/api';
-import { buildApiUrl, isLocalOfflineMode } from '@/lib/config';
+import type { BackendYoloDetection } from '@/lib/api';
+import { isLocalOfflineMode } from '@/lib/config';
+import {
+  detectImage,
+  fetchStreamSnapshot,
+  fetchStreamDetections,
+  startStreamDetectionLoop,
+  stopStreamDetectionLoop,
+} from '@/services/detect';
 import type { YoloDetection } from '@/lib/yoloDetector';
 
 export interface DetectionStats {
@@ -161,10 +168,7 @@ export const usePPEDetection = ({
   const fetchBackendSnapshotBase64 = useCallback(async (frameId?: number): Promise<string | null> => {
     if (!streamId) return null;
     try {
-      const url = frameId && frameId > 0
-        ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${frameId}`)
-        : buildApiUrl(`/streams/${streamId}/snapshot/`);
-      const res = await fetch(url);
+      const res = await fetchStreamSnapshot(streamId, frameId);
       if (!res.ok) return null;
       const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
       if (frameId && frameId > 0 && snapFrameId !== frameId) {
@@ -190,7 +194,7 @@ export const usePPEDetection = ({
     async (imageData: string): Promise<YoloDetection[]> => {
       try {
         const minThreshold = getMinThreshold();
-        const backendDetections = await yoloDetectBackend(imageData, minThreshold, {
+        const backendDetections = await detectImage(imageData, minThreshold, {
           detection_type: 'cleanroom_ppe',
         });
 
@@ -242,7 +246,7 @@ export const usePPEDetection = ({
           return [];
         }
 
-        const backendDetections = await yoloDetectBackend(imageData, captureThreshold, {
+        const backendDetections = await detectImage(imageData, captureThreshold, {
           detection_type: 'cleanroom_ppe',
         });
 
@@ -319,23 +323,16 @@ export const usePPEDetection = ({
     const stopLoop = () => {
       if (!backendLoopStartedRef.current) return;
       backendLoopStartedRef.current = false;
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner_id: backendLoopOwnerRef.current }),
-      }).catch((error) => console.error('停止PPE后端检测循环失败:', error));
+      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+        .catch((error) => console.error('停止PPE后端检测循环失败:', error));
     };
 
     if (isCameraOn && isPpeActive) {
       backendLoopStartedRef.current = true;
-      fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model_id: 'ppe_detection',
-          conf_threshold: Math.min(captureThreshold, getMinThreshold()),
-          owner_id: backendLoopOwnerRef.current,
-        }),
+      startStreamDetectionLoop(streamId, {
+        modelId: 'ppe_detection',
+        confThreshold: Math.min(captureThreshold, getMinThreshold()),
+        ownerId: backendLoopOwnerRef.current,
       }).catch((error) => {
         backendLoopStartedRef.current = false;
         console.error('启动PPE后端检测循环失败:', error);
@@ -371,18 +368,15 @@ export const usePPEDetection = ({
 
       if (useBackendDetection && streamId) {
         try {
-          const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
-          if (response.ok) {
-            const result = await response.json();
-            const backendDetections = (result.boxes || []) as BackendYoloDetection[];
-            currentFrameId = result.frame_id || 0;
-            detections = filterDetections(
-              backendDetections.map(mapBackendDetection),
-              Math.min(captureThreshold, getMinThreshold())
-            );
-            if (result.frame_width && result.frame_height) {
-              sourceSize = { width: result.frame_width, height: result.frame_height };
-            }
+          const result = await fetchStreamDetections(streamId);
+          const backendDetections = result.detections as BackendYoloDetection[];
+          currentFrameId = result.frameId || 0;
+          detections = filterDetections(
+            backendDetections.map(mapBackendDetection),
+            Math.min(captureThreshold, getMinThreshold())
+          );
+          if (result.sourceSize) {
+            sourceSize = result.sourceSize;
           }
         } catch (error) {
           console.error('拉取PPE后端检测结果失败:', error);
