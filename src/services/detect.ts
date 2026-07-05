@@ -24,6 +24,9 @@ import type { BackendYoloDetection } from '@/types';
 
 export type { BackendYoloDetection };
 
+// 共享的单例 Canvas，用于防止移动端实时检测时高频 GC 卡顿
+let sharedCanvas: HTMLCanvasElement | null = null;
+
 export type DetectionSource = 'server' | 'local-onnx' | 'native' | 'stream-loop';
 
 export interface FrameDetectionResult {
@@ -126,14 +129,16 @@ export async function detectVideoFrame(
 
     if (isNativeYoloSupported()) {
       // 原生路径：缩到 320 再过桥（带宽预算，见行动文档 H6）
-      const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 320;
-      const ctx = canvas.getContext('2d');
+      if (!sharedCanvas) {
+        sharedCanvas = document.createElement('canvas');
+      }
+      sharedCanvas.width = 320;
+      sharedCanvas.height = 320;
+      const ctx = sharedCanvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, 320, 320);
       }
-      detections = await detectFrameNative(canvas, conf, 0.45);
+      detections = await detectFrameNative(sharedCanvas, conf, 0.45);
       source = 'native';
     } else {
       detections = await onnxYoloDetector.detectFromVideo(video);

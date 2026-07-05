@@ -181,14 +181,13 @@ export const useLiveYoloDetection = ({
       return;
     }
 
-    // 移动端/工控机环境下，主动引入降采样/冷却，留出 CPU 让 WebView 渲染画面
-    // 移动端/工控机环境下，主动引入极短冷却时间，留出少许 CPU 时间供 WebView 渲染画面
+    // 移动端/工控机环境下，主动引入冷却时间进行背压节流，降低 JPEG 编码压垮主线程的风险，保证 WebView 画面渲染流畅度
     const isMobile = (window as any).__IS_MOBILE_APP__;
     const isElectron = (window as any).__IS_ELECTRON__;
     if (isMobile || isElectron) {
       const now = Date.now();
-      // 在多线程 Web Worker 模式下，设置极小冷却时间 (16ms = 60fps 刷新率) 以避免阻塞主线程渲染
-      const cooldownMs = 16;
+      // 移动端限制为 100ms (10 FPS 推理) 释放大额主线程 JPEG 压缩负担；桌面端限制为 33ms (30 FPS 推理)
+      const cooldownMs = isMobile ? 100 : 33;
       if (now - lastDetectTimeRef.current < cooldownMs) {
         return;
       }
