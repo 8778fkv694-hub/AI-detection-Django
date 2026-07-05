@@ -18,8 +18,8 @@ chmod +x install-moondream.sh
 
 ```bash
 # 启动 Moondream 专用服务
-chmod +x start_moondream.sh
-./start_moondream.sh
+chmod +x start_mac.sh
+./start_mac.sh moondream
 ```
 
 ### 3. 测试功能

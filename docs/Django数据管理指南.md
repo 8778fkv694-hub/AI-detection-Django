@@ -27,9 +27,9 @@ python manage.py runserver 0.0.0.0:8000
 
 ```bash
 # 从项目根目录运行
-./start_simple.sh  # Linux/Mac
+./start_mac.sh full  # Mac 开发机完整启动
 # 或
-start_django_only.sh  # 仅启动Django后端
+./start_mac.sh django  # 仅启动Django后端
 ```
 
 ### 2. 创建超级用户（如果还没有）
@@ -332,4 +332,3 @@ python manage.py migrate
 
 - Django官方文档：https://docs.djangoproject.com/
 - Django Admin文档：https://docs.djangoproject.com/en/stable/ref/contrib/admin/
-
