@@ -20,7 +20,20 @@
 
 **W3 的一个决策记录**（避免后人重做）：`ocrDetectionStore.currentModelId` 是 OCR 页面级的持久化模型记忆，`useCurrentModel` 是从后端拉的全局当前模型，**语义不同，刻意不合并**。
 
-**验证状态**：以上改动均通过 `tsc --noEmit` 零错误验证；**web 端运行时手工回归尚未做**（本机无摄像头/后端联调环境）。接手者第一件事：起 Django + 前端，冒烟 实时检测 / OCR 检测 / PPE 检测 三个页面各跑一次检测，确认行为与改造前一致。
+**验证状态（2026-07-05 已完成运行时冒烟，非仅类型级）**：
+
+| 验证项 | 结果 |
+|---|---|
+| `tsc --noEmit` / `npm run build` 生产构建 | ✅ 零错误、构建通过 |
+| 前端运行时冒烟（vite dev + 无后端） | ✅ 首页 + `/live-inspection` `/safety-equipment` `/ocr` `/ocr-guided` `/kit-matching` `/wechat-qr-guided` 6 页全部正常渲染，**零非网络类 console 错误**（仅预期的 Failed to fetch 噪音）；首页看板的引擎状态（W1 `getLocalEngineInfo`）显示正常 |
+| Django 后端 + 检测接口端到端 | ✅ `manage.py check` 通过；`POST /api/results/yolo-detect/` 200，模型池加载/切换正常（ppe_detection → yolo8_general 动态入池） |
+| 端侧主力模型 `model_package/best.pt` | ✅ 对 `train2/val_batch1_labels.jpg` 检出 7 目标（filter/filtername/nsplogo），模型本体健康——APK 第二梯队的前提成立 |
+| W1 行为等价复查 | ✅ 逐 hunk 对比：引擎阶梯/320 过桥/0.45 NMS/置信度过滤语义一致；发现并修复一处差异（见下） |
+
+**冒烟中修复的一处行为差异**：`fetchStreamDetections` 在轮询响应非 200 时，旧内联实现是"跳过本帧、保留上次性能指标"，W1 版本会把 FPS/耗时闪成空——已改为 throw 交由调用方 catch 跳过，恢复旧语义（commit 见下）。
+
+**⚠️ 冒烟中发现的存量 bug（B1，与本次重构无关，待修）**：
+`yolo8_general` 模型 ID 被后端映射到 `models/yolo10x.pt`，该权重文件**零检出**——同一张真实照片 `models/yolov8n.pt` 检出 2 目标而 `yolo10x.pt` 检出 0（裸调 ultralytics 复现，排除管线因素）。即：**web 端"通用模型"检测长期空转**。修复方向：把 `backend/inspection` 中 `yolo8_general` 的权重路径改指 `models/yolov8n.pt`（或换一个验证过的通用权重），并顺手核查 `filter_core_detection`/`waterprifer_detection` 映射的权重是否同样有问题（仓库里存在 `best.pt.wrong_model_backup`，历史上发生过模型错换）。建议作为 **W5 之前的第一个任务**，半小时可完成。
 
 ---
 

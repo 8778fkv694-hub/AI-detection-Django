@@ -153,7 +153,9 @@ export async function fetchStreamDetections(
 ): Promise<FrameDetectionResult> {
   const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
   if (!response.ok) {
-    return { detections: [], source: 'stream-loop', inferenceMs: null, fps: null, frameId: 0 };
+    // 与旧内联实现语义一致：非 200 视为本次轮询失败，由调用方 catch 跳过本帧更新
+    // （不能返回空结果，否则会把上一帧的性能指标闪成空）
+    throw new Error(`拉取检测结果失败: HTTP ${response.status}`);
   }
   const result = await response.json();
   return {
