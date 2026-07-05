@@ -12,7 +12,6 @@ import { initCsrfToken } from '@/lib/config';
 
 import HomeScreen from '@/screens/HomeScreen';
 import LiveInspectionScreen from '@/screens/LiveInspectionScreen';
-// import InspectionScreen from '@/screens/InspectionScreen';
 import BatchInspectionScreen from '@/screens/BatchInspectionScreen';
 import TemplatesScreen from '@/screens/TemplatesScreen';
 import LocalModelScreen from '@/screens/LocalModelScreen';
@@ -199,7 +198,6 @@ const App: React.FC = () => {
             <Route path="/anomalies" element={<AnomalyDashboardScreen />} />
             <Route path="/streams" element={<StreamSettingsScreen />} />
             <Route path="/live-inspection" element={<LiveInspectionScreen />} />
-            {/* <Route path="/inspection" element={<InspectionScreen />} /> */}
             <Route path="/batch" element={<BatchInspectionScreen />} />
             <Route path="/safety-equipment" element={<SafetyEquipmentScreen />} />
             <Route path="/cleanroom-results" element={<CleanroomInspectionResultsScreen />} />
