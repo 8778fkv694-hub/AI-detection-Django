@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import { MessageSquare, Copy, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvailableModels } from '@/lib/api';
+import { saveImageToFolder, clearTempFolder as clearRpaTempFolder } from '@/lib/rpa';
 import { directBackendFetch } from '@/lib/config';
 import { useModelMode } from '@/hooks/useModelMode';
 import { saveLiveInspectionParams, type LiveInspectionParams } from '@/lib/paramPersistence';
@@ -349,18 +350,22 @@ const LiveInspectionScreen: React.FC = () => {
       toast.error('没有可保存的图片');
       return;
     }
-    try {
-      const response = await fetch('/api/save-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images: capturedImages, folder: tempFolderPath }),
-      });
-      if (response.ok) {
-        toast.success(`已保存 ${capturedImages.length} 张图片到临时文件夹`);
-      } else {
-        toast.error('保存失败');
+    // 修复 B2：原实现调用的 /api/save-images 后端从未存在（长期404），
+    // 改为复用 rpa.ts 已验证的单张保存接口（与 SafetyEquipmentScreen/
+    // KitMatchingScreen 的临时文件夹保存行为一致）。
+    let successCount = 0;
+    for (let i = 0; i < capturedImages.length; i++) {
+      const fileName = `live_capture_${Date.now()}_${i}.jpg`;
+      try {
+        const result = await saveImageToFolder(capturedImages[i], fileName, tempFolderPath);
+        if (result.ok) successCount++;
+      } catch {
+        // 单张失败不影响其余图片继续保存
       }
-    } catch {
+    }
+    if (successCount > 0) {
+      toast.success(`成功保存 ${successCount}/${capturedImages.length} 张图片到临时文件夹`);
+    } else {
       toast.error('保存失败');
     }
   }, [capturedImages, tempFolderPath]);
@@ -371,12 +376,8 @@ const LiveInspectionScreen: React.FC = () => {
 
   const handleClearTempFolder = useCallback(async () => {
     try {
-      const response = await fetch('/api/clear-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder: tempFolderPath }),
-      });
-      if (response.ok) {
+      const result = await clearRpaTempFolder(tempFolderPath);
+      if (result.ok) {
         toast.success('已清空临时文件夹');
       } else {
         toast.error('清空失败');
