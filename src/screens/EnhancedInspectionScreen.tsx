@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react'; import { useParams, useNavigate } from 'react-router-dom'; import { useAppStore } from '@/state/appStore'; import { useStandardStore } from '@/state/standardStore'; import { useAIConfigStore } from '@/state/aiConfigStore'; import { InspectionResult, Standard, AnalysisResult } from '@/types'; import toast from 'react-hot-toast'; import { Button } from '@/components/ui/Button'; import { Textarea } from '@/components/ui/Textarea'; import { ArrowLeft, Sparkles, Loader2 } from 'lucide-react'; import { v4 as uuidv4 } from 'uuid';
+import React, { useState, useEffect } from 'react'; import { useParams, useNavigate } from 'react-router-dom'; import { useAppStore } from '@/state/appStore'; import { useStandardStore } from '@/state/standardStore'; import { useAIConfigStore } from '@/state/aiConfigStore'; import { InspectionResult, Standard, AnalysisResult } from '@/types'; import toast from 'react-hot-toast'; import { Button } from '@/components/ui/Button'; import { Textarea } from '@/components/ui/Textarea'; import { ArrowLeft, Sparkles, Loader2 } from 'lucide-react'; import { v4 as uuidv4 } from 'uuid'; import { enhanceAnalyzeResult } from '@/lib/api';
 const ResultDisplay: React.FC<{ result: AnalysisResult }> = ({ result }) => (<div className="bg-slate-50 p-4 rounded-lg space-y-2 text-sm"><p><strong>质量:</strong> <span className={result.overallQuality === '合格' ? 'text-green-600' : 'text-red-600'}>{result.overallQuality}</span></p><p><strong>分数:</strong> {result.score}</p><p><strong>理由:</strong> {result.reason}</p><p><strong>缺陷:</strong> {result.defects?.length || 0}个</p></div>);
 const EnhancedInspectionScreen: React.FC = () => {
     const { resultId } = useParams<{ resultId: string }>(); const navigate = useNavigate();
@@ -27,7 +27,7 @@ const EnhancedInspectionScreen: React.FC = () => {
         if (!originalResult || !supplementaryPrompt) { toast.error('请输入补充指令！'); return; }
         setIsLoading(true); const toastId = toast.loading('正在进行增强分析...');
         try {
-            const res = await fetch('/api/ai/enhance-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ originalResult, standard, supplementaryPrompt, config }) });
+            const res = await enhanceAnalyzeResult({ originalResult, standard, supplementaryPrompt, config });
             if (!res.ok) throw new Error('增强分析失败');
             const analysisResult = await res.json();
             const pureBase64 = originalResult.image && originalResult.image.startsWith('data:') ? originalResult.image.split(',')[1] : originalResult.image || '';

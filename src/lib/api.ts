@@ -551,11 +551,14 @@ export async function getDataStats(): Promise<DataStats> {
 // ---- 洁净用品检测结果 / 健康系统对接（行动文档 W5，从 CleanroomInspectionResultsScreen 收口） ----
 // 均为薄封装：返回原始 Response，调用方 .ok/.json() 处理逻辑保持不变。
 
-export async function clearCleanroomResults(count: number): Promise<Response> {
+export async function clearCleanroomResults(
+    count: number,
+    reason: string = '用户手动清除洁净用品检测结果'
+): Promise<Response> {
     return apiFetch('/results/clear-cleanroom/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: '用户手动清除洁净用品检测结果', count }),
+        body: JSON.stringify({ reason, count }),
     });
 }
 
@@ -573,6 +576,21 @@ export async function saveHealthSystemConfig(configData: Record<string, any>): P
 
 export async function scanHealthSystemNetwork(): Promise<Response> {
     return apiFetch('/reports/scan-health-system/', { method: 'POST' });
+}
+
+// ---- 增强分析（EnhancedInspectionScreen 收口） ----
+
+export async function enhanceAnalyzeResult(payload: {
+    originalResult: any;
+    standard: any;
+    supplementaryPrompt: string;
+    config: any;
+}): Promise<Response> {
+    return apiFetch('/ai/enhance-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function sendReportToHealthSystem(reportData: Record<string, any>): Promise<Response> {

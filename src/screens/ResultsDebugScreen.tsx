@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
+import { clearCleanroomResults } from '@/lib/api';
 import { useAppStore } from '@/state/appStore';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -93,16 +94,10 @@ const ResultsDebugScreen: React.FC = () => {
 
         // 尝试清空后端数据库
         // 分别清空洁净用品检测结果和标准检测结果
-        const cleanroomResponse = await fetch('/api/results/clear-cleanroom/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            reason: '用户手动清空所有检测结果',
-            count: filteredResults.length
-          })
-        });
+        const cleanroomResponse = await clearCleanroomResults(
+          filteredResults.length,
+          '用户手动清空所有检测结果'
+        );
 
         if (cleanroomResponse.ok) {
           const cleanroomResult = await cleanroomResponse.json();

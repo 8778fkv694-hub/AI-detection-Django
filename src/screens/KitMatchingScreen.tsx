@@ -24,7 +24,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getYoloStatus, preloadYolo, getModelConfig, type ModelConfig } from '@/lib/api';
+import { getYoloStatus, preloadYolo, getModelConfig, getAvailableModels, type ModelConfig } from '@/lib/api';
 import type { InspectionResult } from '@/types';
 import ModelUnavailableDialog from '@/components/ModelUnavailableDialog';
 import ModelSelector from '@/components/ModelSelector';
@@ -358,11 +358,8 @@ const KitMatchingScreen: React.FC = () => {
   // 刷新当前模型状态
   const refreshCurrentModel = useCallback(async () => {
     try {
-      const response = await fetch('/api/results/available-models/');
-      if (response.ok) {
-        const data = await response.json();
-        console.log('当前模型:', data.current_model || '未知');
-      }
+      const data = await getAvailableModels();
+      console.log('当前模型:', data.current_model || '未知');
     } catch (error) {
       console.error('获取模型状态失败:', error);
     }
