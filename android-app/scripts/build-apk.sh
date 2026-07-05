@@ -166,7 +166,7 @@ ONNX_COUNT=0
 for ONNX_FILE in "$MODEL_SRC_DIR"/*.onnx; do
   if [ -f "$ONNX_FILE" ]; then
     BASENAME="$(basename "$ONNX_FILE")"
-    if [ "$BASENAME" = "ppe_large.onnx" ]; then
+    if [ "$BASENAME" != "best.onnx" ] && [ "$BASENAME" != "yolov8n.onnx" ]; then
       echo "[build-apk]   Skip $BASENAME (redundant on mobile)"
       continue
     fi
