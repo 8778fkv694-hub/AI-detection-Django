@@ -8,7 +8,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { buildApiUrl } from '@/lib/config';
 import { useModelPool } from '@/hooks/useModelPool';
 import type { BackendYoloDetection } from '@/types';
 import {
@@ -16,6 +15,7 @@ import {
   detectVideoFrame,
   ensureLocalModel,
   fetchStreamDetections,
+  fetchStreamSnapshot,
   getLocalEngineInfo,
   isOfflineEngineActive,
   startStreamDetectionLoop,
@@ -312,10 +312,7 @@ export const useLiveYoloDetection = ({
               // 获取图像进行处理
               if (useBackendDetection && streamId) {
                 try {
-                  const url = currentFrameId > 0
-                    ? buildApiUrl(`/streams/${streamId}/snapshot/?frame_id=${currentFrameId}`)
-                    : buildApiUrl(`/streams/${streamId}/snapshot/`);
-                  const res = await fetch(url);
+                  const res = await fetchStreamSnapshot(streamId, currentFrameId);
                   if (res.ok) {
                     const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
                     if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
