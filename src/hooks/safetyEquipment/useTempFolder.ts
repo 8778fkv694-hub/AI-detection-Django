@@ -8,6 +8,7 @@
 
 import { useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { saveImageToFolder, openTempFolder, clearTempFolder } from '@/lib/rpa';
 
 export interface UseTempFolderOptions {
   /** 本地抓拍图片列表 */
@@ -45,15 +46,10 @@ export const useTempFolder = ({
 
       try {
         console.log(`保存第 ${i + 1} 张图片: ${fileName}`);
-        const saveResponse = await fetch('/api/rpa/save-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64Image, fileName, folder: tempFolderPath }),
-        });
+        const saveResponse = await saveImageToFolder(base64Image, fileName, tempFolderPath);
 
         if (saveResponse.ok) {
-          const result = await saveResponse.json();
-          console.log(`第 ${i + 1} 张图片保存成功:`, result);
+          console.log(`第 ${i + 1} 张图片保存成功:`, saveResponse.result);
           successCount++;
         } else {
           console.error(`第 ${i + 1} 张图片保存失败:`, saveResponse.status, saveResponse.statusText);
@@ -72,12 +68,8 @@ export const useTempFolder = ({
 
   // 打开临时文件夹
   const handleOpenTempFolder = useCallback(async () => {
-    const response = await fetch('/api/rpa/open-folder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folderPath: tempFolderPath }),
-    });
-    if (response.ok) {
+    const ok = await openTempFolder(tempFolderPath);
+    if (ok) {
       toast.success('已打开临时文件夹');
     } else {
       toast.error('打开临时文件夹失败');
@@ -86,13 +78,8 @@ export const useTempFolder = ({
 
   // 清空临时文件夹
   const handleClearTempFolder = useCallback(async () => {
-    const response = await fetch('/api/rpa/clear-folder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folderPath: tempFolderPath }),
-    });
-    if (response.ok) {
-      const result = await response.json();
+    const result = await clearTempFolder(tempFolderPath);
+    if (result.ok) {
       toast.success(`已清空临时文件夹，删除了 ${result.deletedCount} 个文件`);
     } else {
       toast.error('清空临时文件夹失败');
