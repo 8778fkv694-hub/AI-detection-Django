@@ -75,6 +75,8 @@ db.sqlite3-journal
 db.sqlite3-shm
 db.sqlite3-wal
 media/
+staticfiles/
+backend/staticfiles/
 
 # AI Model files (too large for git)
 *.pt
