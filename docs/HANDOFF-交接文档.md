@@ -1,22 +1,42 @@
 # HANDOFF 交接文档 — 检测架构重构（Web 主线）
 
-> **最后更新**：2026-07-04
+> **最后更新**：2026-07-05
 > **总纲领**：`docs/检测架构重构-行动文档-Web主线与APK落地.md`（先读它，再读本文档）
 > **战略**：Web 端权重更高（主线）；APK 是二线离线方案，第一梯队（Phase W）全部完成前不启动。
-> **接手规则**：一次只做一个任务，单独 commit，commit message 以任务编号开头（如 `W5: ...`）；单次 commit 涉及文件 > 8 个就停下拆分；每次改完跑 `npx tsc --noEmit` 必须零错误。
+> **接手规则**：一次只做一个任务，单独 commit，commit message 以任务编号开头（如 `W6: ...`）；单次 commit 涉及文件 > 8 个就停下拆分；每次改完跑 `npx tsc --noEmit` 必须零错误。
 
 ---
 
-## 1. 当前进度（Phase W：4/6 完成）
+## 1. 当前进度（Phase W：5/6 完成）
 
 | 任务 | 状态 | Commit | 说明 |
 |---|---|---|---|
 | W1 检测抽象层 | ✅ 已完成已推送 | `6367b73` | `src/services/detect.ts`（194 行）：server / local-onnx / native / stream-loop 四引擎收口，业务层禁止直连 onnxYoloDetector / yoloNativeBridge |
 | W2 OCR/条码抽象层 | ✅ 已完成已推送 | `99f91eb` | `src/services/ocr.ts`（95 行） |
 | W4 tsc 清零 | ✅ 已完成已推送 | `edd8a05` | 159→0 错误，tsc 已纳入构建门禁 |
-| W3 阈值单一真源 | ✅ 已完成（本次） | `8fdf88e` | `src/state/detectionDefaults.ts` 集中全部默认阈值；三个 store 字面量清零；PPEThresholds 类型迁入并在 ppeDetectionStore 兼容性再导出 |
-| W5 API 出口收口 | ⬜ **下一个任务** | — | 见第 2 节 |
-| W6 仓库/代码卫生 | ⬜ 未开始 | — | 见第 3 节 |
+| W3 阈值单一真源 | ✅ 已完成已推送 | `8fdf88e` | `src/state/detectionDefaults.ts` 集中全部默认阈值；三个 store 字面量清零；PPEThresholds 类型迁入并在 ppeDetectionStore 兼容性再导出 |
+| B1 模型文件错配 | ✅ 已完成已推送 | `6a3e044` | `yolo8_general` 权重从 `yolo10x.pt`（实为PPE模型）改指 `yolov8n.pt` |
+| **W5 API 出口收口** | ✅ **本次完成已推送** | `4ddd492`~`8426676`~`ae62250` | 见下方 1.1，7 个子提交 |
+| W6 仓库/代码卫生 | ⬜ **下一个任务** | — | 见第 3 节 |
+
+### 1.1 W5 完成明细（7 个子提交，每个独立验证）
+
+| 子任务 | Commit | 内容 |
+|---|---|---|
+| W5.1 | `4ddd492` | 新增 `src/lib/rpa.ts`，收口 `useTempFolder.ts`/`useFolderOperations.ts` 重复的 `/api/rpa/*` 三个调用 |
+| W5.2 | `ed94537` | `CleanroomInspectionResultsScreen` 6 处健康系统对接 fetch → api.ts 薄封装；`probeHealthSystemStatus` 单独处理（探测第三方IP，不走 baseURL） |
+| W5.3 | `55e67d3` | **架构级发现**：`useRealtimeDetectionLoop.ts` 是与 `useLiveYoloDetection` 平行、W1 当初漏收口的检测循环实现（提取自 OCRDetectionScreen），仍直接 `import yoloDetectBackend` + 6 处裸 fetch。并入 `detect.ts`；新增 `fetchStreamSnapshot()` |
+| W5.4 | `3c69e66` | 同型问题：`usePPEDetection.ts` 也是独立实现，5 处并入。**发现真实差异**：需要 `frame_width/frame_height` 算 `sourceSize`（坐标缩放用），`FrameDetectionResult` 补充该可选字段 |
+| W5.5 | `e276373` | 补齐 `useLiveYoloDetection.ts` 自动抓拍分支里漏收口的 1 处快照 fetch |
+| W5.6 | `8426676` | `ResultsDebugScreen`/`KitMatchingScreen`/`EnhancedInspectionScreen` 三处；`clearCleanroomResults` 加可选 `reason` 参数（原文案不同，未强行统一） |
+| W5.7 | `ae62250` | `usePPEScreenController`/`useBatchProcessingManager`；新增 `cacheRoiToBackend`（原调用是裸相对路径未走 buildApiUrl，顺带修复自定义 API_SERVER_URL 场景下路由不到的潜在问题）|
+
+**跳过/豁免的裸 fetch（有据可查，非遗漏）**：
+- `GuidedWeChatQRTestScreen.tsx`（3处）、`OCRGuidedTestScreen.tsx`（2处）：`fetch(dataUrl).blob()` 是 base64→File 的浏览器技巧，与后端 API 无关。
+- `InspectionScreen.tsx`、`ResultsScreen.tsx`、`ProductionBatchScreen.tsx`：**未挂载路由的死文件**（`App.tsx` 里被注释或压根未 import），改了也无运行时效果，归入 W6 判断是否物理删除。
+
+**⚠️ W5 冒烟中发现的新存量 bug（B2，未修，记录留存）**：
+`LiveInspectionScreen.tsx` 的 `handleSaveToTempFolder`/`handleClearTempFolder` 调用 `/api/save-images`、`/api/clear-folder`（注意：**没有** `/rpa/` 前缀），全仓库搜索确认**后端不存在这两个路由**，长期 404（被 catch 静默吞掉，只提示"保存失败"）。这是**第三个独立的"临时文件夹操作"实现**（前两个已在 W5.1 收口到 `rpa.ts`），但语义不同——用的是数组批量接口 `{images: capturedImages}` 而非逐张接口，且硬编码了开发者本机绝对路径 `/Users/yiliwen/开发/打包带走/...`。**不属于机械替换范围**（后端本就不存在，直接套用 `rpa.ts` 需要改成循环调用单张接口，是行为改造不是收口），需要人工决策：①删除这个死功能 ②改造成循环调用 `saveImageToFolder` ③新增批量后端接口。建议下一个专门任务处理，不要顺手改。
 
 **W3 的一个决策记录**（避免后人重做）：`ocrDetectionStore.currentModelId` 是 OCR 页面级的持久化模型记忆，`useCurrentModel` 是从后端拉的全局当前模型，**语义不同，刻意不合并**。
 
@@ -42,23 +62,15 @@
 
 ---
 
-## 2. 下一个任务：W5 — API 出口收口（预计半天，机械活）
+## 2. 下一个任务：W6 — 仓库/代码卫生（预计半天）
 
-（B1 已在本次修复，不再是前置任务；直接开始 W5 即可）
-
-**现状**（2026-07-04 实测）：检测/OCR 相关 fetch 已被 W1/W2 收口；剩余**裸 fetch 39 处**（screens 20 处 + hooks 19 处，均指未走 `apiFetch`/`directBackendFetch` 的 `fetch(`）。
-
-**做法**：
-1. `grep -rn "fetch(" src/screens src/hooks --include="*.tsx" --include="*.ts" | grep -v "apiFetch\|directBackendFetch"` 列清单。
-2. 逐个替换为 `src/lib/api.ts` 中已有函数；没有对应函数的，在 api.ts 新增（薄封装即可，保持 URL/参数/响应处理原样）。
-3. **禁止顺手改业务逻辑**；一个 screen/hook 一个小步，全部完成后一次 commit（`W5: ...`）。
-4. 验收：上述 grep 归零（个别第三方/静态资源 fetch 可豁免，注释说明）；tsc 零错误。
-
-## 3. 之后：W6 — 卫生（预计半天）
-
-- 删 `src/` 内的 `.bak/.backup` 文件（如 `KitMatchingResultsScreen.tsx.backup`、`useModelMode.ts.bak`）和混入的 md 文档（移到 `docs/history/`）。
+- 删 `src/` 内的 `.bak/.backup` 文件（`src/lib/api.ts.bak`、`src/lib/optimizedLocalAI.ts.bak`、`KitMatchingResultsScreen.tsx.backup`、`useModelMode.ts.bak` 等，W5 排查中确认存在）和混入的 md 文档（移到 `docs/history/`）。
 - 26 个根目录 `start_*.sh` 归并为 `scripts/` 下 3–4 个带参数入口。
 - `.gitignore` 补 `*.log`、测试图片等（84 个二进制/日志文件被 git 跟踪，`git rm --cached` 出库）。
+- **顺带处理**：三个未挂载路由的死文件（`InspectionScreen.tsx`/`ResultsScreen.tsx`/`ProductionBatchScreen.tsx`，见 1.1）——确认真的无引用后物理删除，或者如果只是"暂时下线"就保留但加注释说明。
+- **B2 bug**（见 1.1）适合在这里一并处理或另开小任务：`LiveInspectionScreen.tsx` 的临时文件夹保存功能长期 404。
+
+## 3. 之后（W7+）
 
 ## 4. 再之后（按行动文档顺序）
 
@@ -84,10 +96,13 @@ cd android-app && bash scripts/build-apk.sh debug
 - 远程仓库：`https://github.com/8778fkv694-hub/AI-detection-Django`，分支 `main`。
 - 大文件（`.pt/.onnx`）不进 git，手动同步（见根目录 AGENTS.md）。
 - Jetson 生产环境经 `ssh jetson`，部署走 git pull（AGENTS.md 第一部分）。
+- 本地起前端只用 `npm run dev:client`（纯 vite，:3303）；`npm run dev`/`dev:full` 会额外拉起 nodemon（Express，抢 3303 端口）和 rpa-server，如果只是冒烟 UI 不需要它们。
 
 ## 6. 已知风险与坑（接手必读）
 
-1. **运行时回归未做**（见第 1 节验证状态）——W1/W2 收口改动面大，冒烟是第一优先级。
+1. **W5 运行时回归已做**（2026-07-05）：`npx tsc --noEmit` 全程零错误；vite dev 冒烟 10 个路由（含无后端时的 6 页 + 起 Django 后重跑 `/live-inspection`/`/safety-equipment`/`/ocr` 三个改动最重的页面）全部零非网络类 console 错误。W5.3/W5.4 的检测循环并入是本轮风险最高的改动，已重点验证。
 2. `yoloDetectBackend` 内仍保留 WASM 离线拦截分支（`isLocalOfflineMode()` → onnxYoloDetector）——这是 Electron/离线 web 的现行路径，**APK 场景将由 native 分支取代，但在第二梯队 Phase 1 之前不要删它**。
 3. 三套后端（Django / `src/server/api.js` / `android-app/www/nodejs-project`）接口语义有漂移，W8 之前改任何 API 都要三处对照。
 4. 上次失败教训（`docs/FAILED_CHANGES_2026-05-20.md`）：22 文件大爆炸。红线：单 commit ≤ 8 文件。
+5. **B2 新发现**（见 1.1）：`LiveInspectionScreen.tsx` 的临时文件夹保存长期 404，未修，需要人工决策方案。
+6. W5.3/W5.4 过程中发现 W1 当初的"收口"并不完整——`useRealtimeDetectionLoop.ts`/`usePPEDetection.ts` 两个平行的检测循环实现被漏掉了。**教训**：以后做"收口"类任务，光 grep 关键函数名不够，还要 grep 裸 fetch + 裸 import 交叉核实，独立平行实现容易被具体调用点搜索漏掉。
