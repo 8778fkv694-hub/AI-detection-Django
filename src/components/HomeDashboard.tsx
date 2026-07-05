@@ -375,7 +375,7 @@ const HomeDashboard: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* 服务状态 */}
-      <div className="rounded-lg border bg-card p-4">
+      <div className="rounded-xl border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Network className="h-4 w-4 text-muted-foreground" />
@@ -387,15 +387,15 @@ const HomeDashboard: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+              className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
                 autoRefresh
                   ? 'border-green-500/50 bg-green-500/10 text-green-400'
-                  : 'border-slate-600 text-slate-400 hover:text-slate-300'
+                  : 'border-slate-700 text-slate-400 hover:text-slate-300'
               }`}
             >
               {autoRefresh ? '自动30s' : '手动'}
             </button>
-            <button onClick={checkAll} className="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-300 transition-colors">
+            <button onClick={checkAll} className="text-[11px] px-2 py-0.5 rounded border border-slate-700 text-slate-400 hover:text-slate-300 transition-colors">
               <RefreshCw className="h-3 w-3" />
             </button>
           </div>
@@ -404,28 +404,28 @@ const HomeDashboard: React.FC = () => {
           {services.map(s => (
             <div
               key={s.name}
-              className={`rounded-md border px-2.5 py-2 transition-colors ${
+              className={`rounded-lg border px-2.5 py-2 transition-all duration-300 ${
                 s.loading || testingService === s.name
                   ? 'border-yellow-500/20 bg-yellow-500/5'
                   : s.ok
-                    ? 'border-green-500/20 bg-green-500/5'
-                    : 'border-red-500/20 bg-red-500/5'
+                    ? 'border-green-500/15 bg-green-500/5 hover:bg-green-500/10'
+                    : 'border-red-500/15 bg-red-500/5 hover:bg-red-500/10'
               }`}
             >
               <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-medium truncate">{s.name}</span>
+                <span className="text-xs font-semibold truncate text-foreground/90">{s.name}</span>
                 {statusIcon(s)}
               </div>
-              <div className="flex items-center gap-1 mt-0.5 min-h-[18px]">
+              <div className="flex items-center justify-between gap-1.5 mt-1 min-h-[20px]">
                 {s.detail && !s.loading && testingService !== s.name ? (
-                  <p className="text-[11px] text-muted-foreground truncate flex-1">{s.detail}</p>
+                  <p className="text-[10px] text-muted-foreground truncate max-w-[70%]" title={s.detail}>{s.detail}</p>
                 ) : (
                   <span className="flex-1" />
                 )}
                 {s.testAction && testingService !== s.name && (
                   <button
                     onClick={() => handleTestService(s)}
-                    className="text-[10px] px-1.5 py-0 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400 transition-colors shrink-0"
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/40 text-slate-400 hover:text-accent hover:border-accent/40 hover:bg-accent/5 transition-all duration-200 shrink-0 font-medium"
                   >
                     测试
                   </button>
@@ -466,7 +466,7 @@ const HomeDashboard: React.FC = () => {
       </div>
 
       {/* 合格率 + 分类统计 */}
-      <div className="rounded-lg border bg-card p-4 space-y-3">
+      <div className="rounded-xl border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <BarChart3 className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">合格率</span>
@@ -512,10 +512,10 @@ const StatCard: React.FC<StatCardProps> = ({ icon, label, value, subText, color 
     red: 'border-red-500/30 bg-red-500/5 text-red-400',
   };
   return (
-    <div className={`rounded-lg border p-3 ${colorMap[color]}`}>
+    <div className={`rounded-xl border p-3 ${colorMap[color]}`}>
       <div className="flex items-center gap-1.5 mb-1">
         {icon}
-        <span className="text-xs font-medium opacity-80">{label}</span>
+        <span className="text-xs font-semibold opacity-85">{label}</span>
       </div>
       <div className="flex items-baseline gap-1">
         <span className="text-xl font-bold">{value}</span>
@@ -532,7 +532,7 @@ interface MiniStatProps {
 }
 
 const MiniStat: React.FC<MiniStatProps> = ({ icon, label, value }) => (
-  <div className="flex items-center gap-2 rounded-md border border-slate-700/50 bg-slate-800/30 px-2.5 py-1.5">
+  <div className="flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/30 px-2.5 py-1.5">
     <div className="text-muted-foreground">{icon}</div>
     <div className="flex flex-col">
       <span className="text-xs text-muted-foreground">{label}</span>

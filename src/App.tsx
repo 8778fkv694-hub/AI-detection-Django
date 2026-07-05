@@ -36,28 +36,37 @@ import HelpScreen from '@/screens/HelpScreen';
 import StreamSettingsScreen from '@/screens/StreamSettingsScreen';
 // import OCRTestScreen from '@/screens/OCRTestScreen';
 
-const navItems = [
-  { name: '首页设置', href: '/', icon: Home, allowNewWindow: false },
-  { name: '模型管理', href: '/models', icon: Cpu, allowNewWindow: false },
-  { name: '本地LLM（测试）', href: '/config', icon: Settings, allowNewWindow: false },
-  { name: '模版页面', href: '/standards', icon: Layers, allowNewWindow: false },
-  { name: '异常看板', href: '/anomalies', icon: AlertTriangle, allowNewWindow: false },
-  { name: '流媒体管理', href: '/streams', icon: Video, allowNewWindow: false },
-  { name: 'OCR融合模式', href: '/ocr', icon: FileText, allowNewWindow: true },
-  { name: 'OCR检测结果', href: '/ocr-results', icon: FileText, allowNewWindow: false },
-  { name: '实时检测', href: '/live-inspection', icon: Camera, allowNewWindow: true },
-  { name: '实时检测结果', href: '/live-inspection-results', icon: Eye, allowNewWindow: false },
-  // { name: '单件检测', href: '/inspection', icon: Zap },
-  { name: 'PPE检测', href: '/safety-equipment', icon: Shield, allowNewWindow: true },
-  { name: 'PPE检测结果', href: '/cleanroom-results', icon: BarChart2, allowNewWindow: false },
-  // { name: '齐套化检测', href: '/kit-matching', icon: Shield, allowNewWindow: true },
-  // { name: '齐套化检测测试版', href: '/kit-matching-test', icon: Shield, allowNewWindow: true }, // 已隐藏，移至备份文件夹
-  // { name: '齐套化检测结果', href: '/kit-matching-results', icon: BarChart2, allowNewWindow: false },
-  // { name: 'OCR防呆检测', href: '/ocr-error-prevention', icon: FileText, allowNewWindow: true }, // 已隐藏，移至备份文件夹
-  // { name: 'OCR防呆检测结果', href: '/ocr-error-prevention-results', icon: FileText, allowNewWindow: false }, // 已隐藏，移至备份文件夹
-  { name: '二维码检出能力评估', href: '/wechat-qr-guided', icon: FileText, allowNewWindow: true },
-  { name: 'OCR检出能力评估', href: '/ocr-guided', icon: FileText, allowNewWindow: true },
-  { name: '帮助指南', href: '/help', icon: HelpCircle, allowNewWindow: false },
+const navGroups = [
+  {
+    title: 'AI 控制中心',
+    items: [
+      { name: '首页看板', href: '/', icon: Home, allowNewWindow: false },
+      { name: '实时检测', href: '/live-inspection', icon: Camera, allowNewWindow: true },
+      { name: 'PPE检测', href: '/safety-equipment', icon: Shield, allowNewWindow: true },
+      { name: 'OCR融合模式', href: '/ocr', icon: FileText, allowNewWindow: true },
+    ]
+  },
+  {
+    title: '检测数据中心',
+    items: [
+      { name: '实时检测历史', href: '/live-inspection-results', icon: Eye, allowNewWindow: false },
+      { name: 'PPE检测历史', href: '/cleanroom-results', icon: BarChart2, allowNewWindow: false },
+      { name: 'OCR检测历史', href: '/ocr-results', icon: FileText, allowNewWindow: false },
+      { name: '异常看板', href: '/anomalies', icon: AlertTriangle, allowNewWindow: false },
+    ]
+  },
+  {
+    title: '配置与评估工具',
+    items: [
+      { name: '流媒体管理', href: '/streams', icon: Video, allowNewWindow: false },
+      { name: '模型池管理', href: '/models', icon: Cpu, allowNewWindow: false },
+      { name: '模版标准管理', href: '/standards', icon: Layers, allowNewWindow: false },
+      { name: '本地LLM评估', href: '/config', icon: Settings, allowNewWindow: false },
+      { name: '二维码能力评估', href: '/wechat-qr-guided', icon: FileText, allowNewWindow: true },
+      { name: 'OCR能力评估', href: '/ocr-guided', icon: FileText, allowNewWindow: true },
+      { name: '帮助指南', href: '/help', icon: HelpCircle, allowNewWindow: false },
+    ]
+  }
 ];
 
 const App: React.FC = () => {
@@ -97,7 +106,7 @@ const App: React.FC = () => {
   };
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${isActive
+    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${isActive
       ? 'bg-accent/10 text-accent shadow-[0_0_15px_-3px] shadow-accent/40'
       : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
     }`;
@@ -115,33 +124,42 @@ const App: React.FC = () => {
             "h-full transition-opacity duration-300 flex flex-col",
             sidebarVisible ? "opacity-100" : "opacity-0"
           )}>
-            <div className="mb-10 pl-2 pt-4 flex-shrink-0">
+            <div className="mb-6 pl-2 pt-4 flex-shrink-0">
               <Logo />
             </div>
-            <div className="flex flex-col gap-2 px-4 flex-1 overflow-y-auto pb-4">
-              {navItems.map(item => (
-                <div key={item.name} className="group relative">
-                  <NavLink to={item.href} className={navLinkClass} end={item.href === '/'}>
-                    <item.icon className="h-5 w-5" />
-                    <span>{item.name}</span>
-                  </NavLink>
+            <div className="flex flex-col gap-5 px-4 flex-1 overflow-y-auto pb-4">
+              {navGroups.map(group => (
+                <div key={group.title} className="flex flex-col gap-1.5">
+                  <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/50 select-none">
+                    {group.title}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {group.items.map(item => (
+                      <div key={item.name} className="group relative">
+                        <NavLink to={item.href} className={navLinkClass} end={item.href === '/'}>
+                          <item.icon className="h-4 w-4 shrink-0 text-muted-foreground/75 group-hover:text-foreground transition-colors" />
+                          <span className="truncate">{item.name}</span>
+                        </NavLink>
 
-                  {/* 新窗口按钮 */}
-                  {item.allowNewWindow && (
-                    <Button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openInNewWindow(item.href, item.name);
-                      }}
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title={`在新窗口打开 ${item.name}`}
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                    </Button>
-                  )}
+                        {/* 新窗口按钮 */}
+                        {item.allowNewWindow && (
+                          <Button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openInNewWindow(item.href, item.name);
+                            }}
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title={`在新窗口打开 ${item.name}`}
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>

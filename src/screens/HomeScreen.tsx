@@ -84,41 +84,44 @@ const HomeScreen: React.FC = () => {
         {lastResult && recentEntry ? (
           <button
             onClick={() => handleOpen(recentEntry.href, recentEntry.openNewWindow)}
-            className="w-full flex items-center gap-4 rounded-lg border border-slate-700/50 bg-slate-800/30 p-4 text-left transition-colors hover:bg-slate-700/40 hover:border-slate-600/60"
+            className="w-full flex items-center gap-4 rounded-xl border border-slate-700/50 bg-slate-800/20 p-4 text-left transition-all duration-300 hover:bg-slate-800/40 hover:border-accent/30 hover:shadow-lg hover:shadow-accent/5"
           >
             <div className={`rounded-full p-2.5 ${
               lastResult.detectionType === 'cleanroom_ppe' ? 'bg-green-500/10' :
               lastResult.detectionType?.startsWith('ocr') ? 'bg-purple-500/10' : 'bg-blue-500/10'
             }`}>
-              <recentEntry.icon className="h-5 w-5 text-muted-foreground" />
+              <recentEntry.icon className={`h-5 w-5 ${
+                lastResult.detectionType === 'cleanroom_ppe' ? 'text-green-400' :
+                lastResult.detectionType?.startsWith('ocr') ? 'text-purple-400' : 'text-blue-400'
+              }`} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-base font-medium">{recentEntry.label}</span>
-                <span className={`text-sm font-semibold ${QUALITY_COLOR[lastResult.overallQuality] || 'text-slate-400'}`}>
+                <span className="text-base font-semibold">{recentEntry.label}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 font-bold ${QUALITY_COLOR[lastResult.overallQuality] || 'text-slate-400'}`}>
                   {lastResult.overallQuality}
                   {lastResult.score !== undefined && lastResult.score > 0 ? ` ${lastResult.score}分` : ''}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground mt-0.5 truncate">
+              <p className="text-sm text-muted-foreground mt-1 truncate">
                 {lastResult.reason ? lastResult.reason.slice(0, 80) : '—'}
               </p>
-              <div className="flex items-center gap-3 mt-1">
-                <span className="text-xs text-muted-foreground/60">{formatTime(lastResult.timestamp)}</span>
+              <div className="flex items-center gap-3 mt-1.5">
+                <span className="text-xs text-muted-foreground/50">{formatTime(lastResult.timestamp)}</span>
                 {(lastResult.processStageCode || lastResult.cameraId) && (
-                  <span className="text-xs text-muted-foreground/60 truncate">
+                  <span className="text-xs text-muted-foreground/50 truncate">
                     {lastResult.processStageCode || lastResult.cameraId}
                   </span>
                 )}
               </div>
             </div>
-            <ExternalLink className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+            <ExternalLink className="h-4 w-4 text-muted-foreground/45 shrink-0" />
           </button>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-600 p-6 text-center">
-            <Clock className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+          <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center bg-slate-800/5">
+            <Clock className="h-8 w-8 text-muted-foreground/60 mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">暂无检测记录，选择检测类型开始</p>
-            <div className="flex items-center justify-center gap-3 mt-3">
+            <div className="flex items-center justify-center gap-3 mt-4">
               {[
                 { label: '实时检测', icon: Camera, href: '/live-inspection', color: 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30 text-blue-400' },
                 { label: 'PPE检测', icon: Shield, href: '/safety-equipment', color: 'bg-green-500/10 hover:bg-green-500/20 border-green-500/30 text-green-400' },
@@ -127,7 +130,7 @@ const HomeScreen: React.FC = () => {
                 <button
                   key={m.label}
                   onClick={() => handleOpen(m.href, true)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${m.color}`}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold transition-all duration-300 hover:scale-[1.02] ${m.color}`}
                 >
                   <m.icon className="h-4 w-4" />
                   {m.label}

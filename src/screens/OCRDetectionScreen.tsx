@@ -102,6 +102,7 @@ const OCRDetectionScreen: React.FC = () => {
     selectedDeviceId, setSelectedDeviceId,
     videoInfo, setVideoInfo,
     currentSharpness, setCurrentSharpness,
+    bestSharpness, setBestSharpness,
     windowId,
     expandedTargetGroups, setExpandedTargetGroups,
     isDetectionStatusExpanded, setIsDetectionStatusExpanded,
@@ -913,6 +914,7 @@ const OCRDetectionScreen: React.FC = () => {
     setImagePreview('');
     resetPreprocessingState();
     setCurrentSharpness(0);
+    setBestSharpness(0);
     setIsRealtimeActive(false);
     setDetectionStats({
       totalDetections: 0,
@@ -965,7 +967,7 @@ const OCRDetectionScreen: React.FC = () => {
     detectedElements, elementDetectionStartTime, detectionStats, nonGridTargets,
     streamId: backendStreamId ?? undefined,
     setIsDetecting, setDetectedElements, setElementDetectionStartTime,
-    setDetectionStats, setCurrentSharpness, setIsInPostDetectionDelay,
+    setDetectionStats, setCurrentSharpness, setBestSharpness, setIsInPostDetectionDelay,
     setWorkflowState: setWorkflowState as any, setSelectedImage, setImagePreview, setIsWaitingForSpace,
     setMatchStatus: setMatchStatus as any, setWorkflowResult, setAiAnalysisResult, setFinalResult,
   });
@@ -1633,7 +1635,7 @@ const OCRDetectionScreen: React.FC = () => {
           workflowState={workflowState as any} matchStatus={matchStatus as any} finalResult={finalResult} isAnalyzing={isAnalyzing} isWaitingForSpace={isWaitingForSpace}
           ocrResult={ocrResult} aiAnalysisResult={aiAnalysisResult as any} selectedTargets={selectedTargets}
           detectionConfidence={detectionConfidence} keywordConfigs={keywordConfigs} detectionHistory={detectionHistory}
-          imagePreview={imagePreview} currentSharpness={currentSharpness} imageSaveMode={imageSaveMode}
+          imagePreview={imagePreview} currentSharpness={currentSharpness} bestSharpness={bestSharpness} imageSaveMode={imageSaveMode}
           traceContext={lastSavedTraceContext ? { ...traceContext, ...{
             fixtureQrCandidateCount: lastSavedTraceContext.fixtureQrCandidateCount,
             fixtureQrCandidates: lastSavedTraceContext.fixtureQrCandidates,

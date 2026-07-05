@@ -41,6 +41,6 @@
         @apply bg-background text-foreground antialiased;
         font-feature-settings: "rlig" 1, "calt" 1;
       }
-      html { font-size: 17px; }
+      html { font-size: 16px; }
     }
   

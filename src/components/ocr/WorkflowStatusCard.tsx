@@ -39,6 +39,7 @@ export interface WorkflowStatusCardProps {
   imageSaveMode?: 'full' | 'roi';
   /** 当前清晰度 */
   currentSharpness?: number;
+  bestSharpness?: number;
 
   /** 设置等待空格状态 */
   setIsWaitingForSpace: (waiting: boolean) => void;
@@ -89,6 +90,7 @@ export const WorkflowStatusCard: React.FC<WorkflowStatusCardProps> = ({
   getTargetChineseName,
   imageSaveMode = 'roi',
   currentSharpness = 0,
+  bestSharpness = 0,
 }) => {
   const getWorkflowStatusMeta = () => {
     if (workflowState === 'processing') {
@@ -183,9 +185,16 @@ export const WorkflowStatusCard: React.FC<WorkflowStatusCardProps> = ({
               </div>
               <div className="mt-1 text-xs text-slate-400">
                 {workflowState === 'searching_best_frame' && currentSharpness > 0 ? (
-                  <span className="text-blue-400">
-                    当前清晰度: {currentSharpness.toFixed(1)}
-                  </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-blue-400 font-medium">
+                      当前清晰度: {currentSharpness.toFixed(1)}
+                    </span>
+                    {bestSharpness > 0 && (
+                      <span className="text-emerald-400 font-semibold animate-pulse">
+                        最佳清晰度: {bestSharpness.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <span>阈值: {(detectionConfidence * 100).toFixed(0)}%</span>
                 )}

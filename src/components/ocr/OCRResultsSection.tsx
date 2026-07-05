@@ -32,6 +32,7 @@ interface OCRResultsSectionProps {
   detectionHistory: any[];
   imagePreview: string | null;
   currentSharpness: number;
+  bestSharpness: number;
   imageSaveMode: 'full' | 'roi';
   traceContext?: {
     processStageCode?: string;
@@ -355,6 +356,7 @@ export const OCRResultsSection: React.FC<OCRResultsSectionProps> = (props) => {
           getConfidenceColor={props.getConfidenceColor}
           imageSaveMode={props.imageSaveMode}
           currentSharpness={props.currentSharpness}
+          bestSharpness={props.bestSharpness}
         />
       )}
 
