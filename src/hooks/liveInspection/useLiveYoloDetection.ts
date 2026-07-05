@@ -18,6 +18,7 @@ import {
   fetchStreamSnapshot,
   getLocalEngineInfo,
   isOfflineEngineActive,
+  isNativeEngineAvailable,
   startStreamDetectionLoop,
   stopStreamDetectionLoop,
 } from '@/services/detect';
@@ -141,14 +142,14 @@ export const useLiveYoloDetection = ({
 
   // 当移动端/桌面端离线激活模型变化时，自动切换本地推理模型（native/WASM 由抽象层路由）
   useEffect(() => {
-    const isOfflineClient = (window as any).__IS_MOBILE_APP__ || (window as any).__IS_ELECTRON__;
+    const isOfflineClient = (window as any).__IS_MOBILE_APP__ || (window as any).__IS_ELECTRON__ || isNativeEngineAvailable();
     if (isOfflineClient && activeModelId) {
       console.log(`[ONNX] 客户端激活模型变化: ${activeModelId}，正在切换本地推理模型...`);
       ensureLocalModel(activeModelId).then((success) => {
         const engineInfo = getLocalEngineInfo();
         if (success) {
           console.log(`[ONNX] 本地模型加载成功: ${engineInfo.modelPath} (引擎: ${engineInfo.engine})`);
-          toast.success(`本地模型切换为: ${activeModelId === 'yolov8n' ? 'YOLOv8N轻量模型' : 'PPE检测模型'}`);
+          toast.success(`本地模型切换为: ${activeModelId === 'yolov8n' ? 'YOLOv8N轻量模型' : '工业质检模型'}`);
         } else {
           console.error(`[ONNX] 本地模型加载失败: ${engineInfo.modelPath}`);
           toast.error('本地推理模型切换失败');
@@ -182,7 +183,7 @@ export const useLiveYoloDetection = ({
     }
 
     // 移动端/工控机环境下，主动引入冷却时间进行背压节流，降低 JPEG 编码压垮主线程的风险，保证 WebView 画面渲染流畅度
-    const isMobile = (window as any).__IS_MOBILE_APP__;
+    const isMobile = (window as any).__IS_MOBILE_APP__ || isNativeEngineAvailable();
     const isElectron = (window as any).__IS_ELECTRON__;
     if (isMobile || isElectron) {
       const now = Date.now();

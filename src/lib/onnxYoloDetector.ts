@@ -23,6 +23,13 @@ export const PPE_CLASS_NAMES = [
   'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'
 ];
 
+// 工业 14 个类别 (用于 best.onnx)
+export const INDUSTRIAL_CLASSES = [
+  'filter', 'name_MCF', 'nsplogo', 'qrcode', 'anti_counterfeit_label',
+  'service_label', 'nameplate_label', 'water_efficiency_label', 'barcode_label',
+  'fotile_logo', 'water_outlet', 'Prompt_label', 'yellow_point', 'glod_logo'
+];
+
 // COCO 80 个类别 (用于 YOLOv8n)
 export const COCO_CLASSES = [
   'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
@@ -48,12 +55,12 @@ class OnnxYoloDetector {
 
   constructor(config: Partial<OnnxYoloConfig> = {}) {
     this.config = {
-      modelPath: '/models/ppe.onnx',
-      inputSize: 640,
+      modelPath: '/models/best.onnx',
+      inputSize: 320,
       confidenceThreshold: 0.5,
       nmsThreshold: 0.45,
       maxDetections: 100,
-      classNames: PPE_CLASS_NAMES,
+      classNames: INDUSTRIAL_CLASSES,
       ...config
     };
   }
@@ -66,10 +73,10 @@ class OnnxYoloDetector {
         classNames: COCO_CLASSES
       };
     } else {
-      // 默认使用 ppe.onnx (167MB Custom Model)
+      // 默认使用 best.onnx 工业检测模型
       return {
-        modelPath: '/models/ppe.onnx',
-        classNames: PPE_CLASS_NAMES
+        modelPath: '/models/best.onnx',
+        classNames: INDUSTRIAL_CLASSES
       };
     }
   }

@@ -29,8 +29,8 @@ interface WorkerConfig {
 
 let session: ort.InferenceSession | null = null;
 let config: WorkerConfig = {
-  modelPath: '/models/ppe.onnx',
-  inputSize: 640,
+  modelPath: '/models/best.onnx',
+  inputSize: 320,
   confidenceThreshold: 0.5,
   nmsThreshold: 0.45,
   classNames: DEFAULT_CLASS_NAMES,
