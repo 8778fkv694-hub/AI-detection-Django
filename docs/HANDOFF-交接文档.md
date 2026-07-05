@@ -32,12 +32,19 @@
 
 **冒烟中修复的一处行为差异**：`fetchStreamDetections` 在轮询响应非 200 时，旧内联实现是"跳过本帧、保留上次性能指标"，W1 版本会把 FPS/耗时闪成空——已改为 throw 交由调用方 catch 跳过，恢复旧语义（commit 见下）。
 
-**⚠️ 冒烟中发现的存量 bug（B1，与本次重构无关，待修）**：
-`yolo8_general` 模型 ID 被后端映射到 `models/yolo10x.pt`，该权重文件**零检出**——同一张真实照片 `models/yolov8n.pt` 检出 2 目标而 `yolo10x.pt` 检出 0（裸调 ultralytics 复现，排除管线因素）。即：**web 端"通用模型"检测长期空转**。修复方向：把 `backend/inspection` 中 `yolo8_general` 的权重路径改指 `models/yolov8n.pt`（或换一个验证过的通用权重），并顺手核查 `filter_core_detection`/`waterprifer_detection` 映射的权重是否同样有问题（仓库里存在 `best.pt.wrong_model_backup`，历史上发生过模型错换）。建议作为 **W5 之前的第一个任务**，半小时可完成。
+**✅ B1（存量 bug）已修复（2026-07-05，commit 见下）**：
+
+- **诊断修正**：最初怀疑"`yolo10x.pt` 权重损坏/零检出"，深入排查后结论不同——`models/yolo10x.pt` 本体健康，但它**根本不是通用 COCO 模型**。裸读 checkpoint 显示 `nc=17`，17 个类别（person/face/helmet/gloves/safety-vest 等）与配置中另一条目 `yolo8x`（标注"PPE检测"、17类）**完全同集合**，`train_args` 指向 `safe_human.yaml`。用含人物的图（`test_hik_101_normal.jpg` 等）验证，该文件对 `person` 类正常检出（置信度 0.91）。结论：这是历史模型文件错放——`yolo8_general` 配置槽的 `file` 字段被错误指向了一个 PPE/人体安全模型的权重文件，而其 `name`/`description`/`classes` 却声明"通用检测支持80类物体"，两者完全对不上。
+- **修复**：`backend/inspection/model_config.py` 第 85 行 `yolo8_general.file` 从 `yolo10x.pt` 改为 `yolov8n.pt`（已验证的 80 类 COCO 权重，仓库已有）。未删除/未改动 `yolo10x.pt` 文件本身，避免制造新的错配。
+- **验证**：HTTP 端到端重测——`IMG_1677.JPG` 从 0 detections 变为检出 `laptop`；`test_hik_101_normal.jpg` 检出 `person`(0.91)、`boat`(0.38)。`map_to_ppe()` 的 fallback 逻辑（未匹配则原样返回标签，不抛异常）确认改动无副作用。
+- **顺手核查（只读，未改动）**：`filter_core_detection`→`filter.pt`（15类）、`waterprifer_detection`→`waterprifer.pt`（10类），用生产实际加载路径 `YOLO()` 读取，**类别列表与配置声明完全一致，无错配**，无需处理。
+- **遗留**：`models/yolo10x.pt` 现在没有任何配置条目引用它（游离文件，17类PPE模型，可能是 `yolo8x.pt` 的另一版本/checkpoint）。是否需要给它建一个独立的 `model_id` 收编，或直接归档删除，留给后续按需决定——不阻塞任何当前任务。
 
 ---
 
 ## 2. 下一个任务：W5 — API 出口收口（预计半天，机械活）
+
+（B1 已在本次修复，不再是前置任务；直接开始 W5 即可）
 
 **现状**（2026-07-04 实测）：检测/OCR 相关 fetch 已被 W1/W2 收口；剩余**裸 fetch 39 处**（screens 20 处 + hooks 19 处，均指未走 `apiFetch`/`directBackendFetch` 的 `fetch(`）。
 

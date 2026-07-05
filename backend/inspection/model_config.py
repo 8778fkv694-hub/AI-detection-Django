@@ -82,7 +82,7 @@ class PPEModelConfig:
             },
             'yolo8_general': {
                 'name': 'YOLO8通用检测模型',
-                'file': 'yolo10x.pt',
+                'file': 'yolov8n.pt',
                 'description': '通用目标检测，支持80类物体',
                 'version': 'v1.0.0',
                 'created_at': '2024-01-15',
