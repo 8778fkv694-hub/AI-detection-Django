@@ -11,7 +11,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-export type FullscreenVerdict = '合格' | '存疑' | '需复检' | '待检测' | '检测中';
+export type FullscreenVerdict = '合格' | '存疑' | '需复检' | '待检测' | '检测中' | '检测中...';
 
 export interface FullscreenVerdictBadgeProps {
   /** 判定结果文案，直接展示 */
@@ -26,6 +26,7 @@ const VERDICT_COLOR: Record<FullscreenVerdict, string> = {
   需复检: 'text-red-400',
   待检测: 'text-slate-400',
   检测中: 'text-slate-400',
+  '检测中...': 'text-slate-400',
 };
 
 export const FullscreenVerdictBadge: React.FC<FullscreenVerdictBadgeProps> = ({

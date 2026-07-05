@@ -6,13 +6,14 @@
  * 使用位置：OCRDetectionScreen
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Video, VideoOff, Play, Square, Pause, Camera, RotateCcw, Cpu, RefreshCw, CameraOff, Maximize, Minimize } from 'lucide-react';
 import { Label } from '@/components/ui/Label';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import ModelSelector from '@/components/ModelSelector';
 import { VideoOverlayIndicators } from '@/components/ocr/VideoOverlayIndicators';
+import { FullscreenVerdictBadge, type FullscreenVerdict } from '@/components/detection/FullscreenVerdictBadge';
 import { useVideoAspect } from '@/hooks/useVideoAspect';
 import type { CameraDevice } from '@/lib/cameraUtils';
 import type { TestResult } from '@/types/ocr';
@@ -133,6 +134,21 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
   const isJpegVirtualStream = isVirtualStream && virtualStreamPlayMode === 'jpg';
   const showVideoElement = isCameraOn && !isJpegVirtualStream;
   const showPreviewCanvas = isCameraOn && isJpegVirtualStream;
+
+  // A1.2: 全屏判定文案，逻辑原样从内联 JSX 上移，行为不变
+  const fullscreenVerdict: FullscreenVerdict = useMemo(() => {
+    if (fusionModeEnabled && aiAnalysisResult) {
+      const ocrQualified = matchStatus === 'qualified';
+      const llmQualified = aiAnalysisResult.overallQuality === '合格';
+      const barcodeQualified = !ocrResult?.barcode_analysis?.enabled || ocrResult?.barcode_analysis?.overall_match;
+      const finalQualified = ocrQualified && llmQualified && barcodeQualified;
+      return finalQualified ? '合格' : '存疑';
+    }
+    if (workflowState === 'processing' || workflowState === 'capturing') return '检测中...';
+    if (matchStatus === 'qualified') return '合格';
+    if (matchStatus === 'unqualified') return '存疑';
+    return '待检测';
+  }, [fusionModeEnabled, aiAnalysisResult, matchStatus, ocrResult, workflowState]);
 
   return (
     <div className="p-3 sm:p-4 bg-slate-800/50 rounded-lg border border-slate-600">
@@ -315,37 +331,7 @@ export const RealtimeDetectionPanel: React.FC<RealtimeDetectionPanelProps> = ({
         )}
 
         {/* 全屏时显示的右上角状态 */}
-        {isCameraOn && isFullscreen && (
-          <div className="absolute top-4 left-4 z-30 bg-black/70 backdrop-blur-sm px-6 py-4 rounded-lg border border-slate-600/50 shadow-xl">
-            <div className={`text-4xl font-bold ${(() => {
-              if (fusionModeEnabled && aiAnalysisResult) {
-                const ocrQualified = matchStatus === 'qualified';
-                const llmQualified = aiAnalysisResult.overallQuality === '合格';
-                const barcodeQualified = !ocrResult?.barcode_analysis?.enabled || ocrResult?.barcode_analysis?.overall_match;
-                const finalQualified = ocrQualified && llmQualified && barcodeQualified;
-                return finalQualified ? 'text-green-400' : 'text-yellow-400';
-              } else {
-                return matchStatus === 'qualified' ? 'text-green-400' :
-                  matchStatus === 'unqualified' ? 'text-yellow-400' : 'text-slate-400';
-              }
-            })()
-              }`}>
-              {(() => {
-                if (fusionModeEnabled && aiAnalysisResult) {
-                  const ocrQualified = matchStatus === 'qualified';
-                  const llmQualified = aiAnalysisResult.overallQuality === '合格';
-                  const barcodeQualified = !ocrResult?.barcode_analysis?.enabled || ocrResult?.barcode_analysis?.overall_match;
-                  const finalQualified = ocrQualified && llmQualified && barcodeQualified;
-                  return finalQualified ? '合格' : '存疑';
-                } else {
-                  return workflowState === 'processing' || workflowState === 'capturing' ? '检测中...' :
-                    matchStatus === 'qualified' ? '合格' :
-                      matchStatus === 'unqualified' ? '存疑' : '待检测';
-                }
-              })()}
-            </div>
-          </div>
-        )}
+        {isCameraOn && isFullscreen && <FullscreenVerdictBadge verdict={fullscreenVerdict} />}
 
         {/* 全屏按钮 */}
         {isCameraOn && (
