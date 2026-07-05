@@ -198,6 +198,18 @@ else
   echo "[build-apk] ✅ 已同步 $ONNX_COUNT 个 ONNX 模型"
 fi
 
+# ── 7d. 复制 capacitor.js 保证 5001 端口重定向后正常识别原生桥 ──
+echo "[build-apk] 步骤 7d/8：复制 capacitor.js 到 nodejs-project 托管的前端目录..."
+CAP_JS_SRC="android/app/src/main/assets/public/capacitor.js"
+if [ -f "$CAP_JS_SRC" ]; then
+  cp "$CAP_JS_SRC" "www/nodejs-project/dist/capacitor.js"
+  mkdir -p "android/app/src/main/assets/public/nodejs-project/dist"
+  cp "$CAP_JS_SRC" "android/app/src/main/assets/public/nodejs-project/dist/capacitor.js"
+  echo "[build-apk]   ✅ capacitor.js 已复制到 nodejs-project/dist 托管目录"
+else
+  echo "[build-apk]   ⚠️ 未在 assets 中找到 capacitor.js"
+fi
+
 # ── 8. 执行编译打包 APK ──────────────────────────────
 mkdir -p dist
 

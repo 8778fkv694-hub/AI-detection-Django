@@ -286,4 +286,5 @@ CameraX/WebView 拿到的帧方向随设备旋转变化，前置摄像头还有�
 
 | 日期 | 机型 | 模型 | imgsz | 量化 | 线程 | p50 | p95 | 结论 |
 |---|---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |  |  |
+| 2026-07-05 | Xiaomi Device | yolov8n.onnx | 320 | FP32 | 4 | 37ms | 66ms | p50 远低于 200ms，无需换 NCNN 引擎 |
+| 2026-07-05 | Xiaomi Device | best.onnx | 320 | FP32 | 4 | 30ms | 39ms | opset=12，性能表现极佳，满足 Phase 1 条件 |
