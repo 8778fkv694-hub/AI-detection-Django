@@ -63,9 +63,20 @@ export function RecipeWorkflowEditor({
     updateCoords();
     window.addEventListener('resize', updateCoords);
     const timer = setTimeout(updateCoords, 300);
+
+    // 侧边栏收纳/详情面板折叠会引发容器尺寸变化但不触发 window resize,
+    // 用 ResizeObserver 监听 SVG 容器与外层 grid 的尺寸变化以重新测绘坐标。
+    const roTargets = [svgCanvasRef.current, canvasRef.current].filter(Boolean) as HTMLElement[];
+    let ro: ResizeObserver | null = null;
+    if (roTargets.length && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => updateCoords());
+      roTargets.forEach((t) => ro!.observe(t));
+    }
+
     return () => {
       window.removeEventListener('resize', updateCoords);
       clearTimeout(timer);
+      ro?.disconnect();
     };
   }, [updateCoords, form.fixtureEnabled, form.requiredDeviceTypes, activeNode]);
 
