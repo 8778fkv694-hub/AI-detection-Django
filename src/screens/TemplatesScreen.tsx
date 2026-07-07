@@ -7,6 +7,7 @@ import {
   fetchRecipes, createRecipe, updateRecipe, deleteRecipe,
   type StageRecipe,
 } from '@/lib/stageRecipeApi';
+import { RecipeWorkflowEditor } from '@/components/ocr/RecipeWorkflowEditor';
 import {
   getAvailableModels, getModelConfig, type ModelConfig
 } from '@/lib/api';
@@ -78,7 +79,7 @@ const EMPTY_RECIPE: Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'> = {
   requiredDeviceTypes: [],
 };
 
-type RecipeFormData = Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'>;
+export type RecipeFormData = Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'>;
 
 function RecipeFormField({
   label,
@@ -136,6 +137,7 @@ function RecipeForm({
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<RecipeFormData>(initial);
+  const [isWorkflowMode, setIsWorkflowMode] = useState(true);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [currentModelConfig, setCurrentModelConfig] = useState<ModelConfig | null>(null);
 
@@ -197,7 +199,88 @@ function RecipeForm({
 
   return (
     <div className="space-y-5">
-      {/* 基本信息 */}
+      {/* 视图模式切换 */}
+      <div className="flex items-center justify-between border-b border-border/30 pb-3">
+        <div className="flex flex-col">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">配方设计视图</h4>
+          <p className="text-[10px] text-muted-foreground font-normal">切换工作流以图形化方式搭建管线，或使用表单查看全量配置</p>
+        </div>
+        <div className="flex bg-slate-900 border border-border/40 p-1 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setIsWorkflowMode(false)}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              !isWorkflowMode 
+                ? 'bg-slate-850 text-foreground shadow-sm' 
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            📋 传统表单
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsWorkflowMode(true)}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              isWorkflowMode 
+                ? 'bg-accent/20 text-accent shadow-sm' 
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            🌿 可视化工作流 (Dify)
+          </button>
+        </div>
+      </div>
+
+      {isWorkflowMode ? (
+        <div className="space-y-4">
+          {/* 基本信息快速预览区 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-900/40 border border-border/30 p-4 rounded-xl">
+            <div>
+              <label className="block text-[11px] text-muted-foreground mb-1">配方名称 *</label>
+              <input
+                value={form.name}
+                onChange={e => set('name', e.target.value)}
+                className="w-full rounded border border-border/50 bg-slate-850 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-muted-foreground mb-1">描述</label>
+              <input
+                value={form.description}
+                onChange={e => set('description', e.target.value)}
+                placeholder="添加描述..."
+                className="w-full rounded border border-border/50 bg-slate-850 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+              />
+            </div>
+            <div className="flex gap-4 items-center pl-2 pt-5">
+              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none">
+                <input type="checkbox" checked={form.isDefault} onChange={e => set('isDefault', e.target.checked)} className="h-3.5 w-3.5 accent-accent" />
+                默认配方
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none">
+                <input type="checkbox" checked={form.isActive} onChange={e => set('isActive', e.target.checked)} className="h-3.5 w-3.5 accent-accent" />
+                启用
+              </label>
+            </div>
+          </div>
+
+          <RecipeWorkflowEditor 
+            form={form} 
+            onChange={setForm}
+            availableModels={availableModels}
+            fixtureTemplates={fixtureTemplates}
+          />
+          
+          <div className="flex gap-3 pt-2 border-t border-border/20">
+            <Button onClick={() => onSave(form)} disabled={!form.name.trim()}>
+              <Check className="h-4 w-4 mr-1.5" />保存配方
+            </Button>
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* 基本信息 */}
       <section>
         <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">基本信息</h4>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -608,13 +691,15 @@ function RecipeForm({
         </div>
       </section>
 
-      {/* Actions */}
-      <div className="flex gap-3 pt-2">
-        <Button onClick={() => onSave(form)} disabled={!form.name.trim()}>
-          <Check className="h-4 w-4 mr-1.5" />保存配方
-        </Button>
-        <Button variant="outline" onClick={onCancel}>取消</Button>
-      </div>
+          {/* Actions */}
+          <div className="flex gap-3 pt-2">
+            <Button onClick={() => onSave(form)} disabled={!form.name.trim()}>
+              <Check className="h-4 w-4 mr-1.5" />保存配方
+            </Button>
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
