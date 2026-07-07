@@ -37,3 +37,18 @@ export type {
   DetectionModeResult,
   DebounceResult,
 } from './useDetectionMode';
+export { useHardwareTrigger } from './useHardwareTrigger';
+export type {
+  HardwareTriggerCallbacks,
+  HardwareTriggerOptions,
+} from './useHardwareTrigger';
+export { useHardwareWatchdog } from './useHardwareWatchdog';
+export type {
+  UseHardwareWatchdogOptions,
+  UseHardwareWatchdogResult,
+} from './useHardwareWatchdog';
+export { useHardwareFallbackKeys } from './useHardwareFallbackKeys';
+export type {
+  HardwareFallbackKeysCallbacks,
+  UseHardwareFallbackKeysOptions,
+} from './useHardwareFallbackKeys';

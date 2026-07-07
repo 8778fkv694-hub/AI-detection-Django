@@ -20,6 +20,7 @@ import { FinalResultBadge } from '@/components/ocr/FinalResultBadge';
 import { DetectionProgressIndicator } from '@/components/ocr/DetectionProgressIndicator';
 import { OCRSettingsSection } from '@/components/ocr/OCRSettingsSection';
 import { OCRResultsSection } from '@/components/ocr/OCRResultsSection';
+import { MiniWorkflowOverlay, type WorkflowPhase } from '@/components/ocr/MiniWorkflowOverlay';
 
 // Hooks
 import { useOCRDetectionStore } from '@/state/ocrDetectionStore';
@@ -48,6 +49,9 @@ import { useModelConfig } from '@/hooks/ocr/useModelConfig';
 import { useProductRecipe } from '@/hooks/ocr/useProductRecipe';
 import { useAlarmControl } from '@/hooks/ocr/useAlarmControl';
 import { useFullscreen } from '@/hooks/ocr/useFullscreen';
+import { useHardwareTrigger } from '@/hooks/ocr/useHardwareTrigger';
+import { useHardwareWatchdog } from '@/hooks/ocr/useHardwareWatchdog';
+import { useHardwareFallbackKeys } from '@/hooks/ocr/useHardwareFallbackKeys';
 
 // Utils
 import { getConfidenceColor, getConfidenceIcon, exportOCRResults } from '@/lib/ocr/ocrUtils';
@@ -993,6 +997,76 @@ const OCRDetectionScreen: React.FC = () => {
     showShortcutModal,
   });
 
+  // 10b. 硬件串口传感器触发 (Arduino 光电开关/按钮)
+  const hardwareTriggerRef = useRef<any>(null);
+  const handleHardwareStopCaptureRef = useRef<() => void>(() => {});
+
+  const handleHardwareStopCapture = useCallback(() => {
+    if (isRealtimeActive) {
+      console.log('[硬件触发] 收到采集结束信号，开始批量评估缓存的目标和文字');
+      void batchManager.triggerBatchProcessing(true);
+    } else if (selectedImage) {
+      console.log('[硬件触发] 手动模式收到采集结束信号，对当前选中图触发 OCR 评估');
+      toast('采集结束：开始评估当前图像', { id: 'hardware-stop-capture-manual', icon: '🧪' });
+      void performOCRTest(selectedImage);
+    } else {
+      console.log('[硬件触发] 采集结束信号到达，但当前无待评估图像，忽略');
+    }
+  }, [isRealtimeActive, selectedImage, batchManager, performOCRTest]);
+
+  useEffect(() => { handleHardwareStopCaptureRef.current = handleHardwareStopCapture; }, [handleHardwareStopCapture]);
+
+  // 看门狗:硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级评估(防卡死)
+  const watchdog = useHardwareWatchdog({
+    armed: workflowState !== 'idle' && workflowState !== 'completed' && !isAnalyzing,
+    timeoutMs: 30_000,
+    debug: true,
+    onTimeout: () => {
+      toast('采集超时:30 秒未收到旋转台就位信号,自动启动评估', { icon: '⏰' });
+      handleHardwareStopCaptureRef.current();
+    },
+  });
+  const { markActivity } = watchdog;
+
+  const handleHardwareTrigger = useCallback(() => {
+    if (!isCameraOn) return;
+    if (workflowState === 'idle' && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    }
+    if (!isRealtimeActive && workflowState === 'idle') {
+      handleManualCapture();
+    }
+    markActivity();
+  }, [isCameraOn, workflowState, isRealtimeActive, handleManualCapture, markActivity]);
+
+  const hardwareTrigger = useHardwareTrigger({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: handleForceReset,
+      onResetWorkflow: handleForceReset,
+      onConfirmUnqualified: handleConfirmUnqualified,
+      onStopCapture: handleHardwareStopCapture,
+    },
+    enabled: true,
+    actionMap: appliedRecipeSnapshot?.deviceActionMap as any,
+  });
+  hardwareTriggerRef.current = hardwareTrigger;
+
+  // 键盘 ⇄ 硬件后备:Arduino 不在线时,PageDown 等键可手动替 STOP_CAPTURE 等信号
+  useHardwareFallbackKeys({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: handleForceReset,
+      onResetWorkflow: handleForceReset,
+      onConfirmUnqualified: handleConfirmUnqualified,
+      onStopCapture: () => {
+        toast('键盘后备:触发 STOP_CAPTURE', { icon: '⌨️' });
+        handleHardwareStopCapture();
+      },
+    },
+    enabled: true,
+  });
+
   useOCRSideEffects({
     detectedElements,
     detectedElementsRef,
@@ -1659,6 +1733,20 @@ const OCRDetectionScreen: React.FC = () => {
       </div>
 
       <ShortcutHelpModal isOpen={showShortcutModal} onClose={() => setShowShortcutModal(false)} />
+
+      {/* 迷你工作流状态浮层（可选呼出，Portal 到视频容器以便原生全屏下亦可见） */}
+      <MiniWorkflowOverlay
+        portalToVideoContainer
+        positionClass="absolute bottom-3 right-3 z-[60]"
+        phase={(() => {
+          if (workflowState === 'processing' || isAnalyzing) return 'detecting';
+          if (workflowState === 'capturing' || workflowState === 'searching_best_frame') return 'capturing';
+          if (finalResult === 'qualified') return 'pass';
+          if (finalResult === 'unqualified') return 'fail';
+          if (isRealtimeActive) return 'triggered';
+          return 'idle';
+        })() as WorkflowPhase}
+      />
     </>
   );
 };

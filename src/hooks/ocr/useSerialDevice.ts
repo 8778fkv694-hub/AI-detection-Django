@@ -15,6 +15,12 @@ export interface SerialDeviceOptions {
   onData?: (data: string) => void;
   /** 连接状态变化回调 */
   onConnectionChange?: (connected: boolean) => void;
+  /** 是否自动尝试连接已授权端口 */
+  autoConnect?: boolean;
+  /** 期望连接设备的 USB Vendor ID (十进制或十六进制) */
+  usbVendorId?: number;
+  /** 期望连接设备的 USB Product ID (十进制或十六进制) */
+  usbProductId?: number;
 }
 
 export interface SerialDeviceState {
@@ -48,7 +54,7 @@ function getPortDescription(info: SerialPortInfo): string {
 }
 
 export const useSerialDevice = (options: SerialDeviceOptions = {}): UseSerialDeviceResult => {
-  const { onData, onConnectionChange } = options;
+  const { onData, onConnectionChange, baudRate = 9600, autoConnect = false, usbVendorId, usbProductId } = options;
 
   const [state, setState] = useState<SerialDeviceState>({
     isConnected: false,
@@ -135,11 +141,13 @@ export const useSerialDevice = (options: SerialDeviceOptions = {}): UseSerialDev
     onConnectionChangeRef.current?.(false);
   }, []);
 
-  const requestAndConnect = useCallback(async (baudRate = 9600): Promise<boolean> => {
+  const requestAndConnect = useCallback(async (customBaudRate?: number): Promise<boolean> => {
     if (!isSupported) {
       setState(prev => ({ ...prev, error: '浏览器不支持 Web Serial API，请使用 Chrome/Edge' }));
       return false;
     }
+
+    const targetBaud = customBaudRate || baudRate;
 
     // 先断开旧连接
     await disconnect();
@@ -150,12 +158,12 @@ export const useSerialDevice = (options: SerialDeviceOptions = {}): UseSerialDev
       const info = port.getInfo();
       const desc = getPortDescription(info);
 
-      await port.open({ baudRate });
+      await port.open({ baudRate: targetBaud });
 
       portRef.current = port;
       setState({
         isConnected: true,
-        portInfo: `${desc} @ ${baudRate}bps`,
+        portInfo: `${desc} @ ${targetBaud}bps`,
         lastData: '',
         error: null,
       });
@@ -174,7 +182,68 @@ export const useSerialDevice = (options: SerialDeviceOptions = {}): UseSerialDev
       setState(prev => ({ ...prev, error: msg }));
       return false;
     }
-  }, [isSupported, disconnect, startReading]);
+  }, [isSupported, baudRate, disconnect, startReading]);
+
+  // 自动连接逻辑：当 autoConnect 启用且当前未连接时尝试接通已授权端口；
+  // deps 包含 state.isConnected，断开后会自动重试，避免"拔/插后必须 reload 页面"。
+  // inFlightRef 防止重试触发期间重复 open 同一端口。
+  const autoConnectInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!autoConnect || !isSupported || state.isConnected) return;
+    if (autoConnectInFlightRef.current) return;
+    autoConnectInFlightRef.current = true;
+
+    let isMounted = true;
+    const tryAutoConnect = async () => {
+      try {
+        const ports = await (navigator as any).serial.getPorts();
+        if (ports.length > 0 && isMounted) {
+          // 筛选匹配的端口
+          let port = ports[0];
+          if (usbVendorId || usbProductId) {
+            const matched = ports.find((p: any) => {
+              const info = p.getInfo();
+              const vMatch = !usbVendorId || info.usbVendorId === usbVendorId;
+              const pMatch = !usbProductId || info.usbProductId === usbProductId;
+              return vMatch && pMatch;
+            });
+            if (matched) port = matched;
+          }
+
+          const info = port.getInfo();
+          const desc = getPortDescription(info);
+          await port.open({ baudRate });
+
+          if (isMounted) {
+            portRef.current = port;
+            setState({
+              isConnected: true,
+              portInfo: `${desc} @ ${baudRate}bps`,
+              lastData: '',
+              error: null,
+            });
+            onConnectionChangeRef.current?.(true);
+            startReading(port);
+          }
+        }
+      } catch (e: any) {
+        console.warn('Auto-connect serial device failed:', e);
+      } finally {
+        autoConnectInFlightRef.current = false;
+      }
+    };
+
+    // 稍微延迟确保组件加载完成
+    const timer = setTimeout(() => {
+      void tryAutoConnect();
+    }, 500);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+      autoConnectInFlightRef.current = false;
+    };
+  }, [autoConnect, isSupported, state.isConnected, baudRate, usbVendorId, usbProductId, startReading]);
 
   // 向串口发送数据
   const sendData = useCallback(async (data: string | Uint8Array): Promise<boolean> => {

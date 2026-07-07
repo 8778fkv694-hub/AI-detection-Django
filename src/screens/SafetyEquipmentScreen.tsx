@@ -12,10 +12,26 @@ import {
   PPEResultsSection,
   PPEShortcutHelpModal,
 } from '@/components/safetyEquipment';
+import { MiniWorkflowOverlay, type WorkflowPhase } from '@/components/ocr/MiniWorkflowOverlay';
 
 const SafetyEquipmentScreen: React.FC = () => {
   const navigate = useNavigate();
   const controller = usePPEScreenController();
+
+  // 推导当前工作流阶段
+  const workflowPhase = (() => {
+    const cameraPanel = controller.control.panelProps.cameraPanel;
+    const latestVerdict = cameraPanel.latestVerdict;
+    const captures = controller.capture.localCapturedImages;
+    const isDetecting = controller.detection.isDetecting;
+    if (isDetecting) return 'detecting' as WorkflowPhase;
+    if (latestVerdict?.overallQuality === '合格') return 'pass' as WorkflowPhase;
+    if (latestVerdict) return 'fail' as WorkflowPhase;
+    if (captures.length > 0) return 'capturing' as WorkflowPhase;
+    if (cameraPanel.isPpeActive && cameraPanel.isCameraOn) return 'sensor' as WorkflowPhase;
+    if (cameraPanel.isCameraOn) return 'triggered' as WorkflowPhase;
+    return 'idle' as WorkflowPhase;
+  })();
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
@@ -69,6 +85,13 @@ const SafetyEquipmentScreen: React.FC = () => {
       {/* 模型不可用确认对话框 */}
       <ModelUnavailableDialog {...controller.dialogs.modelUnavailable} />
       <PPEShortcutHelpModal {...controller.dialogs.shortcutHelp} />
+
+      {/* 迷你工作流状态浮层（可选呼出，Portal 到视频容器以便原生全屏下亦可见） */}
+      <MiniWorkflowOverlay
+        portalToVideoContainer
+        positionClass="absolute bottom-3 right-3 z-[60]"
+        phase={workflowPhase}
+      />
     </div>
   );
 };

@@ -21,6 +21,7 @@ import { directBackendFetch } from '@/lib/config';
 import { useModelMode } from '@/hooks/useModelMode';
 import { saveLiveInspectionParams, type LiveInspectionParams } from '@/lib/paramPersistence';
 import { getCameraDevices, type CameraDevice } from '@/lib/cameraUtils';
+import { fetchRecipes } from '@/lib/stageRecipeApi';
 
 // 导入拆分的 Hooks
 import {
@@ -31,6 +32,9 @@ import {
   useLiveAIDetection,
   useLiveKeyboardShortcuts,
 } from '@/hooks/liveInspection';
+import { useHardwareTrigger } from '@/hooks/ocr/useHardwareTrigger';
+import { useHardwareWatchdog } from '@/hooks/ocr/useHardwareWatchdog';
+import { useHardwareFallbackKeys } from '@/hooks/ocr/useHardwareFallbackKeys';
 
 // 导入拆分的组件
 import {
@@ -42,6 +46,7 @@ import {
   LiveTargetSelector,
   LiveCameraPanel,
 } from '@/components/liveInspection';
+import { MiniWorkflowOverlay, type WorkflowPhase } from '@/components/ocr/MiniWorkflowOverlay';
 
 const LiveInspectionScreen: React.FC = () => {
   // Refs
@@ -53,6 +58,33 @@ const LiveInspectionScreen: React.FC = () => {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('windowId') || `live_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   });
+
+  // 获取 URL 参数中的工步代码，并加载其硬件覆盖配置
+  const [stageCode] = useState(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('stage_code')?.trim() || '';
+  });
+  const [recipeActionMap, setRecipeActionMap] = useState<Record<string, Record<string, string>> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!stageCode) return;
+    let isMounted = true;
+    void fetchRecipes()
+      .then((recipes) => {
+        if (isMounted) {
+          const matched = recipes.find((r) => r.processStageCode === stageCode);
+          if (matched?.deviceActionMap) {
+            setRecipeActionMap(matched.deviceActionMap);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('获取配方设备配置失败:', err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [stageCode]);
 
   // 本地状态
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -239,6 +271,8 @@ const LiveInspectionScreen: React.FC = () => {
     testLocalModelConnection,
   });
 
+
+
   // 初始化效果
   useEffect(() => {
     fetchResults();
@@ -386,6 +420,68 @@ const LiveInspectionScreen: React.FC = () => {
       toast.error('清空失败');
     }
   }, [tempFolderPath]);
+
+  // 看门狗(先创建以便回调复用 markActivity):硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级 AI 评估
+  const watchdog = useHardwareWatchdog({
+    armed: !isInspecting && capturedImages.length > 0,
+    timeoutMs: 30_000,
+    debug: true,
+    onTimeout: () => {
+      toast('采集超时:30 秒未收到旋转台就位信号,自动启动 AI 评估', { icon: '⏰' });
+      handleHardwareStopCaptureRef.current();
+    },
+  });
+  const { markActivity } = watchdog;
+
+  const handleHardwareTrigger = useCallback(() => {
+    if (!isCameraOn) return;
+    handleCapture();
+    // 第一次抓拍时反向写入 Arduino 启动旋转
+    if (capturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    }
+    markActivity();
+  }, [isCameraOn, handleCapture, capturedImages.length, markActivity]);
+
+  const handleHardwareStopCapture = useCallback(() => {
+    if (capturedImages.length > 0 && !isInspecting) {
+      handleStartAIDetection();
+    }
+  }, [capturedImages.length, isInspecting, handleStartAIDetection]);
+
+  const handleHardwarePass = handleHardwareStopCapture;
+
+  const hardwareTriggerRef = useRef<any>(null);
+  const handleHardwareStopCaptureRef = useRef(handleHardwareStopCapture);
+  useEffect(() => { handleHardwareStopCaptureRef.current = handleHardwareStopCapture; }, [handleHardwareStopCapture]);
+
+  const hardwareTrigger = useHardwareTrigger({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: handleClearCapturedImages,
+      onResetWorkflow: handleClearCapturedImages,
+      onConfirmUnqualified: handleHardwarePass,
+      onStopCapture: handleHardwareStopCapture,
+    },
+    enabled: true,
+    actionMap: recipeActionMap,
+  });
+  hardwareTriggerRef.current = hardwareTrigger;
+
+  // 键盘 ⇄ 硬件后备:Arduino 不在线时,PageDown 等键可手动替 STOP_CAPTURE 等信号
+  useHardwareFallbackKeys({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: handleClearCapturedImages,
+      onResetWorkflow: handleClearCapturedImages,
+      onConfirmUnqualified: handleHardwarePass,
+      onStopCapture: () => {
+        toast('键盘后备:触发 STOP_CAPTURE', { icon: '⌨️' });
+        handleHardwareStopCapture();
+      },
+    },
+    enabled: true,
+  });
 
   return (
     <div
@@ -564,6 +660,18 @@ const LiveInspectionScreen: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* 迷你工作流状态浮层（可选呼出） */}
+      <MiniWorkflowOverlay
+        phase={(() => {
+          if (isInspecting) return 'detecting';
+          if (localResults.length > 0 && localResults[0]?.overallQuality === '合格') return 'pass';
+          if (localResults.length > 0) return 'fail';
+          if (capturedImages.length > 0) return 'capturing';
+          if (isCameraOn && isYoloActive) return 'triggered';
+          return 'idle';
+        })() as WorkflowPhase}
+      />
     </div>
   );
 };

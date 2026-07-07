@@ -134,10 +134,9 @@ export const usePPECapture = ({
 
       const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-      const newImages = [base64Image];
-
-      setCapturedImages(newImages);
-      setLocalCapturedImages(newImages);
+      const nextImages = [...localCapturedImages, base64Image];
+      setCapturedImages(nextImages);
+      setLocalCapturedImages(nextImages);
 
       setForceUpdate((prev) => prev + 1);
 
@@ -146,7 +145,7 @@ export const usePPECapture = ({
       console.error('手动抓拍错误:', error);
       toast.error('抓拍失败');
     }
-  }, [isCameraOn, videoRef, setCapturedImages]);
+  }, [isCameraOn, videoRef, setCapturedImages, localCapturedImages]);
 
   // 自动抓拍
   const handleAutoCapture = useCallback(

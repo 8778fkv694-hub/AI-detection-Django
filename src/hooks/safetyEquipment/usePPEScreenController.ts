@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getYoloStatus, preloadYolo, clearCleanroomResults } from '@/lib/api';
+import { fetchRecipes } from '@/lib/stageRecipeApi';
 import type { ActiveAlert } from '@/lib/anomalyApi';
 import { useCurrentModel } from '@/hooks/useCurrentModel';
 import { useAppStore } from '@/state/appStore';
@@ -16,6 +17,9 @@ import { usePPESave } from './usePPESave';
 import { usePPEPolling } from './usePPEPolling';
 import { usePPELocalState } from './usePPELocalState';
 import { usePPEBinding } from './usePPEBinding';
+import { useHardwareTrigger } from '../ocr/useHardwareTrigger';
+import { useHardwareWatchdog } from '../ocr/useHardwareWatchdog';
+import { useHardwareFallbackKeys } from '../ocr/useHardwareFallbackKeys';
 import type { PPEBindingPanelProps } from '@/components/safetyEquipment/PPEBindingPanel';
 import type { PPEControlPanelProps } from '@/components/safetyEquipment/PPEControlPanel';
 import type { PPECapturedImagesPanelProps } from '@/components/safetyEquipment/PPECapturedImagesPanel';
@@ -95,6 +99,37 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
     windowId: localState.windowId,
     selectedDeviceId: camera.selectedDeviceId,
   });
+
+  // 获取并监听配方中的硬件指令覆盖
+  const [recipeActionMap, setRecipeActionMap] = useState<Record<string, Record<string, string>> | undefined>(undefined);
+
+  useEffect(() => {
+    const stageCode = binding.traceContext.processStageCode;
+    if (!stageCode) {
+      setRecipeActionMap(undefined);
+      return;
+    }
+    
+    let isMounted = true;
+    void fetchRecipes()
+      .then((recipes) => {
+        if (isMounted) {
+          const matched = recipes.find((r) => r.processStageCode === stageCode);
+          if (matched?.deviceActionMap) {
+            setRecipeActionMap(matched.deviceActionMap);
+          } else {
+            setRecipeActionMap(undefined);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('获取配方设备配置失败:', err);
+      });
+      
+    return () => {
+      isMounted = false;
+    };
+  }, [binding.traceContext.processStageCode]);
   const backendStreamId = camera.selectedDeviceId?.startsWith('stream-')
     ? camera.selectedDeviceId.replace('stream-', '')
     : undefined;
@@ -252,6 +287,66 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
     showShortcutModal: store.showShortcutModal,
     onOpenShortcutHelp: openShortcutHelp,
     onCloseShortcutHelp: closeShortcutHelp,
+  });
+
+  const hardwareTriggerRef = useRef<any>(null);
+  const handleHardwareStopCaptureRef = useRef<() => void>(() => {});
+
+  const handleHardwareStopCapture = useCallback(() => {
+    if (capture.localCapturedImages.length > 0) {
+      void inspection.handleSafetyInspection();
+    }
+  }, [capture.localCapturedImages.length, inspection.handleSafetyInspection]);
+
+  useEffect(() => { handleHardwareStopCaptureRef.current = handleHardwareStopCapture; }, [handleHardwareStopCapture]);
+
+  // 看门狗:硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级评估(防卡死)
+  const watchdog = useHardwareWatchdog({
+    armed: camera.isCameraOn && capture.localCapturedImages.length > 0 && !detection.isDetecting,
+    timeoutMs: 30_000,
+    debug: true,
+    onTimeout: () => {
+      toast('采集超时:30 秒未收到旋转台就位信号,自动启动 PPE 评估', { icon: '⏰' });
+      handleHardwareStopCaptureRef.current();
+    },
+  });
+  const { markActivity } = watchdog;
+
+  const handleHardwareTrigger = useCallback(() => {
+    if (!camera.isCameraOn) return;
+    capture.handleManualCapture();
+    if (capture.localCapturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    }
+    markActivity();
+  }, [camera.isCameraOn, capture.localCapturedImages.length, capture.handleManualCapture, markActivity]);
+
+  const hardwareTrigger = useHardwareTrigger({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: () => capture.handleClearCapturedImages(),
+      onResetWorkflow: () => capture.handleClearCapturedImages(),
+      onConfirmUnqualified: handleHardwareStopCapture,
+      onStopCapture: handleHardwareStopCapture,
+    },
+    enabled: true,
+    actionMap: recipeActionMap,
+  });
+  hardwareTriggerRef.current = hardwareTrigger;
+
+  // 键盘 ⇄ 硬件后备
+  useHardwareFallbackKeys({
+    callbacks: {
+      onTrigger: handleHardwareTrigger,
+      onClear: () => capture.handleClearCapturedImages(),
+      onResetWorkflow: () => capture.handleClearCapturedImages(),
+      onConfirmUnqualified: handleHardwareStopCapture,
+      onStopCapture: () => {
+        toast('键盘后备:触发 STOP_CAPTURE', { icon: '⌨️' });
+        handleHardwareStopCapture();
+      },
+    },
+    enabled: true,
   });
 
   useEffect(() => {
