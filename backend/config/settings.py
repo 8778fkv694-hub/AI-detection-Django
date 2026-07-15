@@ -42,8 +42,18 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:3303',
 ]
 
-# 允许所有来源（开发环境）
-CORS_ALLOW_ALL_ORIGINS = True
+# 局域网内任意设备（Web/APK/其他Jetson）都可能以不同IP访问，CORS_ALLOWED_ORIGINS
+# 的固定列表覆盖不到；但 CORS_ALLOW_ALL_ORIGINS=True 会反射任意 Origin，配合下面
+# CORS_ALLOW_CREDENTIALS=True（session/CSRF cookie 需要用到），等于允许公网任意网站
+# 用受害者浏览器的 cookie 跨站调用本机 API。改用正则只放行 localhost/私网网段。
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https?://localhost(:\d+)?$',
+    r'^https?://127\.0\.0\.1(:\d+)?$',
+    r'^https?://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$',
+    r'^https?://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$',
+    r'^https?://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(:\d+)?$',
+]
 
 # CSRF信任的源 - 允许来自这些源的请求通过CSRF验证
 CSRF_TRUSTED_ORIGINS = [

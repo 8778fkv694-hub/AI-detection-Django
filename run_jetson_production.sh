@@ -25,6 +25,7 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 
 # 设置环境变量
+export DEBUG=False
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 export HF_HUB_OFFLINE=1
 export PYTHONUNBUFFERED=1
