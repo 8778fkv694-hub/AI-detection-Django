@@ -20,6 +20,8 @@ import { BarcodesTab } from '@/screens/templates/BarcodesTab';
 import { DevicesTab } from '@/screens/templates/DevicesTab';
 import { AnomalyRulesTab } from '@/screens/templates/AnomalyRulesTab';
 import { ProductsTab } from '@/screens/templates/ProductsTab';
+import { getStreamSources } from '@/api/streamApi';
+import type { StreamSource } from '@/types/stream';
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'products',  label: '产品配方',   icon: <Package className="h-4 w-4" /> },
@@ -144,10 +146,42 @@ function RecipeForm({
   const [isWorkflowMode, setIsWorkflowMode] = useState(true);
   const [availableModels, setAvailableModels] = useState<ModelConfig[]>([]);
   const [currentModelConfig, setCurrentModelConfig] = useState<ModelConfig | null>(null);
+  const [availableStreams, setAvailableStreams] = useState<StreamSource[]>([]);
 
   useEffect(() => {
     getAvailableModels().then(res => setAvailableModels(res.models || []));
+    getStreamSources()
+      .then(setAvailableStreams)
+      .catch(() => toast.error('加载摄像头列表失败'));
   }, []);
+
+  const renderCameraSelect = (compact = false) => (
+    <div>
+      <label className="block text-[11px] text-muted-foreground mb-1">
+        独立摄像头 (camera_id)
+      </label>
+      <select
+        value={form.cameraId || ''}
+        onChange={event => set('cameraId', event.target.value)}
+        className={`w-full rounded border border-border/50 bg-slate-800 px-2.5 ${compact ? 'py-1.5 text-xs' : 'py-1.5 text-sm'} text-foreground outline-none focus:border-accent`}
+      >
+        <option value="">-- 请选择配方专用摄像头 --</option>
+        {form.cameraId && !availableStreams.some(stream => stream.id === form.cameraId) && (
+          <option value={form.cameraId}>原配置：{form.cameraId}</option>
+        )}
+        {availableStreams.map(stream => (
+          <option key={stream.id} value={stream.id}>
+            {stream.name} · {stream.status === 'active' ? '在线' : stream.status} · {stream.display_url || stream.id}
+          </option>
+        ))}
+      </select>
+      {!compact && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          双窗口并行时，两套配方应选择不同摄像头；保存的是 StreamSource ID。
+        </p>
+      )}
+    </div>
+  );
 
   useEffect(() => {
     if (form.currentModelId) {
@@ -238,7 +272,7 @@ function RecipeForm({
       {isWorkflowMode ? (
         <div className="space-y-4">
           {/* 基本信息快速预览区 */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-900/40 border border-border/30 p-4 rounded-xl">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-900/40 border border-border/30 p-4 rounded-xl">
             <div>
               <label className="block text-[11px] text-muted-foreground mb-1">配方名称 *</label>
               <input
@@ -256,6 +290,7 @@ function RecipeForm({
                 className="w-full rounded border border-border/50 bg-slate-850 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
               />
             </div>
+            {renderCameraSelect(true)}
             <div className="flex gap-4 items-center pl-2 pt-5">
               <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none">
                 <input type="checkbox" checked={form.isDefault} onChange={e => set('isDefault', e.target.checked)} className="h-3.5 w-3.5 accent-accent" />
@@ -428,7 +463,7 @@ function RecipeForm({
               <RecipeFormField label="QR检测间隔（秒）" value={form.qrDetectIntervalSeconds} onChange={(v) => set('qrDetectIntervalSeconds', Number(v))} type="number" />
             </>
           )}
-          <RecipeFormField label="相机ID (camera_id)" value={form.cameraId} onChange={(value) => set('cameraId', value)} />
+          <div className="sm:col-span-2">{renderCameraSelect()}</div>
         </div>
       </section>
 
@@ -1080,6 +1115,12 @@ function RecipesTab() {
                   )}
                   <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
                     OCR: {r.ocrEngineModel}
+                  </span>
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] ${r.cameraId ? 'bg-cyan-900/30 text-cyan-300' : 'bg-amber-900/30 text-amber-300'}`}>
+                    摄像头: {r.cameraId || '未绑定'}
+                  </span>
+                  <span className="rounded bg-indigo-900/30 px-1.5 py-0.5 text-[10px] text-indigo-300">
+                    YOLO: {r.currentModelId || '未绑定'}
                   </span>
                 </div>
               </div>

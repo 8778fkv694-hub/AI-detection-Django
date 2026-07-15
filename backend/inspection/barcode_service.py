@@ -208,7 +208,10 @@ class BarcodeDetectionService:
                     errors['opencv_barcode'] = str(exc)
                     logger.debug('OpenCV条码检测失败 [%s]: %s', name, exc)
 
-            if self.zbar_available and zbar_decode is not None:
+            # OpenCV 是主解码器；仅在当前变体未解出时调用 ZBar。旧实现对
+            # 每个变体都重复解码，并因 ZBar 的静态置信度更高而覆盖已经正确
+            # 的 OpenCV 结果，既增加 Jetson CPU 开销也让结果来源不稳定。
+            if not variant_codes and self.zbar_available and zbar_decode is not None:
                 try:
                     decoded = zbar_decode(variant)
                     formatted = self._format_zbar_results(decoded, include_qr=False)

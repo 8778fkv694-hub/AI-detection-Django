@@ -31,6 +31,9 @@ def _sanitize_url(url: str) -> str:
 
 class StreamReader:
     """流媒体读取器"""
+
+    LOCAL_START_TIMEOUT_SECONDS = 3.0
+    NETWORK_START_TIMEOUT_SECONDS = 12.0
     
     def __init__(self, stream_id: str, url: str, auto_reconnect: bool = True, reconnect_interval: int = 5, low_latency: bool = False):
         self.stream_id = stream_id
@@ -76,14 +79,35 @@ class StreamReader:
         self.is_running = True
         self.thread = threading.Thread(target=self._read_loop, daemon=True)
         self.thread.start()
-        
-        # 等待连接建立（最多3秒）
-        for _ in range(30):
+
+        # 本地摄像头通常可在 3 秒内就绪；RTSP/RTMP 首次握手和关键帧等待可能
+        # 超过 3 秒。旧逻辑会过早返回失败，同时留下一个不受 StreamManager
+        # 管理的后台读取线程。网络流给足握手时间，并在超时后明确停止线程。
+        timeout_seconds = (
+            self.LOCAL_START_TIMEOUT_SECONDS
+            if self._is_local_camera()
+            else self.NETWORK_START_TIMEOUT_SECONDS
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
             if self.is_connected:
                 return True
+            if self.thread is not None and not self.thread.is_alive():
+                break
             time.sleep(0.1)
-        
-        return self.is_connected
+
+        if self.is_connected:
+            return True
+
+        self.is_running = False
+        if self.thread is not None:
+            self.thread.join(timeout=1.0)
+        logger.error(
+            "Timed out after %.1fs while starting stream %s",
+            timeout_seconds,
+            self.stream_id,
+        )
+        return False
     
     def stop(self):
         """停止流媒体读取"""
