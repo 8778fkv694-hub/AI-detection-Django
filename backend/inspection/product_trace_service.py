@@ -11,6 +11,15 @@ TRACE_RECHECK = '需复检'
 TRACE_PENDING = '存疑'
 
 
+def _is_fixture_tracking_enabled(record: InspectionResult) -> bool:
+    context = record.trace_context or {}
+    explicit_setting = context.get('fixtureEnabled', context.get('fixture_enabled'))
+    if explicit_setting is not None:
+        return explicit_setting is not False
+    # 旧客户端没有上传开关时，只有实际提供了工装追踪信息才启用。
+    return bool(record.fixture_qr or record.fixture_qr_detected or record.fixture_qr_source)
+
+
 def _apply_trace_quality_gate(record: InspectionResult) -> InspectionResult:
     """将追踪结论并入放行质量，同时保留追踪前的原始质检结论。"""
     context = dict(record.trace_context or {})
@@ -19,7 +28,7 @@ def _apply_trace_quality_gate(record: InspectionResult) -> InspectionResult:
         context['inspectionQualityBeforeTrace'] = record.overall_quality
 
     base_quality = context.get('inspectionQualityBeforeTrace') or record.overall_quality
-    fixture_enabled = context.get('fixtureEnabled', context.get('fixture_enabled', True)) is not False
+    fixture_enabled = _is_fixture_tracking_enabled(record)
 
     if not fixture_enabled or record.trace_conclusion == TRACE_PASS:
         record.overall_quality = base_quality
@@ -275,7 +284,7 @@ def collect_fixture_records_for_refresh(fixture_qr: str) -> list[InspectionResul
 
 def evaluate_trace_for_result(record: InspectionResult) -> InspectionResult:
     trace_context = record.trace_context or {}
-    fixture_enabled = trace_context.get('fixtureEnabled', trace_context.get('fixture_enabled', True)) is not False
+    fixture_enabled = _is_fixture_tracking_enabled(record)
     if not fixture_enabled:
         record.fixture_rule_passed = None
         record.fixture_rule_reason = '当前工序配方未启用工装追踪。'

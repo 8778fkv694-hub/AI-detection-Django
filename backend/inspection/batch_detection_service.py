@@ -280,6 +280,9 @@ class BatchDetectionService:
                 result['ocr_detailed_results'] = detailed_results
                 result['detected_orientation'] = ocr_result.get('detected_orientation')
                 result['detected_orientation_degrees'] = ocr_result.get('detected_orientation_degrees')
+                if not result['ocr_text'].strip() or not detailed_results:
+                    result['qualified'] = False
+                    result['reason'] = 'OCR未识别到可复核文字'
             else:
                 result['skipped_ocr'] = True
                 logger.debug(f"[{label}] 跳过OCR检测（非选中目标且无规则）")
@@ -338,6 +341,9 @@ class BatchDetectionService:
             {'qualified': bool, 'reason': str}
         """
         reasons = []
+
+        if not str(result.get('ocr_text') or '').strip() or not result.get('ocr_detailed_results'):
+            reasons.append('OCR未识别到可复核文字')
 
         def count_matches(text: str, keyword: str) -> int:
             if not text or not keyword:

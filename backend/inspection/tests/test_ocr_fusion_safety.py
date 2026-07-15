@@ -57,6 +57,7 @@ class BatchDetectionSafetyTests(SimpleTestCase):
             'success': True,
             'full_text': 'ABC123',
             'confidence': 0.99,
+            'detailed_results': [{'text': 'ABC123', 'confidence': 0.99}],
         }
         service = BatchDetectionService(max_workers=1)
         image = object()
@@ -69,6 +70,7 @@ class BatchDetectionSafetyTests(SimpleTestCase):
         )
 
         self.assertTrue(result['success'])
+        self.assertEqual(result['overall_quality'], '合格')
         self.assertEqual(result['ocr_text'], '[serial_label] ABC123')
         extract_text.assert_called_once_with(
             image,
@@ -76,6 +78,25 @@ class BatchDetectionSafetyTests(SimpleTestCase):
             use_angle_cls=False,
         )
         detect_barcode.assert_not_called()
+
+    @patch('inspection.ocr_service.ocr_service.extract_text')
+    def test_empty_ocr_evidence_does_not_pass_a_selected_target(self, extract_text):
+        extract_text.return_value = {
+            'success': True,
+            'full_text': '',
+            'detailed_results': [],
+        }
+        service = BatchDetectionService(max_workers=1)
+
+        result = service.process_batch(
+            rois=[{'label': 'serial_label', 'image': object(), 'bbox': {}}],
+            enable_barcode=False,
+            selected_targets=['serial_label'],
+        )
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['overall_quality'], '不合格')
+        self.assertFalse(result['details'][0]['qualified'])
 
     def test_any_roi_failure_marks_batch_unsuccessful(self):
         service = BatchDetectionService(max_workers=1)
@@ -158,6 +179,15 @@ class BatchDetectionApiCompletenessTests(TestCase):
 
 
 class TraceQualityGateTests(TestCase):
+    def test_unscoped_inspection_does_not_implicitly_enable_fixture_tracking(self):
+        record = InspectionResult(overall_quality='合格', trace_context={})
+
+        evaluated = evaluate_trace_for_result(record)
+
+        self.assertEqual(evaluated.trace_conclusion, '合格')
+        self.assertEqual(evaluated.overall_quality, '合格')
+        self.assertTrue(evaluated.trace_context['fixtureTrackingSkipped'])
+
     def test_fixture_disabled_does_not_create_false_missing_code_failure(self):
         record = InspectionResult(
             overall_quality='合格',

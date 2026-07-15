@@ -191,7 +191,9 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     const allTargetsReturned = selectedTargets.length > 0
       && selectedTargets.every(target => returnedLabels.has(target));
     const allRoisSucceeded = (result.details || []).length > 0
-      && (result.details || []).every(detail => detail.success && detail.qualified);
+      && (result.details || []).every(detail =>
+        detail.success && detail.qualified && Boolean((detail.ocr_text || '').trim())
+      );
     const isQualified = result.success
       && result.overall_quality === '合格'
       && allTargetsReturned
