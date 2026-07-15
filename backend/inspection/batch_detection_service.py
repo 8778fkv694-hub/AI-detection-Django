@@ -365,12 +365,12 @@ class BatchDetectionService:
             keyword_config.get('targetRoi') in (None, '', 'all', label)
             for keyword_config in (keyword_configs or [])
         )
-        # 条码专用 ROI 以真实解码为主、OCR数字为兜底；真实条码已解码时不强制额外 OCR。
-        # 普通目标或同时配置关键词的目标仍必须具备可复核 OCR 证据。
+        # 只有真的配置了关键词规则（本目标专属或全局）时才要求OCR证据；纯视觉目标
+        # （金色Logo、出水口等本来就没有可读文字）不应仅因为没配条码规则就被强制
+        # 要求OCR识别到文字——YOLO已确认其存在即可，不应拖累无关目标的合格判定。
         requires_ocr_evidence = (
             bool(config.get('enable_keywords'))
             or has_scoped_keyword_rules
-            or not bool(config.get('require_barcode'))
         )
         if requires_ocr_evidence and (
             not str(result.get('ocr_text') or '').strip()

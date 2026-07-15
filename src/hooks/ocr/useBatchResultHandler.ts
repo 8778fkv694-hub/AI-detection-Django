@@ -232,13 +232,19 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
           const target = config.targetRoi;
           return !target || target === 'all' || target === detail.label;
         });
+        const hasScopedBarcodeRule = enableBarcodeDetection && barcodeConfigEvaluations.some(item =>
+          item.targetRoi === 'all' || item.targetRoi === detail.label
+        );
         const hasMatchedBarcodeEvidence = barcodeConfigEvaluations.some(item =>
           item.matched && item.matchedRois.some((roi: any) => roi.label === detail.label)
         );
         const hasOcrEvidence = Boolean((detail.ocr_text || '').trim());
+        // 纯视觉目标（没有关键词规则也没有条码规则指向它）不应被要求提供OCR/条码
+        // 证据——YOLO已确认其存在即可，避免拖累无关目标的合格判定。
+        const requiresEvidence = hasScopedKeywordRule || hasScopedBarcodeRule;
         return detail.success
           && detail.qualified
-          && (hasOcrEvidence || (!hasScopedKeywordRule && hasMatchedBarcodeEvidence));
+          && (!requiresEvidence || hasOcrEvidence || hasMatchedBarcodeEvidence);
       });
     const isQualified = result.success
       && result.overall_quality === '合格'
