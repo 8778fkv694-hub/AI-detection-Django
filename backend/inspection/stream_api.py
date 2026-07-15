@@ -5,9 +5,11 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.http import FileResponse, Http404
 from django.conf import settings
+from django.db import transaction
 import logging
 import os
 import uuid
@@ -21,6 +23,7 @@ from .detection_loop import detection_loop_manager
 logger = logging.getLogger(__name__)
 
 
+@method_decorator(transaction.non_atomic_requests, name='dispatch')
 class StreamSourceViewSet(viewsets.ModelViewSet):
     """流媒体源管理ViewSet"""
     queryset = StreamSource.objects.all()

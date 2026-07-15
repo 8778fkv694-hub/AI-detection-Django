@@ -1,5 +1,8 @@
 import time
+import uuid
 from unittest import TestCase
+
+from django.urls import resolve
 
 from inspection.stream_service import StreamReader
 
@@ -31,3 +34,12 @@ class StreamReaderStartTests(TestCase):
         self.assertFalse(reader.start())
         self.assertFalse(reader.is_running)
         self.assertFalse(reader.thread.is_alive())
+
+
+class StreamApiTransactionTests(TestCase):
+    def test_stream_actions_do_not_hold_database_transaction_during_io(self):
+        callback = resolve(
+            f"/api/streams/{uuid.uuid4()}/start/"
+        ).func
+
+        self.assertIn('default', callback._non_atomic_requests)
