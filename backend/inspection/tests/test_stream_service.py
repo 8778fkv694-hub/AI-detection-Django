@@ -1,13 +1,16 @@
 import time
 import uuid
-from unittest import TestCase
+from unittest import TestCase as UnitTestCase
+from unittest.mock import patch
 
+from django.test import TestCase
 from django.urls import resolve
 
+from inspection.stream_models import StreamSource
 from inspection.stream_service import StreamReader
 
 
-class StreamReaderStartTests(TestCase):
+class StreamReaderStartTests(UnitTestCase):
     def test_network_stream_can_connect_after_old_three_second_window(self):
         reader = StreamReader("obs", "rtmp://127.0.0.1/live/obs")
         reader.NETWORK_START_TIMEOUT_SECONDS = 0.2
@@ -43,3 +46,30 @@ class StreamApiTransactionTests(TestCase):
         ).func
 
         self.assertIn('default', callback._non_atomic_requests)
+
+    def test_healthy_runtime_status_clears_stale_stream_error(self):
+        stream = StreamSource.objects.create(
+            name='OBS',
+            url='rtmp://127.0.0.1:1935/live/obs',
+            stream_type='rtmp',
+            status='error',
+            last_error='旧断流错误',
+            error_count=5,
+        )
+
+        with patch(
+            'inspection.stream_api.stream_manager.get_stream_status',
+            return_value={
+                'is_connected': True,
+                'is_running': True,
+                'error_message': '',
+                'error_count': 0,
+            },
+        ):
+            response = self.client.get(f'/api/streams/{stream.id}/status/')
+
+        self.assertEqual(response.status_code, 200)
+        stream.refresh_from_db()
+        self.assertEqual(stream.status, 'active')
+        self.assertEqual(stream.last_error, '')
+        self.assertEqual(stream.error_count, 0)

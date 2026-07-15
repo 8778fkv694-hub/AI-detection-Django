@@ -243,9 +243,10 @@ class StreamSourceViewSet(viewsets.ModelViewSet):
             )
             if status_changed:
                 stream.status = new_status
-                if new_error:
-                    stream.last_error = new_error
-                    stream.error_count = new_error_count
+                # 恢复连接后必须清空历史错误；旧逻辑只在 new_error 非空时赋值，
+                # 会让前端在状态已 active 时仍展示上一次断流错误。
+                stream.last_error = new_error
+                stream.error_count = new_error_count
                 stream.save(update_fields=['status', 'last_error', 'error_count'])
         
         return Response({
