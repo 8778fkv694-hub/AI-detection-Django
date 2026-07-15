@@ -1044,3 +1044,219 @@ export async function detectBarcodesWithRetry(
   });
   return detector.detectWithRetry(imageSource, expectedBarcodes, options);
 }
+
+/**
+ * 将图片来源统一转换为 ImageData
+ */
+async function imageSourceToImageData(imageSource: string | File | ImageData): Promise<ImageData> {
+  if (imageSource instanceof ImageData) {
+    return imageSource;
+  }
+
+  const dataUrl = typeof imageSource === 'string'
+    ? imageSource
+    : await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = () => reject(new Error('文件读取失败'));
+        reader.readAsDataURL(imageSource);
+      });
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('无法创建canvas上下文'));
+        return;
+      }
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      resolve(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    };
+    img.onerror = () => reject(new Error('图片加载失败'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * 调用后端一维条码检测API（OpenCV BarcodeDetector + ZBar 级联，服务端已内置多方向多尺度扫描）
+ */
+async function detectLinearBarcodesOnce(imageData: ImageData): Promise<BarcodeDetectionResult[]> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('无法创建canvas上下文');
+  }
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  ctx.putImageData(imageData, 0, 0);
+  const imageBase64 = canvas.toDataURL('image/png');
+  const payloadImage = imageBase64.startsWith('data:') ? imageBase64.split(',')[1] : imageBase64;
+
+  const response = await apiFetch('/barcode/detect/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: payloadImage, code_types: ['linear'] })
+  });
+
+  if (!response.ok) {
+    throw new Error(`一维条码检测API请求失败: ${response.status}`);
+  }
+
+  const result = await response.json();
+  if (!result.success && result.error) {
+    throw new Error(result.error);
+  }
+
+  const codes: Array<{
+    data: string;
+    confidence: number;
+    format?: string;
+    source?: string;
+    bbox?: { x: number; y: number; width: number; height: number };
+  }> = result.codes || [];
+
+  return codes.map(code => ({
+    type: 'barcode' as const,
+    data: code.data,
+    confidence: code.confidence,
+    format: code.format,
+    source: code.source,
+    location: code.bbox
+  }));
+}
+
+/**
+ * 在原图坐标系上用遮罩覆盖已检测到的条码区域，返回新的 ImageData
+ */
+function maskImageData(imageData: ImageData, regions: MaskedRegion[], maskColor: string, maskPadding: number): ImageData {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('无法创建canvas上下文');
+  }
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  ctx.putImageData(imageData, 0, 0);
+  ctx.fillStyle = maskColor;
+  regions.forEach(region => {
+    const x = Math.max(0, region.x - maskPadding);
+    const y = Math.max(0, region.y - maskPadding);
+    const width = Math.min(imageData.width - x, region.width + 2 * maskPadding);
+    const height = Math.min(imageData.height - y, region.height + 2 * maskPadding);
+    ctx.fillRect(x, y, width, height);
+  });
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+/**
+ * 便捷函数：带重试机制的一维条码检测
+ * 后端会将 bbox/polygon 反算回原图坐标系，因此这里可以安全地在客户端遮罩已识别
+ * 区域并重新扫描，以发现同一张图片中的多个条码（例如一张图里有两个条码标签）。
+ */
+export async function detectLinearBarcodesWithRetry(
+  imageSource: string | File | ImageData,
+  expectedBarcodes: Array<{ expectedText: string; matchMode: 'contains' | 'exact' }>,
+  options: RetryDetectionOptions = {}
+): Promise<{
+  allResults: BarcodeDetectionResult[];
+  matchResults: Array<{
+    expectedText: string;
+    matchMode: 'contains' | 'exact';
+    matched: boolean;
+    detectedData?: string;
+    confidence?: number;
+    location?: { x: number; y: number; width: number; height: number };
+    retryCount: number;
+  }>;
+  retrySummary: {
+    totalRetries: number;
+    successfulDetections: number;
+    failedDetections: number;
+    totalDetected?: number;
+    iterations?: number;
+  };
+}> {
+  const {
+    maxRetries = 5,
+    enableMasking = true,
+    maskColor = '#FFFFFF',
+    maskPadding = 10
+  } = options;
+
+  const allResults: BarcodeDetectionResult[] = [];
+  const matchResults = expectedBarcodes.map(config => ({
+    expectedText: config.expectedText,
+    matchMode: config.matchMode,
+    matched: false,
+    retryCount: 1
+  } as {
+    expectedText: string;
+    matchMode: 'contains' | 'exact';
+    matched: boolean;
+    detectedData?: string;
+    confidence?: number;
+    location?: { x: number; y: number; width: number; height: number };
+    retryCount: number;
+  }));
+
+  let totalRetries = 0;
+
+  try {
+    const originalImageData = await imageSourceToImageData(imageSource);
+    let currentImageData = originalImageData;
+
+    for (let retry = 0; retry <= maxRetries; retry++) {
+      totalRetries++;
+
+      const detected = await detectLinearBarcodesOnce(currentImageData);
+      const newCodes = detected.filter(code => !allResults.some(r => r.data === code.data));
+      allResults.push(...newCodes);
+
+      matchResults.forEach(result => {
+        if (result.matched) return;
+        result.retryCount = retry + 1;
+        for (const code of detected) {
+          if (validateBarcode(code.data, result.expectedText, result.matchMode)) {
+            result.matched = true;
+            result.detectedData = code.data;
+            result.confidence = code.confidence;
+            result.location = code.location;
+            break;
+          }
+        }
+      });
+
+      // 没有新条码可遮罩，或已达最大重试次数，停止（继续遮罩已发现区域以寻找同图中的其他条码）
+      if (!enableMasking || newCodes.length === 0 || retry >= maxRetries) {
+        break;
+      }
+
+      const regions = newCodes
+        .filter(code => code.location)
+        .map(code => code.location as MaskedRegion);
+      currentImageData = maskImageData(currentImageData, regions, maskColor, maskPadding);
+    }
+  } catch (error) {
+    console.error('一维条码检测错误:', error);
+  }
+
+  const successfulDetections = matchResults.filter(result => result.matched).length;
+  const failedDetections = matchResults.length - successfulDetections;
+
+  return {
+    allResults,
+    matchResults,
+    retrySummary: {
+      totalRetries,
+      successfulDetections,
+      failedDetections,
+      totalDetected: allResults.length,
+      iterations: totalRetries
+    }
+  };
+}

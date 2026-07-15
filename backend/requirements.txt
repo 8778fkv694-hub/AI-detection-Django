@@ -18,3 +18,6 @@ paddlepaddle>=3.2.0
 # 微信二维码检测依赖
 opencv-contrib-python>=4.10.0.84
 pyzbar>=0.1.9
+# 一维条码首选解码器：单次调用自带多方向/降采样/反色鲁棒性，比 OpenCV+ZBar 级联更快更准；
+# 若目标平台（如 Jetson/aarch64）无预编译 wheel，需自行编译或改用 conda-forge 源
+zxing-cpp>=2.2.0

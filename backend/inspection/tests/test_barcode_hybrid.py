@@ -47,7 +47,7 @@ def make_ean13_image(code='5901234123457'):
 
 
 class HybridBarcodeDetectionTests(TestCase):
-    def test_opencv_detects_ean13_as_linear_barcode(self):
+    def test_linear_detection_decodes_ean13(self):
         service = BarcodeDetectionService()
         result = service._detect_linear_barcodes(make_ean13_image())
 
@@ -55,11 +55,24 @@ class HybridBarcodeDetectionTests(TestCase):
         detected = result['codes'][0]
         self.assertEqual(detected['type'], 'barcode')
         self.assertEqual(detected['data'], '5901234123457')
-        self.assertEqual(detected['source'], 'opencv_barcode')
+        # zxing-cpp 是一维码的首选解码器（单次调用更快更准），OpenCV+ZBar
+        # 级联仅在 zxing 未检出时才会触发，因此这里不强绑定具体解码器来源。
+        self.assertIn(detected['source'], ('zxingcpp', 'opencv_barcode', 'zbar'))
         self.assertEqual(
             ''.join(ch for ch in detected['format'].upper() if ch.isalnum()),
             'EAN13',
         )
+
+    def test_opencv_zbar_fallback_still_decodes_ean13_without_zxing(self):
+        service = BarcodeDetectionService()
+        with patch.object(service, '_detect_zxing', return_value=[]):
+            result = service._detect_linear_barcodes(make_ean13_image())
+
+        self.assertTrue(result['codes'])
+        detected = result['codes'][0]
+        self.assertEqual(detected['type'], 'barcode')
+        self.assertEqual(detected['data'], '5901234123457')
+        self.assertIn(detected['source'], ('opencv_barcode', 'zbar'))
 
     def test_barcode_api_can_request_linear_only(self):
         buffer = BytesIO()

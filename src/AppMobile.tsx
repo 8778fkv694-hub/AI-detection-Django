@@ -28,6 +28,7 @@ const KitMatchingScreen = lazy(() => import('@/screens/KitMatchingScreen'));
 const KitMatchingResultsScreen = lazy(() => import('@/screens/KitMatchingResultsScreen'));
 const OCRDetectionScreen = lazy(() => import('@/screens/OCRDetectionScreen'));
 const GuidedWeChatQRTestScreen = lazy(() => import('@/screens/GuidedWeChatQRTestScreen'));
+const GuidedBarcodeTestScreen = lazy(() => import('@/screens/GuidedBarcodeTestScreen'));
 const OCRGuidedTestScreen = lazy(() => import('@/screens/OCRGuidedTestScreen'));
 const LiveInspectionResultsScreen = lazy(() => import('@/screens/LiveInspectionResultsScreen'));
 const BatchInspectionResultsScreen = lazy(() => import('@/screens/BatchInspectionResultsScreen'));
@@ -56,6 +57,7 @@ const secondaryNavItems = [
   { name: '实时检测结果', href: '/live-inspection-results', icon: Eye, allowNewWindow: false },
   { name: 'PPE检测结果', href: '/cleanroom-results', icon: BarChart2, allowNewWindow: false },
   { name: '二维码检出评估', href: '/wechat-qr-guided', icon: FileText, allowNewWindow: true },
+  { name: '条码检出评估', href: '/barcode-guided', icon: FileText, allowNewWindow: true },
   { name: 'OCR检出能力评估', href: '/ocr-guided', icon: FileText, allowNewWindow: true },
   { name: '帮助指南', href: '/help', icon: HelpCircle, allowNewWindow: false },
 ];
@@ -416,6 +418,7 @@ const AppMobile: React.FC = () => {
             <Route path="/kit-matching-results" element={<KitMatchingResultsScreen />} />
             <Route path="/ocr" element={<OCRDetectionScreen />} />
             <Route path="/wechat-qr-guided" element={<GuidedWeChatQRTestScreen />} />
+            <Route path="/barcode-guided" element={<GuidedBarcodeTestScreen />} />
             <Route path="/ocr-guided" element={<OCRGuidedTestScreen />} />
             <Route path="/live-inspection-results" element={<LiveInspectionResultsScreen />} />
             <Route path="/batch-results" element={<BatchInspectionResultsScreen />} />
