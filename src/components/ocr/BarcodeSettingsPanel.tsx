@@ -82,13 +82,18 @@ export const BarcodeSettingsPanel: React.FC<BarcodeSettingsPanelProps> = ({
   availableTargets = [],
   getTargetChineseName = (t) => t,
 }) => {
-  const handleAddBarcodeConfig = () => {
+  const handleAddBarcodeConfig = (codeType: 'qr' | 'linear') => {
     const newConfig: BarcodeConfig = {
       id: Date.now().toString(),
       expectedText: '',
       matchMode: 'contains',
       enabled: true,
       targetRoi: undefined,
+      codeType,
+      ...(codeType === 'linear' ? {
+        barcodeFormat: 'auto' as const,
+        allowOcrFallback: true,
+      } : {}),
     };
     addBarcodeConfig(newConfig);
   };
@@ -123,20 +128,20 @@ export const BarcodeSettingsPanel: React.FC<BarcodeSettingsPanelProps> = ({
       </div>
 
       {/* 可折叠的条码检测设置内容 */}
-      <div className={`space-y-3 transition-all duration-300 ease-in-out overflow-hidden ${isBarcodeSettingsExpanded ? "max-h-[600px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"
+      <div className={`space-y-3 transition-all duration-300 ease-in-out ${isBarcodeSettingsExpanded ? "max-h-[1000px] overflow-y-auto opacity-100 mt-3" : "max-h-0 overflow-hidden opacity-0 mt-0"
         }`}>
         {/* 条码配置列表 */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-          <Label className="text-sm">期望二维码/条码配置</Label>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleAddBarcodeConfig}
-              className="text-xs"
-            >
-              添加二维码/条码
-            </Button>
+          <Label className="text-sm">检验规则</Label>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => handleAddBarcodeConfig('qr')} className="text-xs">
+                添加二维码规则
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleAddBarcodeConfig('linear')} className="text-xs">
+                添加一维条码规则
+              </Button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
@@ -166,7 +171,7 @@ export const BarcodeSettingsPanel: React.FC<BarcodeSettingsPanelProps> = ({
           {showBarcodeSaveTemplate && (
             <div className="p-3 bg-slate-800/40 rounded border border-slate-600/40 space-y-2">
               {/* ... save template UI ... */}
-              <Label className="text-xs text-slate-300">保存当前二维码配置为模板</Label>
+              <Label className="text-xs text-slate-300">保存当前二维码/一维条码规则为模板</Label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -200,14 +205,15 @@ export const BarcodeSettingsPanel: React.FC<BarcodeSettingsPanelProps> = ({
           {showBarcodeTemplateList && barcodeTemplates.length > 0 && (
             <div className="space-y-2">
               {/* ... template list UI ... */}
-              <Label className="text-xs text-slate-400">已保存的二维码模板</Label>
+              <Label className="text-xs text-slate-400">已保存的条码检验模板</Label>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {barcodeTemplates.map((template) => (
                   <div key={template.id} className="flex items-center justify-between p-2 bg-slate-800/30 rounded border border-slate-600/30">
                     <div className="flex-1">
                       <div className="text-sm font-medium text-slate-200">{template.name}</div>
                       <div className="text-xs text-slate-400">
-                        二维码数量: {template.configs.length}
+                        二维码 {template.configs.filter(config => (config.codeType || 'qr') === 'qr').length} 条，
+                        一维条码 {template.configs.filter(config => config.codeType === 'linear').length} 条
                       </div>
                     </div>
                     <div className="flex gap-1">
@@ -236,60 +242,102 @@ export const BarcodeSettingsPanel: React.FC<BarcodeSettingsPanelProps> = ({
 
           {barcodeConfigs.length === 0 ? (
             <div className="text-xs text-slate-500 text-center py-4">
-              暂无二维码/条码配置，点击"添加二维码/条码"开始配置
+              暂无规则，请分别添加二维码规则或一维条码规则
             </div>
           ) : (
-            <div className="space-y-2">
-              {barcodeConfigs.map((config) => (
-                <div key={config.id} className="flex flex-col gap-2 p-2 bg-slate-800/50 rounded border border-slate-600/30">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.enabled}
-                      onChange={(e) => updateBarcodeConfig(config.id, { enabled: e.target.checked })}
-                      className="rounded"
-                    />
-                    <input
-                      type="text"
-                      value={config.expectedText}
-                      onChange={(e) => updateBarcodeConfig(config.id, { expectedText: e.target.value })}
-                      placeholder="期望的二维码/条码文本"
-                      className="flex-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm"
-                    />
-                    <select
-                      value={config.matchMode}
-                      onChange={(e) => updateBarcodeConfig(config.id, { matchMode: e.target.value as 'contains' | 'exact' })}
-                      className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm w-20"
-                    >
-                      <option value="contains">包含</option>
-                      <option value="exact">相同</option>
-                    </select>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => removeBarcodeConfig(config.id)}
-                      className="text-red-300 border-red-600 hover:bg-red-800 text-xs px-2"
-                    >
-                      删除
-                    </Button>
-                  </div>
+            <div className="space-y-4">
+              {(['qr', 'linear'] as const).map(codeType => {
+                const configs = barcodeConfigs.filter(config => (config.codeType || 'qr') === codeType);
+                return (
+                  <div key={codeType} className="space-y-2">
+                    <div className={`text-xs font-medium ${codeType === 'qr' ? 'text-emerald-300' : 'text-cyan-300'}`}>
+                      {codeType === 'qr' ? '二维码规则（WeChatQR）' : '一维条码规则（OpenCV + ZBar）'}
+                    </div>
+                    {configs.length === 0 && (
+                      <div className="rounded border border-dashed border-slate-600/50 p-2 text-xs text-slate-500">
+                        暂无{codeType === 'qr' ? '二维码' : '一维条码'}规则
+                      </div>
+                    )}
+                    {configs.map(config => (
+                      <div key={config.id} className="flex flex-col gap-2 p-2 bg-slate-800/50 rounded border border-slate-600/30">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={config.enabled}
+                            onChange={(e) => updateBarcodeConfig(config.id, { enabled: e.target.checked })}
+                            className="rounded"
+                          />
+                          <input
+                            type="text"
+                            value={config.expectedText}
+                            onChange={(e) => updateBarcodeConfig(config.id, { expectedText: e.target.value })}
+                            placeholder={codeType === 'qr' ? '期望二维码内容（空=任意）' : '期望条码数字/内容（空=任意）'}
+                            className="flex-1 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm"
+                          />
+                          <select
+                            value={config.matchMode}
+                            onChange={(e) => updateBarcodeConfig(config.id, { matchMode: e.target.value as 'contains' | 'exact' })}
+                            className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-sm w-20"
+                          >
+                            <option value="contains">包含</option>
+                            <option value="exact">相同</option>
+                          </select>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => removeBarcodeConfig(config.id)}
+                            className="text-red-300 border-red-600 hover:bg-red-800 text-xs px-2"
+                          >
+                            删除
+                          </Button>
+                        </div>
 
-                  {/* ROI 选择 */}
-                  <div className="flex items-center gap-2 pl-6">
-                    <Label className="text-xs w-16 text-slate-400">关联目标:</Label>
-                    <select
-                      value={config.targetRoi || 'all'}
-                      onChange={(e) => updateBarcodeConfig(config.id, { targetRoi: e.target.value === 'all' ? undefined : e.target.value })}
-                      className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-xs w-40"
-                    >
-                      <option value="all">所有目标 (默认)</option>
-                      {availableTargets.map(target => (
-                        <option key={target} value={target}>{getTargetChineseName(target)}</option>
-                      ))}
-                    </select>
+                        <div className="flex flex-wrap items-center gap-3 pl-6">
+                          {codeType === 'linear' && (
+                            <>
+                              <Label className="text-xs text-slate-400">码制:</Label>
+                              <select
+                                value={config.barcodeFormat || 'auto'}
+                                onChange={(e) => updateBarcodeConfig(config.id, { barcodeFormat: e.target.value as BarcodeConfig['barcodeFormat'] })}
+                                className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-xs"
+                              >
+                                <option value="auto">自动识别</option>
+                                <option value="code128">Code 128</option>
+                                <option value="code39">Code 39</option>
+                                <option value="ean13">EAN-13</option>
+                                <option value="ean8">EAN-8</option>
+                                <option value="upca">UPC-A</option>
+                                <option value="upce">UPC-E</option>
+                                <option value="itf">ITF</option>
+                                <option value="codabar">Codabar</option>
+                              </select>
+                              <label className="flex items-center gap-1 text-xs text-amber-300">
+                                <input
+                                  type="checkbox"
+                                  checked={config.allowOcrFallback ?? true}
+                                  onChange={(e) => updateBarcodeConfig(config.id, { allowOcrFallback: e.target.checked })}
+                                />
+                                解码失败时允许 OCR 数字兜底
+                              </label>
+                            </>
+                          )}
+                          <Label className="text-xs text-slate-400">关联目标:</Label>
+                          <select
+                            value={config.targetRoi || 'all'}
+                            onChange={(e) => updateBarcodeConfig(config.id, { targetRoi: e.target.value === 'all' ? undefined : e.target.value })}
+                            className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-slate-100 text-xs w-40"
+                          >
+                            <option value="all">所有目标 (默认)</option>
+                            {availableTargets.map(target => (
+                              <option key={target} value={target}>{getTargetChineseName(target)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

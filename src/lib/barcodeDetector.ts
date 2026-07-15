@@ -6,6 +6,9 @@ export interface BarcodeDetectionResult {
   type: 'qr' | 'barcode';
   data: string;
   confidence: number;
+  format?: string;
+  source?: string;
+  preprocess?: string;
   location?: {
     x: number;
     y: number;

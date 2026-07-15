@@ -25,6 +25,8 @@ export interface BarcodeResult {
   targetRoi?: string;
   matchedRois?: string[];
   type?: 'qr' | 'barcode';
+  format?: string;
+  source?: 'decoder' | 'ocr_fallback' | 'none';
   location?: {
     x: number;
     y: number;
@@ -80,6 +82,9 @@ export interface TestResult {
     overall_match: boolean;
     // 二维码检测的汇总信息
     total_qr_codes_detected?: number; // 检测到的二维码总数
+    qr_detected_count?: number;
+    linear_barcode_detected_count?: number;
+    ocr_fallback_count?: number;
     qr_codes_data?: string[]; // 所有检测到的二维码数据
     detection_summary?: string; // 检测结果摘要
     // 重试机制相关信息
@@ -117,6 +122,12 @@ export interface BarcodeConfig {
   matchMode: 'contains' | 'exact';
   enabled: boolean;
   targetRoi?: string;               // 关联的 ROI 目标（Label）
+  /** 旧配置未设置时按二维码兼容 */
+  codeType?: 'qr' | 'linear';
+  /** 仅一维条码使用 */
+  barcodeFormat?: 'auto' | 'code128' | 'ean13' | 'ean8' | 'upca' | 'upce' | 'itf' | 'codabar' | 'code39';
+  /** 一维码真实解码失败时，是否允许 OCR 数字匹配兜底 */
+  allowOcrFallback?: boolean;
 }
 
 // OCR 模板

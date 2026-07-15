@@ -48,48 +48,60 @@ export interface UseBatchResultHandlerOptions {
   captureFrameData: () => { dataUrl: string; base64: string } | null;
 }
 
-// 检查ROI中的条码是否匹配配置规则
-const isConfigMatchedByRoi = (roi: any, config: any) => {
+const normalizeBarcodeFormat = (value: any) => {
+  const normalized = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return ({ I25: 'ITF', INTERLEAVED2OF5: 'ITF' } as Record<string, string>)[normalized] || normalized;
+};
+
+// 分开验证二维码/一维条码；只有一维条码允许 OCR 数字兜底。
+const evaluateConfigByRoi = (roi: any, config: any) => {
   const expectedText = (config.expectedText || '').trim();
   const matchMode = config.matchMode || 'contains';
+  const codeType = config.codeType || 'qr';
+  const expectedFormat = normalizeBarcodeFormat(config.barcodeFormat || 'auto');
   const barcodes = roi.barcodes || [];
   const ocrText = roi.ocr_text || '';
 
-  // 期望内容留空表示“任意条码”，仍必须真实检出至少一个条码。
-  if (!expectedText) return barcodes.length > 0;
-
-  const barcodeMatched = barcodes.some((b: any) => {
+  const matchingBarcode = barcodes.find((b: any) => {
+    const actualType = typeof b === 'string' ? 'barcode' : (b.type || 'barcode');
+    if (codeType === 'qr' && actualType !== 'qr') return false;
+    if (codeType === 'linear' && actualType === 'qr') return false;
+    if (codeType === 'linear' && expectedFormat !== 'AUTO') {
+      if (normalizeBarcodeFormat(b.format) !== expectedFormat) return false;
+    }
     const text = typeof b === 'string' ? b : (b.data || '');
+    if (!expectedText) return Boolean(text);
     return matchMode === 'exact' ? text === expectedText : text.includes(expectedText);
   });
 
-  if (barcodeMatched) return true;
-
-  // OCR 兜底
-  return matchMode === 'exact' ? ocrText === expectedText : ocrText.includes(expectedText);
-};
-
-const getMatchedBarcodeTextByRoi = (roi: any, config: any) => {
-  const expectedText = (config.expectedText || '').trim();
-  const matchMode = config.matchMode || 'contains';
-  const barcodes = roi.barcodes || [];
-  const ocrText = roi.ocr_text || '';
-
-  if (!expectedText) {
-    const firstBarcode = barcodes[0];
-    if (typeof firstBarcode === 'string') return firstBarcode;
-    if (firstBarcode?.data) return firstBarcode.data;
-    return '';
+  if (matchingBarcode) {
+    return {
+      matched: true,
+      detectedText: typeof matchingBarcode === 'string' ? matchingBarcode : matchingBarcode.data,
+      source: 'decoder' as const,
+      format: typeof matchingBarcode === 'string' ? '' : matchingBarcode.format,
+    };
   }
 
-  for (const barcode of barcodes) {
-    const text = typeof barcode === 'string' ? barcode : (barcode.data || '');
-    const matched = matchMode === 'exact' ? text === expectedText : text.includes(expectedText);
-    if (matched) return text;
+  if (codeType === 'linear' && (config.allowOcrFallback ?? true) && expectedText) {
+    const expectedDigits = expectedText.replace(/\D/g, '');
+    const ocrDigits = String(ocrText).replace(/\D/g, '');
+    const ocrMatched = Boolean(expectedDigits) && (
+      matchMode === 'exact'
+        ? ocrDigits === expectedDigits
+        : ocrDigits.includes(expectedDigits)
+    );
+    if (ocrMatched) {
+      return {
+        matched: true,
+        detectedText: expectedDigits,
+        source: 'ocr_fallback' as const,
+        format: config.barcodeFormat || 'auto',
+      };
+    }
   }
 
-  const ocrMatched = matchMode === 'exact' ? ocrText === expectedText : ocrText.includes(expectedText);
-  return ocrMatched ? ocrText : '';
+  return { matched: false, detectedText: '', source: 'none' as const, format: '' };
 };
 
 export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => {
@@ -124,28 +136,36 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
             const relevantRois = targetRoi && targetRoi !== 'all'
               ? (result.details || []).filter((d: any) => d.label === targetRoi)
               : (result.details || []);
-            const matchedRois = relevantRois.filter((roi: any) => isConfigMatchedByRoi(roi, config));
+            const evaluatedRois = relevantRois.map((roi: any) => ({
+              roi,
+              evaluation: evaluateConfigByRoi(roi, config),
+            }));
+            const matchedRois = evaluatedRois.filter(item => item.evaluation.matched);
             const firstMatchedRoi = matchedRois[0];
 
             return {
               config,
               targetRoi: targetRoi || 'all',
               relevantRois,
-              matchedRois,
+              matchedRois: matchedRois.map(item => item.roi),
               matched: matchedRois.length > 0,
-              detectedText: firstMatchedRoi ? getMatchedBarcodeTextByRoi(firstMatchedRoi, config) : '',
+              detectedText: firstMatchedRoi?.evaluation.detectedText || '',
+              source: firstMatchedRoi?.evaluation.source || 'none',
+              format: firstMatchedRoi?.evaluation.format || '',
             };
           })
       : [];
 
-    const structuredBarcodeResults = barcodeConfigEvaluations.map(({ config, targetRoi, matched, detectedText, matchedRois }) => ({
+    const structuredBarcodeResults = barcodeConfigEvaluations.map(({ config, targetRoi, matched, detectedText, matchedRois, source, format }) => ({
       detectedText,
       expectedText: config.expectedText || ((targetRoi && targetRoi !== 'all') ? `(任意条码) [${targetRoi}]` : '(任意条码)'),
       matchMode: config.matchMode || 'contains' as const,
       matched,
       confidence: matched ? 1 : 0,
       qrCodeData: detectedText,
-      type: 'qr' as const,
+      type: (config.codeType === 'linear' ? 'barcode' : 'qr') as 'barcode' | 'qr',
+      format,
+      source,
       targetRoi,
       matchedRois: matchedRois.map((roi: any) => roi.label || ''),
     }));
@@ -191,9 +211,19 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     const allTargetsReturned = selectedTargets.length > 0
       && selectedTargets.every(target => returnedLabels.has(target));
     const allRoisSucceeded = (result.details || []).length > 0
-      && (result.details || []).every(detail =>
-        detail.success && detail.qualified && Boolean((detail.ocr_text || '').trim())
-      );
+      && (result.details || []).every(detail => {
+        const hasScopedKeywordRule = enableKeywordAnalysis && keywordConfigs.some(config => {
+          const target = config.targetRoi;
+          return !target || target === 'all' || target === detail.label;
+        });
+        const hasMatchedBarcodeEvidence = barcodeConfigEvaluations.some(item =>
+          item.matched && item.matchedRois.some((roi: any) => roi.label === detail.label)
+        );
+        const hasOcrEvidence = Boolean((detail.ocr_text || '').trim());
+        return detail.success
+          && detail.qualified
+          && (hasOcrEvidence || (!hasScopedKeywordRule && hasMatchedBarcodeEvidence));
+      });
     const isQualified = result.success
       && result.overall_quality === '合格'
       && allTargetsReturned
@@ -257,13 +287,17 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
               const firstLabel = result.details?.[0]?.label || '';
               return roiLabel === firstLabel;
             })
-            .map(({ config, matched, detectedText, targetRoi, matchedRois }) => ({
+            .map(({ config, matched, detectedText, targetRoi, matchedRois, source, format }) => ({
               expectedText: config.expectedText || '',
               matchMode: config.matchMode || 'contains',
               detectedBarcodes: matched
                 ? [detectedText].filter(Boolean)
                 : roiBarcodes.map((b: any) => typeof b === 'string' ? b : b.data || ''),
               matched,
+              codeType: config.codeType || 'qr',
+              barcodeFormat: config.barcodeFormat || 'auto',
+              source,
+              format,
               required: config.enabled,
               targetRoi,
               matchedRois,

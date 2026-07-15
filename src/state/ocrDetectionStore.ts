@@ -52,6 +52,9 @@ export interface BarcodeConfig {
   matchMode: 'contains' | 'exact';
   enabled: boolean;
   targetRoi?: string;
+  codeType?: 'qr' | 'linear';
+  barcodeFormat?: 'auto' | 'code128' | 'ean13' | 'ean8' | 'upca' | 'upce' | 'itf' | 'codabar' | 'code39';
+  allowOcrFallback?: boolean;
 }
 
 interface BarcodeTemplate {
@@ -86,6 +89,9 @@ export interface DetectionHistoryItem {
     results: any[];
     overall_match: boolean;
     total_qr_codes_detected?: number;
+    qr_detected_count?: number;
+    linear_barcode_detected_count?: number;
+    ocr_fallback_count?: number;
     qr_codes_data?: string[];
     detection_summary?: string;
   };

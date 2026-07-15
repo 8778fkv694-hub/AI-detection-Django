@@ -171,6 +171,7 @@ const RecipeSelectModal: React.FC<RecipeSelectModalProps> = ({ onApply, onSkip }
                     <div className="rounded border border-border/40 bg-slate-800 p-2 space-y-1">
                       {selected.barcodeConfigs.map((bc, i) => (
                         <div key={i} className="text-xs text-foreground">
+                          {(bc.codeType || 'qr') === 'qr' ? '二维码' : `一维条码/${bc.barcodeFormat || 'auto'}`}：
                           {bc.expectedText || <span className="text-muted-foreground">任意内容</span>}
                           <span className="ml-2 text-muted-foreground">({bc.matchMode})</span>
                         </div>

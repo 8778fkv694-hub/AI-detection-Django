@@ -685,11 +685,11 @@ const OCRDetectionScreen: React.FC = () => {
     return { dataUrl, base64: dataUrl.split(',')[1] };
   }, []);
 
-  const performBarcodeDetection = useCallback(async (imageSource: string | File | null) => 
+  const performBarcodeDetection = useCallback(async (imageSource: string | File | null, ocrText: string = '') =>
     detectBarcodesAnalyzer(imageSource, barcodeConfigs, enableBarcodeDetection, {
       maxRetries: OCR_DETECTION_CONFIG.maxRetries, enableMasking: true,
       maskColor: '#FFFFFF', maskPadding: 30, useWeChatQR: OCR_DETECTION_CONFIG.useWeChatQR
-    }), [enableBarcodeDetection, barcodeConfigs]);
+    }, ocrText), [enableBarcodeDetection, barcodeConfigs]);
 
   // 8. OCR 处理与工作流
   const { processCapturedImage, performOCRTest } = useOCRProcessing({

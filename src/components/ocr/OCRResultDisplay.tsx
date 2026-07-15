@@ -358,17 +358,22 @@ export const OCRResultDisplay: React.FC<OCRResultDisplayProps> = ({
                       </div>
                     )}
 
-                    {/* 二维码检测结果 - 所有模式 */}
+                    {/* 二维码/一维条码检测结果 - 所有模式 */}
                     {record.barcodeAnalysis?.enabled && (
                       <div className="space-y-3">
-                        <div className="text-sm font-medium text-green-300 border-b border-green-500/30 pb-1">二维码检测详情</div>
+                        <div className="text-sm font-medium text-green-300 border-b border-green-500/30 pb-1">二维码/一维条码检测详情</div>
                         <div className="grid grid-cols-2 gap-2 text-xs mb-2">
                           <div className="text-slate-400">检测状态:</div>
                           <div className={`font-medium ${record.barcodeAnalysis.overall_match ? 'text-green-400' : 'text-red-400'}`}>
                             {record.barcodeAnalysis.overall_match ? '合格' : '存疑'}
                           </div>
-                          <div className="text-slate-400">检测数量:</div>
-                          <div className="text-slate-300">{record.barcodeAnalysis.total_qr_codes_detected || 0} 个</div>
+                          <div className="text-slate-400">真实解码:</div>
+                          <div className="text-slate-300">
+                            二维码 {record.barcodeAnalysis.qr_detected_count || 0}，
+                            一维条码 {record.barcodeAnalysis.linear_barcode_detected_count || 0}
+                          </div>
+                          <div className="text-slate-400">OCR兜底:</div>
+                          <div className="text-amber-300">{record.barcodeAnalysis.ocr_fallback_count || 0} 条</div>
                         </div>
                         {record.barcodeAnalysis.detection_summary && (
                           <div className="space-y-1">

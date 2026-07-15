@@ -20,6 +20,10 @@ interface ROIStatusDetail {
         required: boolean;
         targetRoi?: string;
         matchedRois?: string[];
+        codeType?: 'qr' | 'linear';
+        barcodeFormat?: string;
+        source?: 'decoder' | 'ocr_fallback' | 'none';
+        format?: string;
     }>;
 }
 
@@ -106,18 +110,15 @@ export const ROIStatusCard: React.FC<ROIStatusCardProps> = ({ roiDetails, getTar
                                         const detectedText = bm.detectedBarcodes.length > 0
                                             ? bm.detectedBarcodes.join(', ')
                                             : '未检测到';
-                                        const expectedText = bm.expectedText || '';
-                                        const matchMode = bm.matchMode || 'contains';
-                                        const ocrText = roi.ocr_text || '';
-                                        const ocrFallbackMatched = bm.matched
-                                            && bm.detectedBarcodes.length === 0
-                                            && expectedText
-                                            && (matchMode === 'exact' ? ocrText === expectedText : ocrText.includes(expectedText));
+                                        const ocrFallbackMatched = bm.source === 'ocr_fallback';
 
                                         return (
                                             <div key={bmIdx} className="pl-4 text-sm space-y-1">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="text-slate-400">预期值:</span>
+                                                    <span className="text-xs text-cyan-300">
+                                                        {bm.codeType === 'linear' ? `一维条码/${bm.barcodeFormat || 'auto'}` : '二维码'}
+                                                    </span>
                                                     <span className="font-medium text-slate-200">{bm.expectedText || '任意'}</span>
                                                     {bm.targetRoi === 'all' && (
                                                         <span className="text-[10px] px-1 py-0.5 rounded bg-slate-700/70 text-slate-300">

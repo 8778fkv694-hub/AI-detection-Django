@@ -22,7 +22,8 @@ def barcode_detect(request):
     
     Request Body:
     {
-        "image": "base64编码的图片数据"
+        "image": "base64编码的图片数据",
+        "code_types": ["qr", "linear"]
     }
     
     Response:
@@ -46,6 +47,7 @@ def barcode_detect(request):
     try:
         data = json.loads(request.body)
         image_b64 = data.get('image')
+        requested_types = data.get('code_types', ['qr', 'linear'])
 
         if not image_b64:
             return JsonResponse({
@@ -55,7 +57,21 @@ def barcode_detect(request):
                 'count': 0
             })
 
-        result = barcode_service.detect_from_base64(image_b64)
+        if not isinstance(requested_types, list) or any(
+            item not in {'qr', 'linear'} for item in requested_types
+        ):
+            return JsonResponse({
+                'success': False,
+                'error': 'code_types 仅支持 qr、linear',
+                'codes': [],
+                'count': 0,
+            }, status=400)
+
+        result = barcode_service.detect_from_base64(
+            image_b64,
+            detect_qr='qr' in requested_types,
+            detect_linear='linear' in requested_types,
+        )
         return JsonResponse(result)
 
     except json.JSONDecodeError:

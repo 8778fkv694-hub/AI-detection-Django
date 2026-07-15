@@ -915,7 +915,7 @@ export function RecipeWorkflowEditor({
               )}
 
               <div className="border-t border-border/20 pt-3 flex items-center justify-between py-1">
-                <span className="text-xs text-indigo-300 font-semibold">3. 启用二维码条码过滤条件</span>
+                <span className="text-xs text-indigo-300 font-semibold">3. 启用二维码/一维条码检验条件</span>
                 <input 
                   type="checkbox" 
                   checked={form.enableBarcodeDetection} 
@@ -925,7 +925,7 @@ export function RecipeWorkflowEditor({
               </div>
               {form.enableBarcodeDetection && (
                 <p className="text-[10px] text-slate-500 pl-3">
-                  已开启条码校验分支。条码的配置规则请在“传统表单视图”中进行规则添加。
+                  已开启条码校验分支。请在“传统表单视图”中分别添加二维码规则或一维条码规则，并设置码制及 OCR 数字兜底。
                 </p>
               )}
             </div>

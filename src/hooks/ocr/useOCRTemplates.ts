@@ -194,7 +194,7 @@ export const useOCRTemplates = (): UseOCRTemplatesReturn => {
     }
 
     if (barcodeConfigs.length === 0) {
-      alert('请至少配置一个二维码');
+      alert('请至少配置一条二维码或一维条码规则');
       return;
     }
 
@@ -207,7 +207,7 @@ export const useOCRTemplates = (): UseOCRTemplatesReturn => {
       setBarcodeTemplates([...barcodeTemplates, createdTemplate]);
       setBarcodeTemplateName('');
       setShowBarcodeSaveTemplate(false);
-      alert('二维码模板保存成功！');
+      alert('条码检验模板保存成功！');
     } catch (error) {
       console.error('保存二维码模板失败:', error);
       alert(`二维码模板保存失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -229,19 +229,19 @@ export const useOCRTemplates = (): UseOCRTemplatesReturn => {
     setBarcodeConfigs(regeneratedConfigs);
     setEnableBarcodeDetection(true);
     setIsBarcodeSettingsExpanded(true);
-    alert(`已加载二维码模板: ${template.name}`);
+    alert(`已加载条码检验模板: ${template.name}`);
   }, [barcodeTemplates, setBarcodeConfigs, setEnableBarcodeDetection, setIsBarcodeSettingsExpanded]);
 
   // 删除二维码模板
   const deleteBarcodeTemplate = useCallback(async (templateId: string) => {
-    if (confirm('确定要删除这个二维码模板吗？')) {
+    if (confirm('确定要删除这个条码检验模板吗？')) {
       try {
         await deleteBarcodeTemplateApi(templateId);
         const updatedTemplates = barcodeTemplates.filter(t => t.id !== templateId);
         setBarcodeTemplates(updatedTemplates);
       } catch (error) {
-        console.error('删除二维码模板失败:', error);
-        alert(`删除二维码模板失败：${error instanceof Error ? error.message : '未知错误'}`);
+        console.error('删除条码检验模板失败:', error);
+        alert(`删除条码检验模板失败：${error instanceof Error ? error.message : '未知错误'}`);
       }
     }
   }, [barcodeTemplates, setBarcodeTemplates]);

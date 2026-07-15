@@ -60,7 +60,9 @@ export function BarcodesTab() {
                     key={index}
                     className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300"
                   >
+                    {(config.codeType || 'qr') === 'qr' ? '二维码' : `一维条码/${config.barcodeFormat || 'auto'}`}：
                     {config.expectedText || '任意'} ({config.matchMode})
+                    {config.codeType === 'linear' && (config.allowOcrFallback ?? true) ? ' · OCR兜底' : ''}
                   </span>
                 ))}
               </div>

@@ -289,9 +289,28 @@ class BatchDetectionService:
             
             # 2. 条码检测
             if enable_barcode and should_run_barcode:
-                barcode_result = barcode_service.detect(image)
+                scoped_barcode_configs = [
+                    cfg for cfg in (barcode_configs or [])
+                    if cfg.get('enabled', True)
+                    and cfg.get('targetRoi') in (None, '', 'all', label)
+                ]
+                # 兼容旧规则：未声明 codeType 时按二维码处理。
+                detect_qr = not scoped_barcode_configs or any(
+                    cfg.get('codeType', 'qr') == 'qr' for cfg in scoped_barcode_configs
+                )
+                detect_linear = not scoped_barcode_configs or any(
+                    cfg.get('codeType') == 'linear' for cfg in scoped_barcode_configs
+                )
+                barcode_result = barcode_service.detect(
+                    image,
+                    detect_qr=detect_qr,
+                    detect_linear=detect_linear,
+                )
                 result['barcodes'] = barcode_result.get('codes', [])
                 result['barcode_count'] = len(result['barcodes'])
+                result['barcode_models_used'] = barcode_result.get('models_used', [])
+                result['barcode_errors'] = barcode_result.get('errors', {})
+                result['barcode_linear_attempts'] = barcode_result.get('linear_attempts', [])
                 logger.info(f"[{label}] 条码检测结果: count={result['barcode_count']}, codes={result['barcodes']}")
             else:
                 result['skipped_barcode'] = True
@@ -342,7 +361,21 @@ class BatchDetectionService:
         """
         reasons = []
 
-        if not str(result.get('ocr_text') or '').strip() or not result.get('ocr_detailed_results'):
+        has_scoped_keyword_rules = any(
+            keyword_config.get('targetRoi') in (None, '', 'all', label)
+            for keyword_config in (keyword_configs or [])
+        )
+        # 条码专用 ROI 以真实解码为主、OCR数字为兜底；真实条码已解码时不强制额外 OCR。
+        # 普通目标或同时配置关键词的目标仍必须具备可复核 OCR 证据。
+        requires_ocr_evidence = (
+            bool(config.get('enable_keywords'))
+            or has_scoped_keyword_rules
+            or not bool(config.get('require_barcode'))
+        )
+        if requires_ocr_evidence and (
+            not str(result.get('ocr_text') or '').strip()
+            or not result.get('ocr_detailed_results')
+        ):
             reasons.append('OCR未识别到可复核文字')
 
         def count_matches(text: str, keyword: str) -> int:
@@ -416,37 +449,85 @@ class BatchDetectionService:
             if raw_count < required_count:
                 reasons.append(f'关键词次数不足: {keyword} ({raw_count}/{required_count})')
         
-        # 2. 条码验证
+        # 2. 二维码/一维条码分别验证；一维码可显式启用 OCR 数字兜底。
         if config.get('require_barcode'):
-            barcode_count = result.get('barcode_count', 0)
-            if barcode_count == 0:
-                # OCR兜底：条码未识别但OCR文本匹配期望值则通过
-                ocr_text = result.get('ocr_text', '') or ''
-                ocr_matched = False
-                if barcode_configs:
-                    for cfg in barcode_configs:
-                        if not cfg.get('enabled', True):
+            detected_codes = result.get('barcodes') or []
+            ocr_text = str(result.get('ocr_text') or '')
+            scoped_configs = [
+                cfg for cfg in (barcode_configs or [])
+                if cfg.get('enabled', True)
+                and cfg.get('targetRoi') in (None, '', 'all', label)
+            ]
+            match_details = []
+
+            def normalize_format(value: Any) -> str:
+                normalized = re.sub(r'[^A-Z0-9]', '', str(value or '').upper())
+                return {
+                    'I25': 'ITF',
+                    'INTERLEAVED2OF5': 'ITF',
+                }.get(normalized, normalized)
+
+            def text_matches(actual: str, expected: str, mode: str) -> bool:
+                if not expected:
+                    return bool(actual.strip())
+                if mode == 'exact':
+                    return actual.strip() == expected
+                return expected in actual or actual in expected
+
+            for barcode_config in scoped_configs:
+                code_type = barcode_config.get('codeType', 'qr')
+                expected = str(barcode_config.get('expectedText') or '').strip()
+                mode = barcode_config.get('matchMode', 'contains')
+                expected_format = normalize_format(barcode_config.get('barcodeFormat', 'auto'))
+                matching_codes = []
+                for code in detected_codes:
+                    actual_type = code.get('type', 'barcode')
+                    if code_type == 'qr' and actual_type != 'qr':
+                        continue
+                    if code_type == 'linear' and actual_type == 'qr':
+                        continue
+                    if code_type == 'linear' and expected_format not in ('', 'AUTO'):
+                        if normalize_format(code.get('format')) != expected_format:
                             continue
-                        target = cfg.get('targetRoi')
-                        if target and target != 'all' and target != label:
-                            continue
-                        expected = (cfg.get('expectedText') or '').strip()
-                        mode = cfg.get('matchMode', 'contains')
-                        # 期望内容留空表示“任意条码”，无实际条码时不能用OCR空条件放行。
-                        if not expected:
-                            continue
-                        if mode == 'exact':
-                            if ocr_text == expected:
-                                ocr_matched = True
-                                break
-                        else:
-                            if expected in ocr_text:
-                                ocr_matched = True
-                                break
-                if ocr_matched:
-                    logger.info(f"[{label}] 条码未识别，OCR兜底通过")
-                else:
-                    reasons.append('未检测到必需的条码')
+                    if text_matches(str(code.get('data') or ''), expected, mode):
+                        matching_codes.append(code)
+
+                source = 'decoder' if matching_codes else None
+                detected_text = str(matching_codes[0].get('data') or '') if matching_codes else ''
+
+                if (
+                    not matching_codes
+                    and code_type == 'linear'
+                    and barcode_config.get('allowOcrFallback', True)
+                    and expected
+                ):
+                    expected_digits = re.sub(r'\D', '', expected)
+                    ocr_digits = re.sub(r'\D', '', ocr_text)
+                    if expected_digits and (
+                        (mode == 'exact' and ocr_digits == expected_digits)
+                        or (mode != 'exact' and expected_digits in ocr_digits)
+                    ):
+                        source = 'ocr_fallback'
+                        detected_text = expected_digits
+                        logger.info('[%s] 一维条码解码失败，OCR数字兜底匹配: %s', label, expected_digits)
+
+                matched = source is not None
+                match_details.append({
+                    'expectedText': expected,
+                    'matchMode': mode,
+                    'codeType': code_type,
+                    'barcodeFormat': barcode_config.get('barcodeFormat', 'auto'),
+                    'matched': matched,
+                    'detectedText': detected_text,
+                    'source': source or 'none',
+                })
+                if not matched:
+                    rule_name = '二维码/条码' if code_type == 'qr' else '一维条码'
+                    reasons.append(f'{rule_name}规则未匹配: {expected or "任意内容"}')
+
+            result['barcode_match_details'] = match_details
+            if not scoped_configs and not detected_codes:
+                reasons.append('未检测到必需的二维码或一维条码')
         
         qualified = len(reasons) == 0
         reason = '; '.join(reasons) if reasons else '验证通过'

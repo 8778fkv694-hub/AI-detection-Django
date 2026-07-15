@@ -43,7 +43,7 @@ export interface OCRProcessingOptions {
 
   // 依赖函数
   compressImage: (base64: string) => Promise<string>;
-  performBarcodeDetection: (imageSource: string | File | null) => Promise<{
+  performBarcodeDetection: (imageSource: string | File | null, ocrText?: string) => Promise<{
     allDetectedData: BarcodeDetectionResult[];
     matchResults: any[];
     retrySummary?: any;
@@ -216,7 +216,10 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
         // 使用 base64Data 而不是 imageFile，确保与 OCR 使用相同的（可能已压缩的）图像数据
         // 同时这也避免了 imageFile 可能为空或读取失败的问题
         console.log(`🔍 准备二维码检测，使用图像数据长度: ${base64Data.length}`);
-        const { allDetectedData, matchResults, retrySummary } = await performBarcodeDetection(base64Data);
+        const { allDetectedData, matchResults, retrySummary } = await performBarcodeDetection(
+          base64Data,
+          finalResult.full_text || '',
+        );
 
         const barcodeAnalysis = buildBarcodeAnalysis({
           enabled: true,
@@ -422,7 +425,10 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
 
       // 执行二维码检测
       if (enableBarcodeDetection && result.success) {
-        const { allDetectedData, matchResults, retrySummary } = await performBarcodeDetection(selectedImage);
+        const { allDetectedData, matchResults, retrySummary } = await performBarcodeDetection(
+          selectedImage,
+          result.full_text || '',
+        );
 
         const barcodeAnalysis = buildBarcodeAnalysis({
           enabled: true,

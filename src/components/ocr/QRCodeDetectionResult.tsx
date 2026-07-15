@@ -1,7 +1,7 @@
 /**
  * QRCodeDetectionResult Component
  *
- * 用途：展示二维码检测结果（紧凑布局）
+ * 用途：展示二维码/一维条码检测结果（紧凑布局）
  * 使用位置：OCRDetectionScreen, OCRErrorPreventionScreen 等页面
  */
 
@@ -65,8 +65,16 @@ export const QRCodeDetectionResult: React.FC<QRCodeDetectionResultProps> = ({ ba
               )}
               <div className="text-xs min-w-0 flex-1">
                 <div className="flex items-center gap-2">
+                  <span className={result.type === 'barcode' ? 'text-cyan-300' : 'text-emerald-300'}>
+                    {result.type === 'barcode' ? `一维条码${result.format ? `/${result.format}` : ''}` : '二维码'}
+                  </span>
                   <span className="text-slate-300 font-mono">{result.expectedText}</span>
-                  <span className="text-slate-500">{(result.confidence * 100).toFixed(1)}%</span>
+                  {result.source !== 'ocr_fallback' && (
+                    <span className="text-slate-500">{(result.confidence * 100).toFixed(1)}%</span>
+                  )}
+                  {result.source === 'ocr_fallback' && (
+                    <span className="text-amber-300">OCR数字兜底</span>
+                  )}
                   {result.retryCount && result.retryCount > 1 && (
                     <span className="text-blue-400">🔄 {result.retryCount}次</span>
                   )}
@@ -94,7 +102,7 @@ export const QRCodeDetectionResult: React.FC<QRCodeDetectionResultProps> = ({ ba
               <div className="flex items-center gap-1.5">
                 <div className="h-3 w-3 rounded-full bg-slate-600 flex items-center justify-center text-[8px] text-slate-300">?</div>
                 <span className="text-xs text-slate-400">
-                  已忽略 {ignoredCodes.length} 个非目标二维码
+                  已忽略 {ignoredCodes.length} 个非目标二维码/条码
                 </span>
               </div>
             </div>
@@ -111,7 +119,7 @@ export const QRCodeDetectionResult: React.FC<QRCodeDetectionResultProps> = ({ ba
 
         {barcodeAnalysis.results.length === 0 && (!barcodeAnalysis.total_qr_codes_detected || barcodeAnalysis.total_qr_codes_detected === 0) && (
           <div className="flex items-center justify-center p-2 rounded bg-slate-800/50">
-            <span className="text-xs text-slate-400">未检测到二维码</span>
+            <span className="text-xs text-slate-400">未检测到二维码或一维条码</span>
           </div>
         )}
       </div>

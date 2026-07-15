@@ -17,4 +17,4 @@ paddleocr>=2.7.0.3
 paddlepaddle>=3.2.0
 # 微信二维码检测依赖
 opencv-contrib-python>=4.10.0.84
-  
+pyzbar>=0.1.9

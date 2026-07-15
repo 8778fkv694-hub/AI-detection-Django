@@ -9,6 +9,7 @@ import {
   type BarcodeDetectionResult,
   detectBarcodesWithRetry
 } from '@/lib/barcodeDetector';
+import { apiFetch } from '@/lib/config';
 
 // 重新导出类型供外部使用
 export type { BarcodeDetectionResult };
@@ -21,6 +22,10 @@ export interface BarcodeConfig {
   expectedText: string;
   matchMode: 'contains' | 'exact';
   enabled: boolean;
+  targetRoi?: string;
+  codeType?: 'qr' | 'linear';
+  barcodeFormat?: 'auto' | 'code128' | 'ean13' | 'ean8' | 'upca' | 'upce' | 'itf' | 'codabar' | 'code39';
+  allowOcrFallback?: boolean;
 }
 
 /**
@@ -33,6 +38,8 @@ export interface BarcodeResult {
   matched: boolean;
   confidence: number;
   type?: 'qr' | 'barcode';
+  format?: string;
+  source?: 'decoder' | 'ocr_fallback' | 'none';
   location?: {
     x: number;
     y: number;
@@ -71,6 +78,138 @@ export interface BarcodeAnalysisResult {
   };
 }
 
+const normalizeFormat = (value: string | undefined) => {
+  const normalized = (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return ({ I25: 'ITF', INTERLEAVED2OF5: 'ITF' } as Record<string, string>)[normalized] || normalized;
+};
+
+const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
+async function detectLinearBarcodes(
+  imageSource: string | File,
+): Promise<BarcodeDetectionResult[]> {
+  try {
+    const image = typeof imageSource === 'string'
+      ? imageSource
+      : await fileToDataUrl(imageSource);
+    const response = await apiFetch('/barcode/detect/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image, code_types: ['linear'] }),
+    });
+    if (!response.ok) {
+      throw new Error(`一维条码检测请求失败: ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!payload.success) {
+      throw new Error(payload.error || '一维条码检测失败');
+    }
+    return (payload.codes || [])
+      .filter((code: any) => code.type === 'barcode' && code.data)
+      .map((code: any) => ({
+        type: 'barcode' as const,
+        data: String(code.data),
+        confidence: Number(code.confidence || 0),
+        format: String(code.format || ''),
+        source: String(code.source || ''),
+        preprocess: String(code.preprocess || ''),
+        location: code.bbox,
+      }));
+  } catch (error) {
+    console.error('❌ 一维条码后端检测失败:', error);
+    return [];
+  }
+}
+
+function deduplicateCodes(codes: BarcodeDetectionResult[]): BarcodeDetectionResult[] {
+  const unique = new Map<string, BarcodeDetectionResult>();
+  for (const code of codes) {
+    if (!code.data) continue;
+    const key = `${code.type}:${normalizeFormat((code as any).format)}:${code.data}`;
+    const previous = unique.get(key);
+    if (!previous || code.confidence > previous.confidence) {
+      unique.set(key, code);
+    }
+  }
+  return Array.from(unique.values());
+}
+
+function matchesRuleFormat(code: BarcodeDetectionResult, config: BarcodeConfig): boolean {
+  if ((config.codeType || 'qr') === 'qr') return code.type === 'qr';
+  if (code.type !== 'barcode') return false;
+  const expectedFormat = normalizeFormat(config.barcodeFormat || 'auto');
+  return !expectedFormat || expectedFormat === 'AUTO'
+    || normalizeFormat((code as any).format) === expectedFormat;
+}
+
+function matchRule(
+  config: BarcodeConfig,
+  detectedCodes: BarcodeDetectionResult[],
+  ocrText: string,
+  qrRetryCount: number,
+): BarcodeResult {
+  const matchedCode = detectedCodes.find(code =>
+    matchesRuleFormat(code, config)
+    && validateBarcode(code.data, config.expectedText, config.matchMode)
+  );
+
+  if (matchedCode) {
+    return {
+      detectedText: matchedCode.data,
+      expectedText: config.expectedText,
+      matchMode: config.matchMode,
+      matched: true,
+      confidence: matchedCode.confidence,
+      type: matchedCode.type,
+      format: (matchedCode as any).format,
+      source: 'decoder',
+      location: matchedCode.location,
+      qrCodeData: matchedCode.data,
+      qrCodeType: matchedCode.type,
+      qrCodeSize: matchedCode.location ? {
+        width: matchedCode.location.width,
+        height: matchedCode.location.height,
+      } : undefined,
+      qrCodePosition: matchedCode.location ? {
+        x: matchedCode.location.x,
+        y: matchedCode.location.y,
+      } : undefined,
+      retryCount: matchedCode.type === 'qr' ? qrRetryCount : 1,
+      isRetryEnabled: matchedCode.type === 'qr',
+    };
+  }
+
+  const isLinear = config.codeType === 'linear';
+  const expectedDigits = config.expectedText.replace(/\D/g, '');
+  const ocrDigits = ocrText.replace(/\D/g, '');
+  const fallbackMatched = isLinear
+    && (config.allowOcrFallback ?? true)
+    && Boolean(expectedDigits)
+    && (config.matchMode === 'exact'
+      ? ocrDigits === expectedDigits
+      : ocrDigits.includes(expectedDigits));
+
+  return {
+    detectedText: fallbackMatched ? expectedDigits : '',
+    expectedText: config.expectedText,
+    matchMode: config.matchMode,
+    matched: fallbackMatched,
+    confidence: 0,
+    type: isLinear ? 'barcode' : 'qr',
+    format: isLinear ? config.barcodeFormat || 'auto' : 'QR',
+    source: fallbackMatched ? 'ocr_fallback' : 'none',
+    qrCodeData: fallbackMatched ? expectedDigits : '',
+    qrCodeType: fallbackMatched ? 'ocr_fallback' : (isLinear ? 'barcode' : 'qr'),
+    retryCount: isLinear ? 1 : qrRetryCount,
+    isRetryEnabled: !isLinear,
+  };
+}
+
 /**
  * 执行二维码检测 - 支持重试机制
  *
@@ -84,7 +223,8 @@ export async function performBarcodeDetection(
   imageSource: string | File | null,
   barcodeConfigs: BarcodeConfig[],
   enabled: boolean = true,
-  options: BarcodeDetectionOptions = {}
+  options: BarcodeDetectionOptions = {},
+  ocrText: string = '',
 ): Promise<BarcodeAnalysisResult> {
   // 默认选项
   const {
@@ -101,62 +241,68 @@ export async function performBarcodeDetection(
   }
 
   try {
-    console.log('🔍 开始二维码检测（支持重试机制）...');
+    console.log('🔍 开始二维码/一维条码检测...');
 
-    // 准备期望的二维码配置
-    const expectedBarcodes = barcodeConfigs
-      .filter(config => config.enabled)
+    const activeConfigs = barcodeConfigs.filter(config => config.enabled);
+    const qrConfigs = activeConfigs.filter(config => (config.codeType || 'qr') === 'qr');
+    const linearConfigs = activeConfigs.filter(config => config.codeType === 'linear');
+    const expectedQrCodes = qrConfigs
       .map(config => ({
         expectedText: config.expectedText,
         matchMode: config.matchMode
       }));
 
-    if (expectedBarcodes.length === 0) {
+    if (activeConfigs.length === 0) {
       return { allDetectedData: [], matchResults: [] };
     }
 
-    // 使用带重试机制的检测
-    const retryResult = await detectBarcodesWithRetry(imageSource, expectedBarcodes, {
-      maxRetries,
-      enableMasking,
-      maskColor,
-      maskPadding,
-      useWeChatQR
+    const emptyQrResult = {
+      allResults: [] as BarcodeDetectionResult[],
+      matchResults: [],
+      retrySummary: { totalRetries: 0, successfulDetections: 0, failedDetections: 0 },
+    };
+    const [retryResult, linearResults] = await Promise.all([
+      expectedQrCodes.length > 0
+        ? detectBarcodesWithRetry(imageSource, expectedQrCodes, {
+            maxRetries,
+            enableMasking,
+            maskColor,
+            maskPadding,
+            useWeChatQR,
+          })
+        : Promise.resolve(emptyQrResult),
+      linearConfigs.length > 0
+        ? detectLinearBarcodes(imageSource)
+        : Promise.resolve([] as BarcodeDetectionResult[]),
+    ]);
+
+    const allDetectedData = deduplicateCodes([
+      ...retryResult.allResults,
+      ...linearResults,
+    ]);
+
+    const qrRetryCount = retryResult.retrySummary.totalRetries || 1;
+    const matchResults = activeConfigs.map(config =>
+      matchRule(config, allDetectedData, ocrText, qrRetryCount)
+    );
+
+    const successfulDetections = matchResults.filter(result => result.matched).length;
+    const retrySummary = {
+      totalRetries: retryResult.retrySummary.totalRetries + (linearConfigs.length > 0 ? 1 : 0),
+      successfulDetections,
+      failedDetections: matchResults.length - successfulDetections,
+    };
+
+    console.log('✅ 二维码/一维条码检测完成:', {
+      qr: allDetectedData.filter(item => item.type === 'qr').length,
+      linear: allDetectedData.filter(item => item.type === 'barcode').length,
+      ocrFallback: matchResults.filter(item => item.source === 'ocr_fallback').length,
     });
-
-    console.log('📊 重试检测结果:', retryResult);
-
-    // 转换结果格式
-    const matchResults: BarcodeResult[] = retryResult.matchResults.map((result) => {
-      return {
-        detectedText: result.detectedData || '',
-        expectedText: result.expectedText,
-        matchMode: result.matchMode,
-        matched: result.matched,
-        confidence: result.confidence || 0,
-        type: 'qr' as const,
-        location: result.location,
-        qrCodeData: result.detectedData,
-        qrCodeType: 'qr',
-        qrCodeSize: result.location ? {
-          width: result.location.width,
-          height: result.location.height
-        } : undefined,
-        qrCodePosition: result.location ? {
-          x: result.location.x,
-          y: result.location.y
-        } : undefined,
-        retryCount: result.retryCount,
-        isRetryEnabled: true
-      };
-    });
-
-    console.log('✅ 二维码重试检测完成，匹配结果:', matchResults);
 
     return {
-      allDetectedData: retryResult.allResults,
-      matchResults: matchResults,
-      retrySummary: retryResult.retrySummary
+      allDetectedData,
+      matchResults,
+      retrySummary,
     };
 
   } catch (error) {

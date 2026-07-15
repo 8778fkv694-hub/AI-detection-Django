@@ -819,6 +819,9 @@ interface BarcodeConfigItem {
   matchMode: 'contains' | 'exact';
   enabled: boolean;
   targetRoi?: string;
+  codeType?: 'qr' | 'linear';
+  barcodeFormat?: 'auto' | 'code128' | 'ean13' | 'ean8' | 'upca' | 'upce' | 'itf' | 'codabar' | 'code39';
+  allowOcrFallback?: boolean;
 }
 
 function BarcodeConfigEditor({
@@ -830,8 +833,16 @@ function BarcodeConfigEditor({
   onChange: (configs: BarcodeConfigItem[]) => void;
   availableTargets?: string[];
 }) {
-  const add = () =>
-    onChange([...configs, { id: `${Date.now()}`, expectedText: '', matchMode: 'contains', enabled: true, targetRoi: '' }]);
+  const add = (codeType: 'qr' | 'linear') =>
+    onChange([...configs, {
+      id: `${Date.now()}`,
+      expectedText: '',
+      matchMode: 'contains',
+      enabled: true,
+      targetRoi: '',
+      codeType,
+      ...(codeType === 'linear' ? { barcodeFormat: 'auto' as const, allowOcrFallback: true } : {}),
+    }]);
   const remove = (id: string) => onChange(configs.filter(c => c.id !== id));
   const update = (id: string, field: keyof BarcodeConfigItem, value: any) =>
     onChange(configs.map(c => (c.id === id ? { ...c, [field]: value } : c)));
@@ -843,45 +854,74 @@ function BarcodeConfigEditor({
       {configs.length === 0 && (
         <div className="text-xs text-muted-foreground py-1">暂无条码规则，点击下方添加</div>
       )}
-      {configs.map(c => (
-        <div key={c.id} className="flex items-center gap-2">
-          <input
-            value={c.expectedText}
-            onChange={e => update(c.id, 'expectedText', e.target.value)}
-            placeholder="期望内容（空=任意）"
-            className="flex-1 rounded border border-border/50 bg-slate-800 px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-          />
-          <select
-            value={c.matchMode}
-            onChange={e => update(c.id, 'matchMode', e.target.value)}
-            className="rounded border border-border/50 bg-slate-800 px-1.5 py-1 text-xs text-foreground outline-none focus:border-accent"
-          >
-            <option value="contains">包含</option>
-            <option value="exact">精确</option>
-          </select>
-          {hasTargets && (
-            <select
-              value={c.targetRoi ?? ''}
-              onChange={e => update(c.id, 'targetRoi', e.target.value || undefined)}
-              className="rounded border border-border/50 bg-slate-800 px-1.5 py-1 text-xs text-foreground outline-none focus:border-accent w-[100px]"
-            >
-              <option value="">不绑定</option>
-              {availableTargets.map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          )}
-          <button onClick={() => remove(c.id)} className="text-muted-foreground hover:text-red-400">
-            <X className="h-4 w-4" />
+      {(['qr', 'linear'] as const).map(codeType => (
+        <div key={codeType} className="space-y-2 rounded border border-border/30 p-2">
+          <div className="text-xs font-medium text-slate-300">
+            {codeType === 'qr' ? '二维码规则' : '一维条码规则'}
+          </div>
+          {configs.filter(c => (c.codeType || 'qr') === codeType).map(c => (
+            <div key={c.id} className="space-y-2 rounded bg-slate-900/30 p-2">
+              <div className="flex items-center gap-2">
+                <input
+                  value={c.expectedText}
+                  onChange={e => update(c.id, 'expectedText', e.target.value)}
+                  placeholder={codeType === 'qr' ? '二维码期望内容（空=任意）' : '条码数字/内容（空=任意）'}
+                  className="flex-1 rounded border border-border/50 bg-slate-800 px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
+                />
+                <select
+                  value={c.matchMode}
+                  onChange={e => update(c.id, 'matchMode', e.target.value)}
+                  className="rounded border border-border/50 bg-slate-800 px-1.5 py-1 text-xs text-foreground outline-none focus:border-accent"
+                >
+                  <option value="contains">包含</option>
+                  <option value="exact">精确</option>
+                </select>
+                <button onClick={() => remove(c.id)} className="text-muted-foreground hover:text-red-400">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {codeType === 'linear' && (
+                  <>
+                    <select
+                      value={c.barcodeFormat || 'auto'}
+                      onChange={e => update(c.id, 'barcodeFormat', e.target.value)}
+                      className="rounded border border-border/50 bg-slate-800 px-1.5 py-1 text-xs text-foreground"
+                    >
+                      <option value="auto">自动码制</option><option value="code128">Code 128</option>
+                      <option value="code39">Code 39</option><option value="ean13">EAN-13</option>
+                      <option value="ean8">EAN-8</option><option value="upca">UPC-A</option>
+                      <option value="upce">UPC-E</option><option value="itf">ITF</option>
+                      <option value="codabar">Codabar</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-xs text-amber-300">
+                      <input
+                        type="checkbox"
+                        checked={c.allowOcrFallback ?? true}
+                        onChange={e => update(c.id, 'allowOcrFallback', e.target.checked)}
+                      />
+                      OCR数字兜底
+                    </label>
+                  </>
+                )}
+                {hasTargets && (
+                  <select
+                    value={c.targetRoi ?? ''}
+                    onChange={e => update(c.id, 'targetRoi', e.target.value || undefined)}
+                    className="rounded border border-border/50 bg-slate-800 px-1.5 py-1 text-xs text-foreground outline-none focus:border-accent w-[120px]"
+                  >
+                    <option value="">不绑定目标</option>
+                    {availableTargets.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+          ))}
+          <button onClick={() => add(codeType)} className="flex items-center gap-1 text-xs text-accent hover:underline">
+            <Plus className="h-3.5 w-3.5" />添加{codeType === 'qr' ? '二维码' : '一维条码'}规则
           </button>
         </div>
       ))}
-      <button
-        onClick={add}
-        className="flex items-center gap-1 text-xs text-accent hover:underline"
-      >
-        <Plus className="h-3.5 w-3.5" />添加条码规则
-      </button>
     </div>
   );
 }
