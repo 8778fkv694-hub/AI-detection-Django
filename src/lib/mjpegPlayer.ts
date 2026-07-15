@@ -14,6 +14,8 @@ export interface MJPEGPlayerOptions {
   onFrame?: (frameData: string) => void;
   onStreamTaken?: () => void;
   windowId?: string;
+  /** 后端共享流允许多窗口同时观看；物理独占场景才设为 true */
+  exclusive?: boolean;
 }
 
 export class MJPEGPlayer {
@@ -26,6 +28,7 @@ export class MJPEGPlayer {
   private onFrame?: (frameData: string) => void;
   private onStreamTaken?: () => void;
   private windowId: string;
+  private exclusive: boolean;
 
   private isPlaying = false;
   private frameCount = 0;
@@ -61,6 +64,7 @@ export class MJPEGPlayer {
     this.onFrame = options.onFrame;
     this.onStreamTaken = options.onStreamTaken;
     this.windowId = options.windowId || `mjpeg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    this.exclusive = options.exclusive ?? true;
 
     // 创建隐藏的 canvas（仅用于 onFrame 截图回调）
     this.canvas = document.createElement('canvas');
@@ -84,6 +88,7 @@ export class MJPEGPlayer {
   }
 
   private initBroadcastChannel(): void {
+    if (!this.exclusive) return;
     try {
       this.broadcastChannel = new BroadcastChannel(`stream_${this.streamId}`);
       this.broadcastChannel.onmessage = (event) => {
@@ -104,7 +109,7 @@ export class MJPEGPlayer {
   }
 
   private broadcastStreamRequest(): void {
-    if (!this.broadcastChannel) return;
+    if (!this.exclusive || !this.broadcastChannel) return;
     try {
       this.broadcastChannel.postMessage({
         type: 'REQUEST_STREAM',

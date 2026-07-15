@@ -124,7 +124,9 @@ export const usePPEDetection = ({
 }: UsePPEDetectionOptions): UsePPEDetectionResult => {
   const isDetectingRef = useRef(false);
   const backendLoopStartedRef = useRef(false);
-  const backendLoopOwnerRef = useRef(`ppe:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerBaseRef = useRef(`ppe:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerGenerationRef = useRef(0);
+  const backendLoopOwnerRef = useRef(backendLoopOwnerBaseRef.current);
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
   const [detectionStats, setDetectionStats] = useState<DetectionStats>({
@@ -220,7 +222,12 @@ export const usePPEDetection = ({
   const fetchBackendSnapshotBase64 = useCallback(async (frameId?: number): Promise<string | null> => {
     if (!streamId) return null;
     try {
-      const res = await fetchStreamSnapshot(streamId, frameId);
+      const res = await fetchStreamSnapshot(
+        streamId,
+        frameId,
+        backendLoopOwnerRef.current,
+        'ppe_detection'
+      );
       if (!res.ok) return null;
       const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
       if (frameId && frameId > 0 && snapFrameId !== frameId) {
@@ -396,11 +403,13 @@ export const usePPEDetection = ({
   useEffect(() => {
     const useBackendDetection = !isLocalOfflineMode();
     if (!useBackendDetection || !streamId) return;
+    const ownerId = `${backendLoopOwnerBaseRef.current}:${++backendLoopOwnerGenerationRef.current}`;
+    backendLoopOwnerRef.current = ownerId;
 
     const stopLoop = () => {
       if (!backendLoopStartedRef.current) return;
       backendLoopStartedRef.current = false;
-      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+      stopStreamDetectionLoop(streamId, ownerId)
         .catch((error) => console.error('停止PPE后端检测循环失败:', error));
     };
 
@@ -409,10 +418,11 @@ export const usePPEDetection = ({
       startStreamDetectionLoop(streamId, {
         modelId: 'ppe_detection',
         confThreshold: Math.min(captureThreshold, getMinThreshold()),
-        ownerId: backendLoopOwnerRef.current,
+        ownerId,
       }).catch((error) => {
         backendLoopStartedRef.current = false;
         console.error('启动PPE后端检测循环失败:', error);
+        toast.error(`PPE模型启动失败：${error instanceof Error ? error.message : '未知错误'}`);
       });
     } else {
       stopLoop();
@@ -448,7 +458,11 @@ export const usePPEDetection = ({
 
       if (useBackendDetection && streamId) {
         try {
-          const result = await fetchStreamDetections(streamId);
+          const result = await fetchStreamDetections(
+            streamId,
+            backendLoopOwnerRef.current,
+            'ppe_detection'
+          );
           const backendDetections = result.detections as BackendYoloDetection[];
           currentFrameId = result.frameId || 0;
           detections = filterDetections(

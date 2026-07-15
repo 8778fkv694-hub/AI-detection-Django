@@ -18,16 +18,19 @@ const createScopedStorageName = () => {
   const explicitWindowId = params.get('windowId')?.trim();
 
   const buildScopeKey = () => {
-    if (pageInstanceId) return `page:${pageInstanceId}`;
-    if (stageCode) return `stage:${stageCode}`;
-    if (explicitWindowId) return `window:${explicitWindowId}`;
-
     const sessionStorageKey = `ocr-detection-scope:${window.location.pathname}`;
     let sessionScope = window.sessionStorage.getItem(sessionStorageKey);
     if (!sessionScope) {
       sessionScope = `tab:${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       window.sessionStorage.setItem(sessionStorageKey, sessionScope);
     }
+    const windowScope = explicitWindowId ? `window:${explicitWindowId}` : sessionScope;
+
+    // stage_code 只是工序标识，不是页面实例标识。同一工序开两个窗口时必须把
+    // window/tab 也纳入持久化键，否则两个配方会覆盖彼此的模型和规则。
+    if (pageInstanceId) return `page:${pageInstanceId}:${windowScope}`;
+    if (stageCode) return `stage:${stageCode}:${windowScope}`;
+    if (explicitWindowId) return windowScope;
     return sessionScope;
   };
 

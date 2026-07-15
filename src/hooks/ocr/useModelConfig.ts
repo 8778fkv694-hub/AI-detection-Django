@@ -75,9 +75,11 @@ export const useModelConfig = ({
   const previousModelRef = useRef<string | null>(null);
   const previousModelConfigRef = useRef<ModelConfig | null>(null);
   const lastLoadedModelRef = useRef<string | null>(null); // 🔧 新增：记录上次加载的模型ID，避免重复加载
+  const loadRequestSequenceRef = useRef(0);
 
   // 加载模型配置
   const loadModelConfig = useCallback(async (modelId: string | null) => {
+    const requestSequence = ++loadRequestSequenceRef.current;
     if (!modelId) {
       setModelConfig(null);
       return;
@@ -86,6 +88,10 @@ export const useModelConfig = ({
     setIsLoadingConfig(true);
     try {
       const result = await getModelConfig(modelId);
+      if (requestSequence !== loadRequestSequenceRef.current) {
+        console.log('忽略已过期的模型配置响应:', modelId);
+        return undefined;
+      }
       if (result.model) {
         setModelConfig(result.model);
         console.log('✅ OCR页面已加载模型配置:', result.model);
@@ -99,11 +105,14 @@ export const useModelConfig = ({
         return false; // 加载失败
       }
     } catch (error) {
+      if (requestSequence !== loadRequestSequenceRef.current) return undefined;
       console.error('❌ OCR页面加载模型配置失败:', error);
       setModelConfig(null);
       return false; // 加载失败
     } finally {
-      setIsLoadingConfig(false);
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setIsLoadingConfig(false);
+      }
     }
   }, []);
 

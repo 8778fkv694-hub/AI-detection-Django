@@ -6,6 +6,7 @@ import base64
 import io
 import logging
 import json
+import threading
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 
@@ -53,6 +54,13 @@ class OCRService:
 
     def __init__(self):
         """初始化OCR服务，延迟加载模型"""
+        self._load_lock = threading.RLock()
+        # RapidOCR/PaddleOCR 单例内部包含可复用执行状态。双窗口请求可以并发进入
+        # Django，但同一OCR引擎按次串行，避免ORT/OpenCV线程池叠加拖垮Jetson。
+        self._inference_locks = {
+            'rapidocr': threading.Lock(),
+            'paddleocr': threading.Lock(),
+        }
         # PaddleOCR 实例
         self.paddleocr_reader_with_cls = None
         self.paddleocr_reader_without_cls = None
@@ -148,39 +156,40 @@ class OCRService:
             logger.error("PIL或NumPy未安装，无法处理图片")
             return None
 
-        if use_angle_cls:
-            # 需要开启方向检测的实例
-            if self.paddleocr_with_cls_loaded:
-                return self.paddleocr_reader_with_cls
-            try:
-                logger.info("正在加载PaddleOCR模型（开启方向检测）...")
-                # 新版PaddleOCR使用 use_textline_orientation 替代 use_angle_cls
-                self.paddleocr_reader_with_cls = paddleocr.PaddleOCR(
-                    use_textline_orientation=True,
-                    lang='ch'
-                )
-                self.paddleocr_with_cls_loaded = True
-                logger.info("PaddleOCR模型加载成功（开启方向检测）")
-                return self.paddleocr_reader_with_cls
-            except Exception as e:
-                logger.error(f"PaddleOCR模型加载失败（开启方向检测）: {str(e)}")
-                return None
-        else:
-            # 关闭方向检测的实例（性能更好）
-            if self.paddleocr_without_cls_loaded:
-                return self.paddleocr_reader_without_cls
-            try:
-                logger.info("正在加载PaddleOCR模型（关闭方向检测）...")
-                self.paddleocr_reader_without_cls = paddleocr.PaddleOCR(
-                    use_textline_orientation=False,
-                    lang='ch'
-                )
-                self.paddleocr_without_cls_loaded = True
-                logger.info("PaddleOCR模型加载成功（关闭方向检测）")
-                return self.paddleocr_reader_without_cls
-            except Exception as e:
-                logger.error(f"PaddleOCR模型加载失败（关闭方向检测）: {str(e)}")
-                return None
+        with self._load_lock:
+            if use_angle_cls:
+                # 需要开启方向检测的实例
+                if self.paddleocr_with_cls_loaded:
+                    return self.paddleocr_reader_with_cls
+                try:
+                    logger.info("正在加载PaddleOCR模型（开启方向检测）...")
+                    # 新版PaddleOCR使用 use_textline_orientation 替代 use_angle_cls
+                    self.paddleocr_reader_with_cls = paddleocr.PaddleOCR(
+                        use_textline_orientation=True,
+                        lang='ch'
+                    )
+                    self.paddleocr_with_cls_loaded = True
+                    logger.info("PaddleOCR模型加载成功（开启方向检测）")
+                    return self.paddleocr_reader_with_cls
+                except Exception as e:
+                    logger.error(f"PaddleOCR模型加载失败（开启方向检测）: {str(e)}")
+                    return None
+            else:
+                # 关闭方向检测的实例（性能更好）
+                if self.paddleocr_without_cls_loaded:
+                    return self.paddleocr_reader_without_cls
+                try:
+                    logger.info("正在加载PaddleOCR模型（关闭方向检测）...")
+                    self.paddleocr_reader_without_cls = paddleocr.PaddleOCR(
+                        use_textline_orientation=False,
+                        lang='ch'
+                    )
+                    self.paddleocr_without_cls_loaded = True
+                    logger.info("PaddleOCR模型加载成功（关闭方向检测）")
+                    return self.paddleocr_reader_without_cls
+                except Exception as e:
+                    logger.error(f"PaddleOCR模型加载失败（关闭方向检测）: {str(e)}")
+                    return None
     
     def _load_rapidocr_model(self):
         """加载 RapidOCR 模型
@@ -196,41 +205,41 @@ class OCRService:
             logger.error("PIL或NumPy未安装，无法处理图片")
             return None
         
-        if self.rapidocr_loaded:
-            return self.rapidocr_reader
-        
-        try:
-            logger.info("正在加载 RapidOCR 模型...")
+        with self._load_lock:
+            if self.rapidocr_loaded:
+                return self.rapidocr_reader
+            try:
+                logger.info("正在加载 RapidOCR 模型...")
             
             # 指定本地模型路径，避免自动下载
             # 假设模型存放在当前项目目录的 models/rapidocr/ 下
-            import os
-            base_path = os.path.dirname(os.path.abspath(__file__))
-            model_dir = os.path.join(base_path, 'models', 'rapidocr')
+                import os
+                base_path = os.path.dirname(os.path.abspath(__file__))
+                model_dir = os.path.join(base_path, 'models', 'rapidocr')
             
-            det_path = os.path.join(model_dir, 'ch_PP-OCRv4_det_infer.onnx')
-            cls_path = os.path.join(model_dir, 'ch_ppocr_mobile_v2.0_cls_infer.onnx')
-            rec_path = os.path.join(model_dir, 'ch_PP-OCRv4_rec_infer.onnx')
+                det_path = os.path.join(model_dir, 'ch_PP-OCRv4_det_infer.onnx')
+                cls_path = os.path.join(model_dir, 'ch_ppocr_mobile_v2.0_cls_infer.onnx')
+                rec_path = os.path.join(model_dir, 'ch_PP-OCRv4_rec_infer.onnx')
             
             # 检查模型文件是否存在，如果存在则指定路径，否则让它尝试自动下载
-            config_args = {}
-            if os.path.exists(det_path): 
-                config_args['det_model_path'] = det_path
-            if os.path.exists(cls_path): 
-                config_args['cls_model_path'] = cls_path
-            if os.path.exists(rec_path): 
-                config_args['rec_model_path'] = rec_path
+                config_args = {}
+                if os.path.exists(det_path):
+                    config_args['det_model_path'] = det_path
+                if os.path.exists(cls_path):
+                    config_args['cls_model_path'] = cls_path
+                if os.path.exists(rec_path):
+                    config_args['rec_model_path'] = rec_path
             
             # 初始化 RapidOCR
-            self.rapidocr_reader = RapidOCR(**config_args)
-            self.rapidocr_loaded = True
+                self.rapidocr_reader = RapidOCR(**config_args)
+                self.rapidocr_loaded = True
             
-            local_models = os.path.exists(det_path)
-            logger.info(f"RapidOCR 模型加载成功 (本地模型: {local_models})")
-            return self.rapidocr_reader
-        except Exception as e:
-            logger.error(f"RapidOCR 模型加载失败: {str(e)}")
-            return None
+                local_models = os.path.exists(det_path)
+                logger.info(f"RapidOCR 模型加载成功 (本地模型: {local_models})")
+                return self.rapidocr_reader
+            except Exception as e:
+                logger.error(f"RapidOCR 模型加载失败: {str(e)}")
+                return None
     
 
     def extract_text(self, image_data, model_name=None, use_angle_cls=False):
@@ -298,7 +307,13 @@ class OCRService:
             # 执行 RapidOCR 识别
             # RapidOCR接口: result, elapse = engine(img_content, use_det=True, use_cls=use_angle_cls, use_rec=True)
             logger.info(f"RapidOCR 执行识别: use_cls={use_angle_cls}")
-            result, elapse = rapidocr_reader(img_array, use_det=True, use_cls=use_angle_cls, use_rec=True)
+            with self._inference_locks['rapidocr']:
+                result, elapse = rapidocr_reader(
+                    img_array,
+                    use_det=True,
+                    use_cls=use_angle_cls,
+                    use_rec=True,
+                )
             
             if not result:
                 return {
@@ -431,7 +446,8 @@ class OCRService:
             
             # 执行OCR识别
             logger.info(f"PaddleOCR执行识别: use_angle_cls={use_angle_cls}")
-            results = paddleocr_reader.ocr(image_array)
+            with self._inference_locks['paddleocr']:
+                results = paddleocr_reader.ocr(image_array)
             
             # 如果启用了方向检测，使用详细解析器
             if use_angle_cls:

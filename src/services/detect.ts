@@ -46,6 +46,8 @@ export interface FrameDetectionResult {
   frameId?: number;
   /** stream-loop 模式下后端上报的原始帧尺寸，用于检测框坐标缩放 */
   sourceSize?: { width: number; height: number };
+  /** 后端实际执行的模型，用于双窗口隔离校验 */
+  modelId?: string;
 }
 
 export interface DetectImageOptions {
@@ -218,23 +220,38 @@ export async function detectVideoFrame(
  */
 export async function fetchStreamSnapshot(
   streamId: string,
-  frameId?: number
+  frameId?: number,
+  ownerId?: string,
+  modelId?: string
 ): Promise<Response> {
-  const query = frameId && frameId > 0 ? `?frame_id=${frameId}` : '';
+  const params = new URLSearchParams();
+  if (frameId && frameId > 0) params.set('frame_id', String(frameId));
+  if (ownerId) params.set('owner_id', ownerId);
+  if (modelId) params.set('model_id', modelId);
+  const query = params.size > 0 ? `?${params.toString()}` : '';
   return fetch(buildApiUrl(`/streams/${streamId}/snapshot/${query}`));
 }
 
 /** stream-loop 模式：拉取后端检测循环的最新结果 */
 export async function fetchStreamDetections(
-  streamId: string
+  streamId: string,
+  ownerId?: string,
+  modelId?: string
 ): Promise<FrameDetectionResult> {
-  const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/`));
+  const params = new URLSearchParams();
+  if (ownerId) params.set('owner_id', ownerId);
+  if (modelId) params.set('model_id', modelId);
+  const query = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await fetch(buildApiUrl(`/streams/${streamId}/detections/${query}`));
   if (!response.ok) {
     // 与旧内联实现语义一致：非 200 视为本次轮询失败，由调用方 catch 跳过本帧更新
     // （不能返回空结果，否则会把上一帧的性能指标闪成空）
     throw new Error(`拉取检测结果失败: HTTP ${response.status}`);
   }
   const result = await response.json();
+  if (modelId && result.model_id && result.model_id !== modelId) {
+    throw new Error(`检测结果模型不一致: 请求 ${modelId}，实际 ${result.model_id}`);
+  }
   return {
     detections: result.boxes || [],
     source: 'stream-loop',
@@ -244,6 +261,7 @@ export async function fetchStreamDetections(
     sourceSize: result.frame_width && result.frame_height
       ? { width: result.frame_width, height: result.frame_height }
       : undefined,
+    modelId: result.model_id,
   };
 }
 
@@ -251,8 +269,8 @@ export async function fetchStreamDetections(
 export async function startStreamDetectionLoop(
   streamId: string,
   params: { confThreshold: number; modelId?: string; ownerId: string }
-): Promise<void> {
-  await fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
+): Promise<{ loopId?: string; modelId?: string }> {
+  const response = await fetch(buildApiUrl(`/streams/${streamId}/detection-loop/start/`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -261,6 +279,15 @@ export async function startStreamDetectionLoop(
       owner_id: params.ownerId,
     }),
   });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.message || `启动检测循环失败: HTTP ${response.status}`);
+  }
+  const actualModelId = data.status?.model_id;
+  if (params.modelId && actualModelId && actualModelId !== params.modelId) {
+    throw new Error(`模型绑定不一致: 请求 ${params.modelId}，实际 ${actualModelId}`);
+  }
+  return { loopId: data.loop_id, modelId: actualModelId };
 }
 
 /** stream-loop 模式：请求后端停止检测循环 */
@@ -268,9 +295,13 @@ export async function stopStreamDetectionLoop(
   streamId: string,
   ownerId: string
 ): Promise<void> {
-  await fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
+  const response = await fetch(buildApiUrl(`/streams/${streamId}/detection-loop/stop/`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ owner_id: ownerId }),
   });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `停止检测循环失败: HTTP ${response.status}`);
+  }
 }

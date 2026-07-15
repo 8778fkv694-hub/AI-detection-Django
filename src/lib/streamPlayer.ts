@@ -16,6 +16,8 @@ export interface StreamPlayerOptions {
   onFrame?: (frameData: string) => void;
   onStreamTaken?: () => void; // 当流被其他窗口占用时的回调
   windowId?: string; // 窗口ID，用于跨窗口通信
+  /** 后端共享流允许多窗口同时观看；物理独占场景才设为 true */
+  exclusive?: boolean;
 }
 
 export class StreamPlayer {
@@ -36,6 +38,7 @@ export class StreamPlayer {
   private frameCount = 0;
   private broadcastChannel: BroadcastChannel | null = null;
   private windowId: string;
+  private exclusive: boolean;
   private consecutiveErrorCount = 0;
   private isFetchingFrame = false;
   private captureTrack: CanvasCaptureMediaStreamTrack | null = null;
@@ -79,6 +82,7 @@ export class StreamPlayer {
     this.onFrame = options.onFrame;
     this.onStreamTaken = options.onStreamTaken;
     this.windowId = options.windowId || `window_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.exclusive = options.exclusive ?? true;
 
     // 创建canvas用于渲染图片到video
     this.canvas = this.displayCanvas ?? document.createElement('canvas');
@@ -120,6 +124,7 @@ export class StreamPlayer {
    * 初始化跨窗口通信
    */
   private initBroadcastChannel(): void {
+    if (!this.exclusive) return;
     try {
       // 为每个流创建一个专属的广播频道
       this.broadcastChannel = new BroadcastChannel(`stream_${this.streamId}`);
@@ -149,7 +154,7 @@ export class StreamPlayer {
    * 广播占用流的消息
    */
   private broadcastStreamRequest(): void {
-    if (this.broadcastChannel) {
+    if (this.exclusive && this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage({
           type: 'REQUEST_STREAM',

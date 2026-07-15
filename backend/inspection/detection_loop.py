@@ -232,7 +232,11 @@ class DetectionLoop:
 
 
 class DetectionLoopManager:
-    """管理多个流的检测循环（单例）"""
+    """管理多个“视频流 + 模型 + 阈值”检测循环（单例）。
+
+    同一路视频允许被两个独立窗口分别绑定不同模型。owner_id 用来把查询、抓拍和
+    停止操作精确路由回调用方自己的循环，杜绝后打开窗口覆盖先打开窗口的模型。
+    """
 
     _instance: Optional['DetectionLoopManager'] = None
     _init_lock = threading.Lock()
@@ -242,11 +246,66 @@ class DetectionLoopManager:
             with cls._init_lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
+                    # key = stream_id::model_id::confidence
                     cls._instance._loops: Dict[str, DetectionLoop] = {}
-                    cls._instance._ref_counts: Dict[str, int] = {}
+                    cls._instance._anonymous_ref_counts: Dict[str, int] = {}
                     cls._instance._owners: Dict[str, set[str]] = {}
+                    cls._instance._owner_loops: Dict[str, str] = {}
                     cls._instance._lock = threading.Lock()
         return cls._instance
+
+    @staticmethod
+    def _make_loop_key(stream_id: str, model_id: str, conf_threshold: float) -> str:
+        return f'{stream_id}::{model_id}::{float(conf_threshold):.4f}'
+
+    def _stream_loop_keys_locked(self, stream_id: str) -> List[str]:
+        return [
+            loop_key for loop_key, loop in self._loops.items()
+            if loop.stream_id == stream_id and loop.is_running
+        ]
+
+    def _stop_loop_key_locked(self, loop_key: str) -> None:
+        loop = self._loops.pop(loop_key, None)
+        if not loop:
+            return
+        loop.stop()
+        for owner in self._owners.pop(loop_key, set()):
+            if self._owner_loops.get(owner) == loop_key:
+                self._owner_loops.pop(owner, None)
+        self._anonymous_ref_counts.pop(loop_key, None)
+        from .yolo import unpin_model
+        unpin_model(loop.model_id)
+
+    def _detach_owner_locked(self, owner_id: str) -> None:
+        loop_key = self._owner_loops.pop(owner_id, None)
+        if not loop_key:
+            return
+        owners = self._owners.setdefault(loop_key, set())
+        owners.discard(owner_id)
+        if not owners and self._anonymous_ref_counts.get(loop_key, 0) <= 0:
+            self._stop_loop_key_locked(loop_key)
+
+    def _resolve_loop_key_locked(
+        self,
+        stream_id: str,
+        owner_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+    ) -> Optional[str]:
+        if owner_id:
+            loop_key = self._owner_loops.get(owner_id)
+            loop = self._loops.get(loop_key or '')
+            if loop and loop.is_running and loop.stream_id == stream_id:
+                return loop_key
+            return None
+
+        candidates = self._stream_loop_keys_locked(stream_id)
+        if model_id:
+            candidates = [key for key in candidates if self._loops[key].model_id == model_id]
+        if not candidates:
+            return None
+        # 旧客户端没有 owner_id：单循环时完全兼容；多循环时稳定返回第一个，
+        # 新版前端始终携带 owner_id，不会走到这个兼容分支。
+        return sorted(candidates)[0]
 
     def start_loop(
         self,
@@ -255,21 +314,16 @@ class DetectionLoopManager:
         conf_threshold: float = 0.5,
         owner_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """启动指定流的检测循环（引用计数，支持多消费者）"""
+        """启动独立检测循环；同流不同模型不会互相覆盖。"""
         with self._lock:
-            from .yolo import MAX_MODEL_POOL_SIZE
+            from .yolo import MAX_MODEL_POOL_SIZE, pin_model, unpin_model
 
-            def add_reference() -> int:
-                # 新版前端传 owner_id，同一 owner 重复 start 只算一次；
-                # 这样 OCR/实时检测/PPE 共享同一个 stream 时，一个页面的 cleanup
-                # 不会误停另一个页面正在使用的检测循环。
-                if owner_id:
-                    owners = self._owners.setdefault(stream_id, set())
-                    owners.add(owner_id)
-                    self._ref_counts[stream_id] = len(owners)
-                else:
-                    self._ref_counts[stream_id] = self._ref_counts.get(stream_id, 0) + 1
-                return self._ref_counts.get(stream_id, 0)
+            loop_key = self._make_loop_key(stream_id, model_id, conf_threshold)
+
+            # 同一页面切换配方/模型时，只释放该页面旧循环，不影响其他窗口。
+            previous_loop_key = self._owner_loops.get(owner_id or '') if owner_id else None
+            if previous_loop_key and previous_loop_key != loop_key:
+                self._detach_owner_locked(owner_id)
 
             def active_model_counts() -> Dict[str, int]:
                 counts: Dict[str, int] = {}
@@ -279,56 +333,26 @@ class DetectionLoopManager:
                     counts[loop.model_id] = counts.get(loop.model_id, 0) + 1
                 return counts
 
-            def would_exceed_model_capacity(
-                next_model_id: str,
-                replacing_model_id: Optional[str] = None,
-            ) -> tuple[bool, int]:
+            def would_exceed_model_capacity(next_model_id: str) -> tuple[bool, int]:
                 counts = active_model_counts()
-                if replacing_model_id and counts.get(replacing_model_id, 0) <= 1:
-                    counts.pop(replacing_model_id, None)
                 counts[next_model_id] = counts.get(next_model_id, 0) + 1
                 return len(counts) > MAX_MODEL_POOL_SIZE, len(counts)
 
-            # 如果已有循环在跑
-            if stream_id in self._loops and self._loops[stream_id].is_running:
-                old_loop = self._loops[stream_id]
-                # 如果配置没变，直接返回
-                if old_loop.model_id == model_id and old_loop.conf_threshold == conf_threshold:
-                    owners = add_reference()
-                    return {
-                        'success': True,
-                        'message': f'检测循环已在运行: stream={stream_id}',
-                        'status': old_loop.get_status(),
-                        'owners': owners,
-                    }
-
-                exceeds_capacity, candidate_count = would_exceed_model_capacity(
-                    model_id,
-                    replacing_model_id=old_loop.model_id,
-                )
-                if exceeds_capacity:
-                    return {
-                        'success': False,
-                        'message': (
-                            f'模型池将超限（{candidate_count}/{MAX_MODEL_POOL_SIZE}），'
-                            f'无法将 stream={stream_id} 切换到模型 {model_id}。'
-                            f'请先停止一个使用其他模型的检测循环。'
-                        ),
-                        'status': old_loop.get_status(),
-                        'owners': self._ref_counts.get(stream_id, 0),
-                    }
-
-                # 配置变了，更新配置
-                owners = add_reference()
-                old_loop.update_config(model_id=model_id, conf_threshold=conf_threshold)
+            existing_loop = self._loops.get(loop_key)
+            if existing_loop and existing_loop.is_running:
+                if owner_id:
+                    self._owners.setdefault(loop_key, set()).add(owner_id)
+                    self._owner_loops[owner_id] = loop_key
+                else:
+                    self._anonymous_ref_counts[loop_key] = self._anonymous_ref_counts.get(loop_key, 0) + 1
                 return {
                     'success': True,
-                    'message': f'检测循环配置已更新: stream={stream_id}',
-                    'status': old_loop.get_status(),
-                    'owners': owners,
+                    'message': f'检测循环已在运行: stream={stream_id}, model={model_id}',
+                    'loop_id': loop_key,
+                    'status': existing_loop.get_status(),
+                    'owners': len(self._owners.get(loop_key, set())),
                 }
 
-            # 检查模型池容量
             exceeds_capacity, candidate_count = would_exceed_model_capacity(model_id)
             if exceeds_capacity:
                 return {
@@ -337,20 +361,39 @@ class DetectionLoopManager:
                         f'模型池已满（{candidate_count}/{MAX_MODEL_POOL_SIZE}），'
                         f'无法加载新模型 {model_id}。请先停止一个检测循环。'
                     ),
-                    'owners': self._ref_counts.get(stream_id, 0),
+                    'owners': 0,
                 }
 
-            # 创建并启动新循环
-            loop = DetectionLoop(stream_id, model_id, conf_threshold)
-            loop.start()
-            self._loops[stream_id] = loop
-            owners = add_reference()
+            # 启动接口同步加载并固定模型，失败会直接返回给前端，避免页面看似已启动
+            # 实际后台线程持续报错。
+            model_was_pinned = False
+            try:
+                pin_model(model_id)
+                model_was_pinned = True
+                loop = DetectionLoop(stream_id, model_id, conf_threshold)
+                loop.start()
+            except Exception as exc:
+                if model_was_pinned:
+                    unpin_model(model_id)
+                return {
+                    'success': False,
+                    'message': f'模型 {model_id} 启动失败: {exc}',
+                    'owners': 0,
+                }
+
+            self._loops[loop_key] = loop
+            if owner_id:
+                self._owners.setdefault(loop_key, set()).add(owner_id)
+                self._owner_loops[owner_id] = loop_key
+            else:
+                self._anonymous_ref_counts[loop_key] = 1
 
             return {
                 'success': True,
                 'message': f'检测循环已启动: stream={stream_id}, model={model_id}',
+                'loop_id': loop_key,
                 'status': loop.get_status(),
-                'owners': owners,
+                'owners': len(self._owners.get(loop_key, set())),
             }
 
     def stop_loop(
@@ -359,80 +402,80 @@ class DetectionLoopManager:
         owner_id: Optional[str] = None,
         force: bool = False,
     ) -> Dict[str, Any]:
-        """停止指定流的检测循环（引用计数归零才真停）"""
+        """停止调用方自己的循环；force=True 才停止该视频流的全部模型。"""
         with self._lock:
             if force:
-                self._owners.pop(stream_id, None)
-                self._ref_counts[stream_id] = 0
-            elif owner_id:
-                owners = self._owners.setdefault(stream_id, set())
-                if owner_id not in owners:
+                loop_keys = self._stream_loop_keys_locked(stream_id)
+                for loop_key in loop_keys:
+                    self._stop_loop_key_locked(loop_key)
+                return {
+                    'success': True,
+                    'message': f'已停止流 {stream_id} 的全部检测循环',
+                    'owners': 0,
+                }
+
+            if owner_id:
+                loop_key = self._owner_loops.get(owner_id)
+                loop = self._loops.get(loop_key or '')
+                if not loop or loop.stream_id != stream_id:
                     return {
                         'success': True,
                         'message': f'owner 未持有检测循环，忽略停止: stream={stream_id}',
-                        'owners': len(owners),
+                        'owners': 0,
                     }
-                owners.discard(owner_id)
-                self._ref_counts[stream_id] = len(owners)
-            elif self._owners.get(stream_id):
+                self._detach_owner_locked(owner_id)
                 return {
                     'success': True,
-                    'message': f'存在 owner 持有检测循环，忽略无 owner 停止: stream={stream_id}',
-                    'owners': len(self._owners[stream_id]),
-                }
-            else:
-                current = self._ref_counts.get(stream_id, 0)
-                if current <= 0:
-                    return {
-                        'success': False,
-                        'message': f'未找到检测循环引用: stream={stream_id}',
-                    }
-                self._ref_counts[stream_id] = current - 1
-
-            current = self._ref_counts.get(stream_id, 0)
-            if current > 0:
-                return {
-                    'success': True,
-                    'message': f'检测循环仍有其他消费者 ({current}), 不停止: stream={stream_id}',
-                    'owners': current,
+                    'message': f'已释放 owner 检测循环: stream={stream_id}',
+                    'owners': len(self._owners.get(loop_key, set())),
                 }
 
-            if stream_id not in self._loops:
+            loop_key = self._resolve_loop_key_locked(stream_id)
+            if not loop_key:
+                return {
+                    'success': False,
+                    'message': f'未找到检测循环引用: stream={stream_id}',
+                }
+            current = self._anonymous_ref_counts.get(loop_key, 0)
+            if current > 1:
+                self._anonymous_ref_counts[loop_key] = current - 1
                 return {
                     'success': True,
-                    'message': f'检测循环引用已清零: stream={stream_id}',
-                    'owners': 0,
+                    'message': f'检测循环仍有匿名消费者 ({current - 1})',
+                    'owners': len(self._owners.get(loop_key, set())),
                 }
-            loop = self._loops[stream_id]
-            loop.stop()
-            del self._loops[stream_id]
-            self._owners.pop(stream_id, None)
+            self._anonymous_ref_counts[loop_key] = 0
+            if not self._owners.get(loop_key):
+                self._stop_loop_key_locked(loop_key)
             return {
                 'success': True,
                 'message': f'检测循环已停止: stream={stream_id}',
                 'owners': 0,
             }
 
-    def get_latest_boxes(self, stream_id: str) -> List[Dict[str, Any]]:
+    def get_latest_boxes(self, stream_id: str, owner_id: Optional[str] = None, model_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取指定流的最新检测框（给 MJPEG 画框用）"""
         with self._lock:
-            loop = self._loops.get(stream_id)
+            loop_key = self._resolve_loop_key_locked(stream_id, owner_id, model_id)
+            loop = self._loops.get(loop_key or '')
         if loop and loop.is_running:
             return loop.get_latest_boxes()
         return []
 
-    def get_latest_result(self, stream_id: str) -> Optional[Dict[str, Any]]:
+    def get_latest_result(self, stream_id: str, owner_id: Optional[str] = None, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """获取指定流的最新检测结果"""
         with self._lock:
-            loop = self._loops.get(stream_id)
+            loop_key = self._resolve_loop_key_locked(stream_id, owner_id, model_id)
+            loop = self._loops.get(loop_key or '')
         if loop and loop.is_running:
             return loop.get_latest_result()
         return None
 
-    def get_snapshot_jpeg(self, stream_id: str, frame_id: Optional[int] = None) -> Tuple[Optional[bytes], Optional[int]]:
+    def get_snapshot_jpeg(self, stream_id: str, frame_id: Optional[int] = None, owner_id: Optional[str] = None, model_id: Optional[str] = None) -> Tuple[Optional[bytes], Optional[int]]:
         """获取指定流的高清截图"""
         with self._lock:
-            loop = self._loops.get(stream_id)
+            loop_key = self._resolve_loop_key_locked(stream_id, owner_id, model_id)
+            loop = self._loops.get(loop_key or '')
         if loop and loop.is_running:
             return loop.get_snapshot_jpeg(frame_id)
         return None, None
@@ -441,26 +484,26 @@ class DetectionLoopManager:
         """获取所有检测循环的状态"""
         with self._lock:
             statuses = {
-                sid: loop.get_status()
-                for sid, loop in self._loops.items()
+                loop_key: loop.get_status()
+                for loop_key, loop in self._loops.items()
             }
         return {
             'active_loops': len(statuses),
             'loops': statuses,
             'owners': {
-                sid: len(owners)
-                for sid, owners in self._owners.items()
+                loop_key: sorted(owners)
+                for loop_key, owners in self._owners.items()
             },
+            'owner_loops': dict(self._owner_loops),
         }
 
     def stop_all(self):
         """停止所有检测循环"""
         with self._lock:
-            for stream_id, loop in list(self._loops.items()):
-                loop.stop()
-            self._loops.clear()
-            self._ref_counts.clear()
-            self._owners.clear()
+            for loop_key in list(self._loops):
+                self._stop_loop_key_locked(loop_key)
+            self._anonymous_ref_counts.clear()
+            self._owner_loops.clear()
         logger.info("🛑 All detection loops stopped")
 
 

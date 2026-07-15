@@ -159,7 +159,10 @@ const OCRDetectionScreen: React.FC = () => {
   const processStageCode = urlParams.get('stage_code')?.trim() || '';
   const processStageName = urlParams.get('stage_name')?.trim() || processStageCode;
   const pageInstanceId = urlParams.get('page_instance_id')?.trim() || windowId;
-  const cameraId = urlParams.get('camera_id')?.trim() || selectedDeviceId || '';
+  const requestedCameraId = (
+    urlParams.get('camera_id') || urlParams.get('camera') || ''
+  ).trim();
+  const cameraId = requestedCameraId || selectedDeviceId || '';
   // 后端检测循环需要的是 StreamSource 的 DB 主键，不是浏览器 deviceId
   // 虚拟摄像头 selectedDeviceId = "stream-<id>"，物理摄像头 = 浏览器 UUID
   const backendStreamId = selectedDeviceId?.startsWith('stream-') ? selectedDeviceId.replace('stream-', '') : null;
@@ -201,7 +204,7 @@ const OCRDetectionScreen: React.FC = () => {
   const effectiveStageCode    = processStageCode    || stageBindingConfig.processStageCode;
   const effectiveStageName    = processStageName    || stageBindingConfig.processStageName    || effectiveStageCode;
   const effectivePageId       = pageInstanceId      || stageBindingConfig.pageInstanceId;
-  const effectiveCameraId     = cameraId            || stageBindingConfig.cameraId;
+  const effectiveCameraId     = requestedCameraId   || stageBindingConfig.cameraId || selectedDeviceId;
   const effectiveFixturePrefixes = fixtureQrPrefixes.length > 0
     ? fixtureQrPrefixes
     : stageBindingConfig.fixtureQrPrefixes.split(',').map(s => s.trim()).filter(Boolean);
@@ -454,45 +457,34 @@ const OCRDetectionScreen: React.FC = () => {
     });
     // 关键词 — 无论 enable 状态都覆盖，确保不保留旧配置
     setEnableKeywordAnalysis(recipe.enableKeywordAnalysis);
-    if (recipe.enableKeywordAnalysis) {
-      setKeywords(recipe.keywords);
-      setKeywordConfigs(recipe.keywordConfigs.map(kw => ({
-        ...kw,
-        id: kw.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      })));
-      setKeywordMatchMode(recipe.keywordMatchMode);
-      setMinConfidence(recipe.minConfidence);
-    }
+    setKeywords(recipe.keywords);
+    setKeywordConfigs(recipe.keywordConfigs.map(kw => ({
+      ...kw,
+      id: kw.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    })));
+    setKeywordMatchMode(recipe.keywordMatchMode);
+    setMinConfidence(recipe.minConfidence);
     // 条码 — 同上
     setEnableBarcodeDetection(recipe.enableBarcodeDetection);
-    if (recipe.enableBarcodeDetection) {
-      setBarcodeConfigs(recipe.barcodeConfigs.map(bc => ({
-        ...bc,
-        id: bc.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      })));
-    }
+    setBarcodeConfigs(recipe.barcodeConfigs.map(bc => ({
+      ...bc,
+      id: bc.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    })));
     // OCR 引擎
     setOcrEngineModel(recipe.ocrEngineModel);
     setDetectionConfidence(recipe.detectionConfidence);
     // 模型与目标同步（抑制 useModelConfig 的自动全选，由配方指定目标）
     suppressAutoSelectRef.current = true;
-    if (recipe.currentModelId) {
-      setCurrentModelId(recipe.currentModelId);
-    }
-    if (recipe.selectedTargets && recipe.selectedTargets.length > 0) {
-      setSelectedTargets(recipe.selectedTargets);
-    }
+    setCurrentModelId(recipe.currentModelId || null);
+    setSelectedTargets(recipe.selectedTargets ?? []);
     // mini模式目标
-    if (recipe.nonGridTargets && recipe.nonGridTargets.length > 0) {
-      setNonGridTargets(recipe.nonGridTargets);
-    }
+    setNonGridTargets(recipe.nonGridTargets ?? []);
     // 每个目标独立置信度
     setTargetConfidences(recipe.targetConfidences ?? {});
-    // 融合模式
-    setFusionModeEnabled(recipe.fusionModeEnabled);
-    if (recipe.fusionModeEnabled && recipe.selectedStandardId) {
-      setSelectedStandardId(recipe.selectedStandardId);
-    }
+    // LLM融合绝不随配方自动开启：Jetson双YOLO + OCR并行时必须保持零驻留。
+    // 标准可以预选，但用户若确实需要LLM，必须在当前窗口手动开启。
+    setFusionModeEnabled(false);
+    setSelectedStandardId(recipe.selectedStandardId ?? undefined);
     // 检测流程参数
     setAutoCapture(recipe.autoCapture);
     setCaptureDelaySeconds(recipe.captureDelaySeconds);
@@ -634,7 +626,9 @@ const OCRDetectionScreen: React.FC = () => {
   ]);
 
   const { toggleCamera, switchCamera } = useOCRCamera({
-    windowId, videoRef, previewCanvasRef, isCameraOn, setIsCameraOn, setIsRealtimeActive,
+    windowId,
+    preferredCameraId: requestedCameraId || stageBindingConfig.cameraId,
+    videoRef, previewCanvasRef, isCameraOn, setIsCameraOn, setIsRealtimeActive,
     selectedDeviceId, setSelectedDeviceId, availableDevices, setAvailableDevices,
   });
 
@@ -970,7 +964,7 @@ const OCRDetectionScreen: React.FC = () => {
     stitchROISnapshots, stitchMultipleROIs, captureFrameData, processCapturedImage: processCapturedImage as any,
     detectedElements, elementDetectionStartTime, detectionStats, nonGridTargets,
     streamId: backendStreamId ?? undefined,
-    setIsDetecting, setDetectedElements, setElementDetectionStartTime,
+    setIsRealtimeActive, setIsDetecting, setDetectedElements, setElementDetectionStartTime,
     setDetectionStats, setCurrentSharpness, setBestSharpness, setIsInPostDetectionDelay,
     setWorkflowState: setWorkflowState as any, setSelectedImage, setImagePreview, setIsWaitingForSpace,
     setMatchStatus: setMatchStatus as any, setWorkflowResult, setAiAnalysisResult, setFinalResult,

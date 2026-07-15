@@ -134,7 +134,9 @@ export const useLiveYoloDetection = ({
   handleDirectAIDetection,
   getTargetChineseName,
 }: UseLiveYoloDetectionOptions): UseLiveYoloDetectionResult => {
-  const backendLoopOwnerRef = useRef(`live:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerBaseRef = useRef(`live:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerGenerationRef = useRef(0);
+  const backendLoopOwnerRef = useRef(backendLoopOwnerBaseRef.current);
   const isDetectingRef = useRef(false);
   const lastDetectTimeRef = useRef(0);
 
@@ -208,7 +210,11 @@ export const useLiveYoloDetection = ({
       if (useBackendDetection && streamId) {
         // 解耦模式：拉取后端最新 JSON 结果
         try {
-          const result = await fetchStreamDetections(streamId);
+          const result = await fetchStreamDetections(
+            streamId,
+            backendLoopOwnerRef.current,
+            modelId
+          );
           detections = result.detections;
           currentFrameId = result.frameId || 0;
           setPerfStats({ inferenceMs: result.inferenceMs, fps: result.fps });
@@ -312,7 +318,12 @@ export const useLiveYoloDetection = ({
               // 获取图像进行处理
               if (useBackendDetection && streamId) {
                 try {
-                  const res = await fetchStreamSnapshot(streamId, currentFrameId);
+                  const res = await fetchStreamSnapshot(
+                    streamId,
+                    currentFrameId,
+                    backendLoopOwnerRef.current,
+                    modelId
+                  );
                   if (res.ok) {
                     const snapFrameId = parseInt(res.headers.get('X-Frame-ID') || '0', 10);
                     if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
@@ -461,23 +472,29 @@ export const useLiveYoloDetection = ({
   useEffect(() => {
     const useBackendDetection = !isOfflineEngineActive();
     if (!useBackendDetection || !streamId) return;
+    const ownerId = `${backendLoopOwnerBaseRef.current}:${++backendLoopOwnerGenerationRef.current}`;
+    backendLoopOwnerRef.current = ownerId;
 
     if (isCameraOn && isYoloActive) {
       console.log(`🚀 正在请求后端启动Live YOLO检测循环: stream=${streamId}`);
       startStreamDetectionLoop(streamId, {
         confThreshold: detectionConfidence,
         modelId,
-        ownerId: backendLoopOwnerRef.current,
-      }).catch(e => console.error('启动后端Live YOLO检测循环失败:', e));
+        ownerId,
+      }).catch(e => {
+        console.error('启动后端Live YOLO检测循环失败:', e);
+        toast.error(`检测模型启动失败：${e instanceof Error ? e.message : '未知错误'}`);
+        setIsYoloActive(false);
+      });
     } else {
       console.log(`🛑 正在请求后端停止Live YOLO检测循环: stream=${streamId}`);
-      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+      stopStreamDetectionLoop(streamId, ownerId)
         .catch(e => console.error('停止后端Live YOLO检测循环失败:', e));
     }
 
     return () => {
       if (useBackendDetection && streamId) {
-        stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+        stopStreamDetectionLoop(streamId, ownerId)
           .catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
       }
     };

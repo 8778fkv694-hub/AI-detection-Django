@@ -17,6 +17,8 @@ import toast from 'react-hot-toast';
 
 interface UseOCRCameraOptions {
   windowId: string;
+  /** URL/配方绑定的摄像头；支持 stream UUID 或 stream-UUID */
+  preferredCameraId?: string;
   videoRef: React.RefObject<HTMLVideoElement>;
   previewCanvasRef?: React.RefObject<HTMLCanvasElement>;
   isCameraOn: boolean;
@@ -30,6 +32,7 @@ interface UseOCRCameraOptions {
 
 export const useOCRCamera = ({
   windowId,
+  preferredCameraId,
   videoRef,
   previewCanvasRef: _previewCanvasRef,
   isCameraOn,
@@ -44,6 +47,15 @@ export const useOCRCamera = ({
   const hlsPlayerRef = useRef<HLSPlayer | null>(null);
   const mjpegPlayerRef = useRef<MJPEGPlayer | null>(null);
   const manualCameraSelectionRef = useRef(false);
+
+  const resolveDeviceId = useCallback((cameraId: string | undefined, devices: CameraDevice[]) => {
+    const requested = cameraId?.trim();
+    if (!requested) return '';
+    if (devices.some(device => device.deviceId === requested)) return requested;
+    const virtualId = requested.startsWith('stream-') ? requested : `stream-${requested}`;
+    if (devices.some(device => device.deviceId === virtualId)) return virtualId;
+    return '';
+  }, []);
 
   // 全局视频流显示设置（仅影响浏览器渲染，不影响 YOLO 检测）
   const globalFps = useStreamSettingsStore((s) => s.fps);
@@ -154,6 +166,7 @@ export const useOCRCamera = ({
             quality: Math.min(globalQuality, 90),
             targetWidth: globalWidth || 1280,
             windowId: windowId,
+            exclusive: false,
             onError: (error) => {
               console.error('StreamPlayer 兼容预览错误:', error);
               toast.error(`流媒体播放失败: ${error.message}`);
@@ -180,6 +193,7 @@ export const useOCRCamera = ({
           quality: globalQuality,
           targetWidth: globalWidth,
           windowId: windowId,
+          exclusive: false,
           onError: (error) => {
             console.error('MJPEGPlayer 错误:', error);
             if (initializingMjpeg) {
@@ -417,10 +431,15 @@ export const useOCRCamera = ({
 
       // 从URL参数获取首选摄像头
       const urlParams = new URLSearchParams(window.location.search);
-      const preferredCamera = urlParams.get('camera');
+      const preferredCamera =
+        urlParams.get('camera') ||
+        urlParams.get('camera_id') ||
+        preferredCameraId ||
+        '';
+      const resolvedPreferredCamera = resolveDeviceId(preferredCamera, devices);
 
-      if (preferredCamera && devices.find(d => d.deviceId === preferredCamera)) {
-        setSelectedDeviceId(preferredCamera);
+      if (resolvedPreferredCamera) {
+        setSelectedDeviceId(resolvedPreferredCamera);
       } else if (selectedDeviceId && devices.find(d => d.deviceId === selectedDeviceId)) {
         const preferVirtual =
           window.location.port === '3005' || window.location.port === '3001';
@@ -440,8 +459,10 @@ export const useOCRCamera = ({
         const preferVirtual =
           window.location.port === '3005' || window.location.port === '3001';
         if (preferVirtual) {
-          const streamDevice = devices.find((d) => d.isVirtual);
-          if (streamDevice) {
+          const virtualDevices = devices.filter((device) => device.isVirtual);
+          if (virtualDevices.length > 0) {
+            const hash = windowId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const streamDevice = virtualDevices[hash % virtualDevices.length];
             setSelectedDeviceId(streamDevice.deviceId);
             console.log(`[${windowId}] 自动选择流媒体设备: ${streamDevice.label}`);
             return;
@@ -471,7 +492,18 @@ export const useOCRCamera = ({
     } catch (error) {
       console.error('获取摄像头设备失败:', error);
     }
-  }, [windowId, selectedDeviceId, setAvailableDevices, setSelectedDeviceId]);
+  }, [windowId, preferredCameraId, resolveDeviceId, selectedDeviceId, setAvailableDevices, setSelectedDeviceId]);
+
+  // 切换配方时同步切换配方绑定的摄像头；同一后端流允许多个窗口共享。
+  useEffect(() => {
+    const resolved = resolveDeviceId(preferredCameraId, availableDevices);
+    if (!resolved || resolved === selectedDeviceId) return;
+    manualCameraSelectionRef.current = false;
+    setSelectedDeviceId(resolved);
+    if (isCameraOn) {
+      void startCamera(resolved);
+    }
+  }, [availableDevices, isCameraOn, preferredCameraId, resolveDeviceId, selectedDeviceId, setSelectedDeviceId, startCamera]);
 
   // 初始化摄像头设备
   useEffect(() => {

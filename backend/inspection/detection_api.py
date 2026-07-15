@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET"])
 def detection_latest_view(request, stream_id):
     """获取指定流的最新检测结果"""
-    result = detection_loop_manager.get_latest_result(stream_id)
+    owner_id = request.GET.get('owner_id') or None
+    model_id = request.GET.get('model_id') or None
+    result = detection_loop_manager.get_latest_result(stream_id, owner_id, model_id)
     if not result:
         return JsonResponse({
             'stream_id': stream_id,
+            'owner_id': owner_id,
+            'model_id': model_id,
             'boxes': [],
             'detect_fps': 0,
         })
@@ -39,7 +43,14 @@ def detection_snapshot_view(request, stream_id):
         except ValueError:
             frame_id = None
             
-    jpeg_bytes, actual_id = detection_loop_manager.get_snapshot_jpeg(stream_id, frame_id)
+    owner_id = request.GET.get('owner_id') or None
+    model_id = request.GET.get('model_id') or None
+    jpeg_bytes, actual_id = detection_loop_manager.get_snapshot_jpeg(
+        stream_id,
+        frame_id,
+        owner_id,
+        model_id,
+    )
     
     if not jpeg_bytes:
         return JsonResponse({'error': 'Snapshot not available'}, status=404)

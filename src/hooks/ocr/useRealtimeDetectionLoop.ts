@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import type { BackendYoloDetection } from '@/lib/api';
 import { apiFetch, isLocalOfflineMode } from '@/lib/config';
 import {
@@ -114,6 +115,7 @@ export interface UseRealtimeDetectionLoopOptions {
   streamId?: string;
 
   // State setters
+  setIsRealtimeActive: (value: boolean) => void;
   setIsDetecting: (value: boolean) => void;
   setDetectedElements: (value: string[]) => void;
   setElementDetectionStartTime: (value: number | null) => void;
@@ -147,7 +149,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     detectedElements, elementDetectionStartTime: _elementDetectionStartTime, nonGridTargets: _nonGridTargets,
     enableParallelQrDetection, qrDetectIntervalMs, fixtureQrInput, fixtureQrPrefixes, fixtureQrPattern,
     onFixtureQrDetected, streamId,
-    setIsDetecting, setDetectedElements, setElementDetectionStartTime,
+    setIsRealtimeActive, setIsDetecting, setDetectedElements, setElementDetectionStartTime,
     setDetectionStats, setCurrentSharpness, setBestSharpness, setIsInPostDetectionDelay,
     setWorkflowState, setSelectedImage, setImagePreview,
     setIsWaitingForSpace, setMatchStatus, setWorkflowResult,
@@ -158,7 +160,9 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   const performRealtimeDetectionRef = useRef<(() => Promise<void>) | null>(null);
   const handleCaptureWorkflowRef = useRef<((validSelectedTargets: string[], currentDataUrl: string, currentBase64: string) => Promise<void>) | null>(null);
   const latestPerfStatsRef = useRef<{ inferenceMs: number | null, fps: number | null }>({ inferenceMs: null, fps: null });
-  const backendLoopOwnerRef = useRef(`ocr:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerBaseRef = useRef(`ocr:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+  const backendLoopOwnerGenerationRef = useRef(0);
+  const backendLoopOwnerRef = useRef(backendLoopOwnerBaseRef.current);
 
   // M2修复：保存workflowState到ref，延时循环中读取ref而非闭包值
   const workflowStateRef = useRef(workflowState);
@@ -210,7 +214,12 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         try {
           if (useBackendDetection && streamId) {
             // 解耦模式：从后端获取与检测框完全匹配的高清原图
-            const res = await fetchStreamSnapshot(streamId);
+            const res = await fetchStreamSnapshot(
+              streamId,
+              undefined,
+              backendLoopOwnerRef.current,
+              currentModelId || undefined
+            );
             if (!res.ok) return;
             const blob = await res.blob();
             const objectUrl = URL.createObjectURL(blob);
@@ -359,7 +368,11 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         if (useBackendDetection && streamId) {
           // ====== 解耦模式：拉取后端最新 JSON 结果（<1KB） ======
           try {
-            const result = await fetchStreamDetections(streamId);
+            const result = await fetchStreamDetections(
+              streamId,
+              backendLoopOwnerRef.current,
+              currentModelId || undefined
+            );
             detections = result.detections;
             currentFrameId = result.frameId || 0;
 
@@ -573,7 +586,12 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           if (useBackendDetection && streamId && !finalDataUrl) {
             try {
               // 通过 frame_id 从后端 Ring Buffer 请求历史帧，实现完美对齐
-              const snapRes = await fetchStreamSnapshot(streamId, currentFrameId);
+              const snapRes = await fetchStreamSnapshot(
+                streamId,
+                currentFrameId,
+                backendLoopOwnerRef.current,
+                currentModelId || undefined
+              );
               if (snapRes.ok) {
                 const snapFrameId = parseInt(snapRes.headers.get('X-Frame-ID') || '0', 10);
                 if (currentFrameId > 0 && snapFrameId !== currentFrameId) {
@@ -1210,6 +1228,8 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   useEffect(() => {
     const useBackendDetection = !isLocalOfflineMode();
     if (!useBackendDetection || !streamId) return;
+    const ownerId = `${backendLoopOwnerBaseRef.current}:${++backendLoopOwnerGenerationRef.current}`;
+    backendLoopOwnerRef.current = ownerId;
 
     if (isRealtimeActive && isCameraOn && !isPaused) {
       // 启动后端检测循环
@@ -1217,19 +1237,23 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
       startStreamDetectionLoop(streamId, {
         confThreshold: detectionConfidence,
         modelId: currentModelId || undefined,
-        ownerId: backendLoopOwnerRef.current,
-      }).catch(e => console.error('启动后端检测循环失败:', e));
+        ownerId,
+      }).catch(e => {
+        console.error('启动后端检测循环失败:', e);
+        toast.error(`双路检测启动失败：${e instanceof Error ? e.message : '未知错误'}`);
+        setIsRealtimeActive(false);
+      });
     } else {
       // 暂停或停止时关闭后端检测循环
       console.log(`🛑 正在请求后端停止检测循环: stream=${streamId}`);
-      stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+      stopStreamDetectionLoop(streamId, ownerId)
         .catch(e => console.error('停止后端检测循环失败:', e));
     }
 
     return () => {
       // 卸载组件时停止检测循环
       if (useBackendDetection && streamId) {
-        stopStreamDetectionLoop(streamId, backendLoopOwnerRef.current)
+        stopStreamDetectionLoop(streamId, ownerId)
           .catch(e => console.error('卸载时停止后端检测循环失败:', e));
       }
     };

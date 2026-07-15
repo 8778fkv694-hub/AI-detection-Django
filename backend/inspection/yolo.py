@@ -1,8 +1,10 @@
 import os
 import logging
 import threading
+import time
+from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from datetime import datetime
 
 import numpy as np
@@ -13,10 +15,74 @@ logger = logging.getLogger(__name__)
 # 模型池：支持同时加载多个模型实例
 _model_pool: Dict[str, Any] = OrderedDict()  # {model_id: model_instance}
 _model_last_used: Dict[str, datetime] = {}  # {model_id: last_used_time}
+_model_pin_counts: Dict[str, int] = {}  # 活跃检测循环固定模型，防止被LRU误淘汰
 _current_model_id = None  # 记录最近使用的模型（用于兼容旧接口）
-_lock = threading.Lock()
+_lock = threading.RLock()
 # B5修复：Jetson 8GB 共享内存，2 个 YOLO 模型即可（3 个会 OOM）
 MAX_MODEL_POOL_SIZE = 2 if os.path.exists('/etc/nv_tegra_release') else 3
+
+
+class _FairInferenceScheduler:
+    """单GPU公平调度器。
+
+    TensorRT/PyTorch 在 Jetson 上并发执行多个模型容易造成显存峰值和执行上下文
+    竞争。两个检测窗口仍各自独立运行，但GPU推理按进入顺序交替执行，避免某一路
+    长期抢占GPU，也避免同时推理导致OOM。
+    """
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._queue = deque()
+        self._active = False
+        self._last_wait_ms = 0.0
+        self._completed = 0
+
+    @contextmanager
+    def slot(self):
+        token = object()
+        queued_at = time.monotonic()
+        with self._condition:
+            self._queue.append(token)
+            while self._active or self._queue[0] is not token:
+                self._condition.wait()
+            self._queue.popleft()
+            self._active = True
+            self._last_wait_ms = (time.monotonic() - queued_at) * 1000
+
+        try:
+            yield self._last_wait_ms
+        finally:
+            with self._condition:
+                self._active = False
+                self._completed += 1
+                self._condition.notify_all()
+
+    def status(self) -> Dict[str, Any]:
+        with self._condition:
+            return {
+                'active': self._active,
+                'queued': len(self._queue),
+                'last_wait_ms': round(self._last_wait_ms, 1),
+                'completed': self._completed,
+            }
+
+
+_inference_scheduler = _FairInferenceScheduler()
+
+
+def _collect_model_memory() -> None:
+    """尽快归还TensorRT/PyTorch缓存，降低切换到第二套配方时的内存峰值。"""
+    try:
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.debug('释放YOLO模型缓存失败: %s', exc)
 
 
 def load_model(model_id: Optional[str] = None):
@@ -135,11 +201,22 @@ def load_model(model_id: Optional[str] = None):
         try:
             # 检查模型池大小，如果已满则释放最久未使用的模型
             if len(_model_pool) >= MAX_MODEL_POOL_SIZE:
-                # 找出最久未使用的模型
-                oldest_model_id = min(_model_last_used.items(), key=lambda x: x[1])[0]
+                # 只淘汰未被活跃检测循环固定的模型，避免双窗口运行时来回卸载。
+                eviction_candidates = {
+                    candidate_id: last_used
+                    for candidate_id, last_used in _model_last_used.items()
+                    if _model_pin_counts.get(candidate_id, 0) <= 0
+                }
+                if not eviction_candidates:
+                    raise Exception(
+                        f'模型池已满且全部模型正在使用（{len(_model_pool)}/{MAX_MODEL_POOL_SIZE}）'
+                    )
+                oldest_model_id = min(eviction_candidates.items(), key=lambda x: x[1])[0]
                 logger.info(f"🗑️  模型池已满，释放模型: {oldest_model_id}")
-                del _model_pool[oldest_model_id]
+                evicted_model = _model_pool.pop(oldest_model_id)
                 del _model_last_used[oldest_model_id]
+                del evicted_model
+                _collect_model_memory()
 
             # 加载新模型到模型池
             model = YOLO(model_path)
@@ -175,11 +252,37 @@ def get_model_pool_status() -> Dict[str, Any]:
         'pool_size': len(_model_pool),
         'max_pool_size': MAX_MODEL_POOL_SIZE,
         'current_model': _current_model_id,
+        'pinned_models': dict(_model_pin_counts),
+        'inference_scheduler': _inference_scheduler.status(),
         'model_last_used': {
             model_id: last_used.isoformat() 
             for model_id, last_used in _model_last_used.items()
         }
     }
+
+
+def pin_model(model_id: str) -> None:
+    """为活跃检测循环固定模型；首次固定时同步完成加载。"""
+    if not model_id:
+        raise ValueError('model_id不能为空')
+    with _inference_scheduler.slot():
+        load_model(model_id)
+    with _lock:
+        _model_pin_counts[model_id] = _model_pin_counts.get(model_id, 0) + 1
+        logger.info('📌 固定模型 %s，引用数=%s', model_id, _model_pin_counts[model_id])
+
+
+def unpin_model(model_id: str) -> None:
+    """释放活跃检测循环对模型的固定引用。"""
+    if not model_id:
+        return
+    with _lock:
+        current = _model_pin_counts.get(model_id, 0)
+        if current <= 1:
+            _model_pin_counts.pop(model_id, None)
+        else:
+            _model_pin_counts[model_id] = current - 1
+        logger.info('📍 释放模型固定 %s，引用数=%s', model_id, _model_pin_counts.get(model_id, 0))
 
 
 def get_available_models() -> List[Dict[str, Any]]:
@@ -208,10 +311,20 @@ def remove_model_from_pool(model_id: str) -> Dict[str, Any]:
                 'loaded_models': list(_model_pool.keys())
             }
 
+        if _model_pin_counts.get(model_id, 0) > 0:
+            return {
+                'success': False,
+                'message': f'模型 {model_id} 正被活跃检测循环使用，不能卸载',
+                'loaded_models': list(_model_pool.keys()),
+                'pinned_models': dict(_model_pin_counts),
+            }
+
         # 移除模型
-        del _model_pool[model_id]
+        removed_model = _model_pool.pop(model_id)
         if model_id in _model_last_used:
             del _model_last_used[model_id]
+        del removed_model
+        _collect_model_memory()
 
         # 如果移除的是当前模型，更新当前模型ID
         if _current_model_id == model_id:
@@ -287,9 +400,14 @@ def run_inference(image_bgr: np.ndarray, conf: float = 0.5, model_id: Optional[s
     自动将检测类别映射到PPE类别。
     """
     try:
-        model = load_model(model_id)
-        # ultralytics 接受 numpy 数组 (BGR 或 RGB)。
-        results = model.predict(source=image_bgr, conf=conf, verbose=False)
+        # 单GPU公平排队：模型加载和推理都在同一临界区内，避免加载第二个
+        # TensorRT执行上下文时与另一模型的推理并发争抢共享内存。
+        with _inference_scheduler.slot() as wait_ms:
+            model = load_model(model_id)
+            # ultralytics 接受 numpy 数组 (BGR 或 RGB)。
+            results = model.predict(source=image_bgr, conf=conf, verbose=False)
+        if wait_ms >= 100:
+            logger.debug('YOLO推理排队 %.1fms model=%s', wait_ms, model_id)
         if not results:
             return []
 

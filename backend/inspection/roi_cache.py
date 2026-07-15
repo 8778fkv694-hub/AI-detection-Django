@@ -4,6 +4,7 @@ ROI缓存管理器
 """
 import time
 import logging
+import uuid
 from typing import Dict, List, Optional, Any
 from threading import RLock
 
@@ -64,7 +65,8 @@ class ROICacheManager:
         with self.lock:
             # 生成唯一ID
             timestamp_ms = int(time.time() * 1000)
-            roi_id = f"{label}_{timestamp_ms}"
+            # 两个窗口可能在同一毫秒缓存同名ROI；随机后缀防止互相覆盖。
+            roi_id = f"{label}_{timestamp_ms}_{uuid.uuid4().hex[:10]}"
             
             # 存储数据
             self.cache[roi_id] = {
