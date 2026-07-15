@@ -713,6 +713,8 @@ export async function analyzeImageLocalOptimized(
       messages,
       stream: false,
       format: 'json',
+      // 边缘设备按需加载，单次调用完成后立即释放 LLM 模型内存。
+      keep_alive: 0,
       ...(isThinkingModel ? { think: false } : {}),
       options: {
         temperature: config.temperature,
@@ -727,8 +729,7 @@ export async function analyzeImageLocalOptimized(
         low_vram: false,
         num_keep: 4,
         use_mmap: true,
-        use_mlock: true,
-        keep_alive: '2h'
+        use_mlock: true
       }
     };
 

@@ -54,3 +54,23 @@ class OllamaProxySecurityTests(TestCase):
             ollama_api.normalize_ollama_host('http://user:secret@remote-ollama.local:11434')
         with self.assertRaises(ValueError):
             ollama_api.normalize_ollama_host('http://remote-ollama.local:11434/api/chat')
+
+    def test_chat_forces_immediate_model_unload(self):
+        upstream = Mock(status_code=200)
+        upstream.json.return_value = {'message': {'content': '{}'}}
+
+        with patch('inspection.ollama_api.requests.post', return_value=upstream) as mocked_post:
+            response = self.client.post(
+                '/api/ollama/chat/',
+                data=json.dumps({
+                    'model': 'test',
+                    'keep_alive': '2h',
+                    'options': {'keep_alive': '2h', 'temperature': 0.1},
+                }),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        forwarded = mocked_post.call_args.kwargs['json']
+        self.assertEqual(forwarded['keep_alive'], 0)
+        self.assertNotIn('keep_alive', forwarded['options'])

@@ -149,6 +149,8 @@ export const useFusionAI = (options: UseFusionAIOptions): UseFusionAIReturn => {
       ],
       stream: false,
       format: 'json',
+      // Jetson 内存无法同时容纳 YOLO、OCR 和常驻 LLM；响应完成后立即卸载模型。
+      keep_alive: 0,
       ...(isThinkingModel ? { think: false } : {}),
       options: {
         temperature: localConfig.temperature ?? 0.1,

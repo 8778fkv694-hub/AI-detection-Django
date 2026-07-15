@@ -264,7 +264,7 @@ export const FusionModeSettingsPanel: React.FC<FusionModeSettingsPanelProps> = (
           </div>
 
           <div className="text-xs text-slate-400">
-            融合模式：OCR检测完成后，将图片压缩后传给LLM进行智能分析
+            默认关闭；仅手动开启后才调用LLM，本地模型在单次分析完成后立即释放内存
           </div>
 
           {/* 测试按钮 */}

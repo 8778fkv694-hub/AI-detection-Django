@@ -575,6 +575,7 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
       // 🔧 排除实时检测状态的持久化，避免闪烁和竞态条件
       partialize: (state) => {
         const {
+          fusionModeEnabled: _fusionModeEnabled, // 排除：LLM 融合必须在每次页面会话中手动开启
           detectedElements,        // 排除：实时检测状态，不应持久化
           elementDetectionStartTime, // 排除：实时检测时间，不应持久化
           workflowState,            // 排除：工作流状态，每次都应重新开始
@@ -651,10 +652,9 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
             typeof persistedState.roiWeightRatio.clarity === 'number'
             ? persistedState.roiWeightRatio
             : currentState.roiWeightRatio,
-          // 确保 fusionModeEnabled 和 selectedStandardId 被正确恢复
-          fusionModeEnabled: persistedState?.fusionModeEnabled !== undefined
-            ? persistedState.fusionModeEnabled
-            : currentState.fusionModeEnabled,
+          // Jetson 无法让 YOLO、OCR、LLM 同时常驻；页面启动时始终关闭 LLM 融合。
+          // 用户仍可在当前会话中手动开启，配方也可显式开启，但不会跨页面恢复。
+          fusionModeEnabled: false,
           selectedStandardId: persistedState?.selectedStandardId !== undefined
             ? persistedState.selectedStandardId
             : currentState.selectedStandardId,
@@ -695,8 +695,8 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
           typeof state.roiWeightRatio.clarity !== 'number')) {
           state.roiWeightRatio = { area: 60, clarity: 40 };
         }
-        // 确保 fusionModeEnabled 是布尔值
-        if (state && typeof state.fusionModeEnabled !== 'boolean') {
+        // 安全默认值：每次重新进入页面都必须手动开启 LLM 融合。
+        if (state) {
           state.fusionModeEnabled = false;
         }
         // 确保 compressionConfig 有效

@@ -41,6 +41,20 @@ def normalize_ollama_host(host):
 OLLAMA_HOST = normalize_ollama_host(os.environ.get('OLLAMA_HOST', 'http://localhost:11434'))
 
 
+def get_ollama_chat_keep_alive():
+    """边缘设备默认单次推理后立即卸载模型；可由部署环境显式覆盖。"""
+    configured = os.environ.get('OLLAMA_CHAT_KEEP_ALIVE', '0').strip()
+    if not configured:
+        return 0
+    try:
+        return int(configured)
+    except ValueError:
+        return configured
+
+
+OLLAMA_CHAT_KEEP_ALIVE = get_ollama_chat_keep_alive()
+
+
 def get_allowed_ollama_hosts():
     """Read explicitly trusted remote Ollama origins from the deployment environment."""
     configured_hosts = os.environ.get('OLLAMA_ALLOWED_HOSTS', '')
@@ -240,6 +254,13 @@ def ollama_chat(request):
         # 移除请求负载中的自定义字段再转交给 Ollama
         if 'ollama_host' in data:
             del data['ollama_host']
+
+        # 不信任旧客户端的长保活设置。keep_alive 是 Ollama 顶层参数，0 表示
+        # 响应完成后立即卸载模型，避免与常驻 YOLO + OCR 争用 Jetson 内存。
+        options = data.get('options')
+        if isinstance(options, dict):
+            options.pop('keep_alive', None)
+        data['keep_alive'] = OLLAMA_CHAT_KEEP_ALIVE
         
         response = requests.post(
             ollama_url,
