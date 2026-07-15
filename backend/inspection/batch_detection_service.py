@@ -499,17 +499,27 @@ class BatchDetectionService:
                     not matching_codes
                     and code_type == 'linear'
                     and barcode_config.get('allowOcrFallback', True)
-                    and expected
                 ):
-                    expected_digits = re.sub(r'\D', '', expected)
-                    ocr_digits = re.sub(r'\D', '', ocr_text)
-                    if expected_digits and (
-                        (mode == 'exact' and ocr_digits == expected_digits)
-                        or (mode != 'exact' and expected_digits in ocr_digits)
-                    ):
-                        source = 'ocr_fallback'
-                        detected_text = expected_digits
-                        logger.info('[%s] 一维条码解码失败，OCR数字兜底匹配: %s', label, expected_digits)
+                    if expected:
+                        expected_digits = re.sub(r'\D', '', expected)
+                        ocr_digits = re.sub(r'\D', '', ocr_text)
+                        if expected_digits and (
+                            (mode == 'exact' and ocr_digits == expected_digits)
+                            or (mode != 'exact' and expected_digits in ocr_digits)
+                        ):
+                            source = 'ocr_fallback'
+                            detected_text = expected_digits
+                            logger.info('[%s] 一维条码解码失败，OCR数字兜底匹配: %s', label, expected_digits)
+                    else:
+                        # 开放检测模式（未配置期望值）：条码解码器读不出时，若 OCR 在该
+                        # ROI 内识别到数字串（宽松门槛：连续4位以上），视为条码/追溯码
+                        # 内容存在，兜底放行——避免纯拍摄质量问题（角度/对焦）误判为不合格。
+                        digit_runs = re.findall(r'\d{4,}', ocr_text)
+                        if digit_runs:
+                            longest_run = max(digit_runs, key=len)
+                            source = 'ocr_fallback'
+                            detected_text = longest_run
+                            logger.info('[%s] 一维条码解码失败，OCR数字兜底(开放模式)匹配: %s', label, longest_run)
 
                 matched = source is not None
                 match_details.append({

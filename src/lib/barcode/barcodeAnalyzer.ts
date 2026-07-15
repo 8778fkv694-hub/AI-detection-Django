@@ -187,15 +187,31 @@ function matchRule(
   const isLinear = config.codeType === 'linear';
   const expectedDigits = config.expectedText.replace(/\D/g, '');
   const ocrDigits = ocrText.replace(/\D/g, '');
-  const fallbackMatched = isLinear
-    && (config.allowOcrFallback ?? true)
-    && Boolean(expectedDigits)
-    && (config.matchMode === 'exact'
-      ? ocrDigits === expectedDigits
-      : ocrDigits.includes(expectedDigits));
+  const allowFallback = isLinear && (config.allowOcrFallback ?? true);
+
+  let fallbackMatched = false;
+  let fallbackDetectedText = '';
+
+  if (allowFallback) {
+    if (expectedDigits) {
+      fallbackMatched = config.matchMode === 'exact'
+        ? ocrDigits === expectedDigits
+        : ocrDigits.includes(expectedDigits);
+      fallbackDetectedText = fallbackMatched ? expectedDigits : '';
+    } else {
+      // 开放检测模式（未配置期望值）：条码解码器读不出时，若 OCR 识别到
+      // 足够长的数字串（宽松门槛：连续4位以上），视为条码/追溯码内容存在，
+      // 避免纯拍摄质量问题（角度/对焦）把本该合格的产品判成存疑。
+      const digitRuns = ocrText.match(/\d{4,}/g) || [];
+      if (digitRuns.length > 0) {
+        fallbackDetectedText = digitRuns.reduce((a, b) => (b.length > a.length ? b : a));
+        fallbackMatched = true;
+      }
+    }
+  }
 
   return {
-    detectedText: fallbackMatched ? expectedDigits : '',
+    detectedText: fallbackDetectedText,
     expectedText: config.expectedText,
     matchMode: config.matchMode,
     matched: fallbackMatched,
@@ -203,7 +219,7 @@ function matchRule(
     type: isLinear ? 'barcode' : 'qr',
     format: isLinear ? config.barcodeFormat || 'auto' : 'QR',
     source: fallbackMatched ? 'ocr_fallback' : 'none',
-    qrCodeData: fallbackMatched ? expectedDigits : '',
+    qrCodeData: fallbackDetectedText,
     qrCodeType: fallbackMatched ? 'ocr_fallback' : (isLinear ? 'barcode' : 'qr'),
     retryCount: isLinear ? 1 : qrRetryCount,
     isRetryEnabled: !isLinear,

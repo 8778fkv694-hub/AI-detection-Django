@@ -83,21 +83,37 @@ const evaluateConfigByRoi = (roi: any, config: any) => {
     };
   }
 
-  if (codeType === 'linear' && (config.allowOcrFallback ?? true) && expectedText) {
-    const expectedDigits = expectedText.replace(/\D/g, '');
-    const ocrDigits = String(ocrText).replace(/\D/g, '');
-    const ocrMatched = Boolean(expectedDigits) && (
-      matchMode === 'exact'
-        ? ocrDigits === expectedDigits
-        : ocrDigits.includes(expectedDigits)
-    );
-    if (ocrMatched) {
-      return {
-        matched: true,
-        detectedText: expectedDigits,
-        source: 'ocr_fallback' as const,
-        format: config.barcodeFormat || 'auto',
-      };
+  if (codeType === 'linear' && (config.allowOcrFallback ?? true)) {
+    if (expectedText) {
+      const expectedDigits = expectedText.replace(/\D/g, '');
+      const ocrDigits = String(ocrText).replace(/\D/g, '');
+      const ocrMatched = Boolean(expectedDigits) && (
+        matchMode === 'exact'
+          ? ocrDigits === expectedDigits
+          : ocrDigits.includes(expectedDigits)
+      );
+      if (ocrMatched) {
+        return {
+          matched: true,
+          detectedText: expectedDigits,
+          source: 'ocr_fallback' as const,
+          format: config.barcodeFormat || 'auto',
+        };
+      }
+    } else {
+      // 开放检测模式（未配置期望值）：条码解码器读不出时，若 OCR 识别到
+      // 足够长的数字串（宽松门槛：连续4位以上），视为条码/追溯码内容存在，
+      // 避免纯拍摄质量问题（角度/对焦）把本该合格的产品判成存疑。
+      const digitRuns = String(ocrText).match(/\d{4,}/g) || [];
+      if (digitRuns.length > 0) {
+        const longestRun = digitRuns.reduce((a, b) => (b.length > a.length ? b : a));
+        return {
+          matched: true,
+          detectedText: longestRun,
+          source: 'ocr_fallback' as const,
+          format: config.barcodeFormat || 'auto',
+        };
+      }
     }
   }
 
