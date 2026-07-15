@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { productRecipeApi, type ProductRecipe } from '@/lib/productRecipeApi';
 import { useOCRDetectionStore } from '@/state/ocrDetectionStore';
 import { type StageRecipe, fetchRecipes } from '@/lib/stageRecipeApi';
@@ -38,13 +38,17 @@ export function useProductRecipe(applyRecipe: (recipe: StageRecipe) => void) {
   }, [loadProducts]);
 
   // Handle stage application
+  const applyStageSequenceRef = useRef(0);
   const applyStage = useCallback(async (index: number, product: ProductRecipe) => {
     const stage = product.stages[index];
     if (!stage) return;
 
+    const requestSequence = ++applyStageSequenceRef.current;
     try {
       // Find the actual StageRecipe object
       const allRecipes = await fetchRecipes();
+      if (requestSequence !== applyStageSequenceRef.current) return; // 已被更新的切换请求取代，丢弃过期响应
+
       const recipe = allRecipes.find(r => r.id === stage.stage_recipe);
       if (recipe) {
         applyRecipe(recipe);
@@ -52,6 +56,7 @@ export function useProductRecipe(applyRecipe: (recipe: StageRecipe) => void) {
         toast.error(`未找到工序配方: ${stage.stage_recipe_name}`);
       }
     } catch (e) {
+      if (requestSequence !== applyStageSequenceRef.current) return;
       toast.error('加载工序数据失败');
     }
   }, [applyRecipe]);
