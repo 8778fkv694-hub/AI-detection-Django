@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, NavLink } from 'react-router-dom';
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { 
   Home, Camera, Layers, BarChart2, Shield, FileText, 
@@ -31,6 +31,7 @@ import BatchInspectionResultsScreen from '@/screens/BatchInspectionResultsScreen
 import OCRInspectionResultsScreen from '@/screens/OCRInspectionResultsScreen';
 import AnomalyDashboardScreen from '@/screens/AnomalyDashboardScreen';
 import ResultsDebugScreen from '@/screens/ResultsDebugScreen';
+import ResultDetailScreen from '@/screens/ResultDetailScreen';
 import HelpScreen from '@/screens/HelpScreen';
 import ModelManagementScreen from '@/screens/ModelManagementScreen';
 import StreamSettingsScreen from '@/screens/StreamSettingsScreen';
@@ -416,6 +417,11 @@ const AppMobile: React.FC = () => {
             <Route path="/batch-results" element={<BatchInspectionResultsScreen />} />
             <Route path="/ocr-results" element={<OCRInspectionResultsScreen />} />
             <Route path="/results-debug" element={<ResultsDebugScreen />} />
+            {/* 兼容结果页及旧版返回链接 */}
+            <Route path="/results" element={<ResultsDebugScreen />} />
+            <Route path="/results/:resultId" element={<ResultDetailScreen />} />
+            <Route path="/live" element={<Navigate to="/live-inspection" replace />} />
+            <Route path="/model-management" element={<Navigate to="/models" replace />} />
             <Route path="/help" element={<HelpScreen />} />
             <Route path="/enhance/:resultId" element={<EnhancedInspectionScreen />} />
           </Routes>

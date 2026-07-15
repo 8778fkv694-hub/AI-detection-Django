@@ -14,6 +14,7 @@ interface ServiceHealth {
 
 interface OptimizedLocalConfig {
   modelName: string;
+  ollamaHost?: string;
   systemPrompt: string;
   userMessage: string;
   temperature: number;
@@ -30,10 +31,11 @@ interface OptimizedLocalConfig {
 }
 
 const DEFAULT_OPTIMIZED_CONFIG: OptimizedLocalConfig = {
-  modelName: 'gemma4:e4b', // 默认使用 Gemma 4 模型
+  modelName: 'gemma4:e2b-it-qat', // 默认使用 Gemma 4 模型
+  ollamaHost: '', // 留空则使用默认配置
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
-  temperature: 0.2, // 低温度，稳定输出
+  temperature: 0.1, // 极低温度，稳定且格式严格的输出
   maxTokens: 512, // 充足输出
   topP: 0.9,
   topK: 40,
@@ -416,10 +418,10 @@ export const MOONDREAM3_QUALITY_CONFIG: Partial<OptimizedLocalConfig> = {
 
 // Gemma 4 专用配置预设（Google最新多模态模型，支持图像理解）
 export const GEMMA4_CONFIG: Partial<OptimizedLocalConfig> = {
-  modelName: 'gemma4:e4b',
-  systemPrompt: '你是一个专业的工业质检AI助手，擅长精确分析产品图像，识别缺陷和特征。请用专业、准确的中文回答。注意：defects数组中的severity字段只能是"轻微", "一般", "严重", "致命"四个值之一。',
-  userMessage: '请按照标准严格分析这张图，返回JSON格式：{"overallQuality": "合格/存疑/需复检", "score": 85, "reason": "检测原因", "reasonKeywords": "关键词1,关键词2,关键词3", "defects": [{"type": "缺陷类型", "description": "缺陷描述", "severity": "轻微/一般/严重/致命"}]}',
-  temperature: 0.2,     // 低温度，稳定输出
+  modelName: 'gemma4:e2b-it-qat',
+  systemPrompt: '作为工业视觉质检助手，精确分析产品图像，识别缺陷和特征。请只返回符合格式要求的 JSON 结果。',
+  userMessage: '请严格按照检测标准分析图片，只返回 JSON。',
+  temperature: 0.1,     // 极低温度，稳定输出
   maxTokens: 512,       // 充足输出
   topP: 0.9,
   topK: 40,
@@ -430,16 +432,31 @@ export const GEMMA4_CONFIG: Partial<OptimizedLocalConfig> = {
   memoryOptimization: false
 };
 
-// 服务健康检查函数
-let healthCache: ServiceHealth | null = null;
+// 服务健康检查函数。缓存按目标主机隔离，避免切换远程模型后误用旧状态。
+let healthCache: { host: string; value: ServiceHealth } | null = null;
 const HEALTH_CACHE_DURATION = 5000; // 5秒缓存
 
-export async function checkOllamaHealth(): Promise<ServiceHealth> {
+function getOllamaHostKey(ollamaHost?: string): string {
+  return ollamaHost?.trim() || '';
+}
+
+function getOllamaStatusPath(ollamaHost?: string): string {
+  const host = getOllamaHostKey(ollamaHost);
+  return host ? `/ollama/status/?ollama_host=${encodeURIComponent(host)}` : '/ollama/status/';
+}
+
+function cacheHealth(host: string, value: ServiceHealth): ServiceHealth {
+  healthCache = { host, value };
+  return value;
+}
+
+export async function checkOllamaHealth(ollamaHost?: string): Promise<ServiceHealth> {
   const now = Date.now();
+  const host = getOllamaHostKey(ollamaHost);
 
   // 如果缓存有效，直接返回缓存结果
-  if (healthCache && (now - healthCache.lastCheck) < HEALTH_CACHE_DURATION) {
-    return healthCache;
+  if (healthCache && healthCache.host === host && (now - healthCache.value.lastCheck) < HEALTH_CACHE_DURATION) {
+    return healthCache.value;
   }
 
   try {
@@ -449,7 +466,7 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
     const ollamaController = new AbortController();
     const ollamaTimeoutId = setTimeout(() => ollamaController.abort(), 5000);
 
-    const ollamaResponse = await directBackendFetch('/ollama/status/', {
+    const ollamaResponse = await directBackendFetch(getOllamaStatusPath(host), {
       method: 'GET',
       signal: ollamaController.signal
     });
@@ -457,66 +474,62 @@ export async function checkOllamaHealth(): Promise<ServiceHealth> {
     clearTimeout(ollamaTimeoutId);
 
     if (!ollamaResponse.ok) {
-      healthCache = {
+      return cacheHealth(host, {
         isHealthy: false,
         status: 'error',
         message: `状态检查失败，请检查 Django/Ollama 服务是否正在运行`,
         lastCheck: now
-      };
-      return healthCache;
+      });
     }
 
     const statusData = await ollamaResponse.json();
     const models = Array.isArray(statusData.models) ? statusData.models : [];
 
     if (!statusData.success || statusData.status !== 'running') {
-      healthCache = {
+      return cacheHealth(host, {
         isHealthy: false,
         status: 'error',
         message: statusData.message || 'Ollama 服务未就绪',
         lastCheck: now
-      };
-      return healthCache;
+      });
     }
 
     if (models.length === 0) {
-      healthCache = {
+      return cacheHealth(host, {
         isHealthy: false,
         status: 'error',
         message: 'Ollama 服务已运行，但没有可用模型',
         lastCheck: now
-      };
-      return healthCache;
+      });
     }
 
-    healthCache = {
+    const healthyResult = cacheHealth(host, {
       isHealthy: true,
       status: 'ready',
       message: statusData.message || `Ollama服务运行正常，已发现 ${models.length} 个模型`,
       lastCheck: now
-    };
+    });
 
-    console.log('Ollama服务健康检查通过:', healthCache.message);
-    return healthCache;
+    console.log('Ollama服务健康检查通过:', healthyResult.message);
+    return healthyResult;
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '未知错误';
     console.error('Ollama服务健康检查失败:', errorMessage);
 
-    healthCache = {
+    return cacheHealth(host, {
       isHealthy: false,
       status: 'error',
       message: `服务检查失败: ${errorMessage}`,
       lastCheck: now
-    };
-    return healthCache;
+    });
   }
 }
 
 // 简化的 Ollama 状态检查
-export async function checkProxyService(): Promise<boolean> {
+export async function checkProxyService(ollamaHost?: string): Promise<boolean> {
   try {
-    const response = await directBackendFetch('/ollama/status/', {
+    const response = await directBackendFetch(getOllamaStatusPath(ollamaHost), {
       method: 'GET',
     });
 
@@ -532,7 +545,7 @@ export async function checkProxyService(): Promise<boolean> {
 }
 
 // 等待服务就绪函数
-export async function waitForServiceReady(maxWaitTime: number = 30000): Promise<boolean> {
+export async function waitForServiceReady(maxWaitTime: number = 30000, ollamaHost?: string): Promise<boolean> {
   const startTime = Date.now();
   const checkInterval = 2000; // 每2秒检查一次
 
@@ -540,14 +553,14 @@ export async function waitForServiceReady(maxWaitTime: number = 30000): Promise<
 
   while (Date.now() - startTime < maxWaitTime) {
     // 首先尝试轻量状态检查
-    const proxyOk = await checkProxyService();
+    const proxyOk = await checkProxyService(ollamaHost);
     if (proxyOk) {
       console.log('Ollama状态接口已就绪');
       return true;
     }
 
     // 如果轻量检查失败，再进行完整的健康检查
-    const health = await checkOllamaHealth();
+    const health = await checkOllamaHealth(ollamaHost);
 
     if (health.isHealthy) {
       console.log('Ollama服务已就绪');
@@ -589,10 +602,10 @@ export async function analyzeImageLocalOptimized(
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // 检查服务健康状态
-    const health = await checkOllamaHealth();
+    const health = await checkOllamaHealth(config.ollamaHost);
     if (!health.isHealthy) {
       console.warn('服务健康检查失败，尝试等待服务就绪...');
-      const isReady = await waitForServiceReady(5000); // 减少等待时间到5秒
+      const isReady = await waitForServiceReady(5000, config.ollamaHost); // 减少等待时间到5秒
       if (!isReady) {
         console.warn('服务健康检查失败，但继续尝试API调用...');
         // 不直接抛出错误，而是继续尝试API调用
@@ -630,9 +643,12 @@ export async function analyzeImageLocalOptimized(
     console.log('最终系统提示词:', systemPrompt.substring(0, 200) + '...');
 
     // 3. 构建消息 - 使用 Ollama images 字段传递图片（不嵌入base64到文本）
-    const userMessage = config.userMessage;
+    const standardCriteria = standard?.criteria || '';
+    const baseUserMessage = standardCriteria
+      ? `检测任务：请分析图片是否符合以下检测要求：\n"标准要求：${standardCriteria}。请仔细核对画面中的细节。"\n\n请严格返回 JSON 格式结果。格式要求示例：\n${config.userMessage}`
+      : config.userMessage;
 
-    console.log('使用的用户消息配置:', userMessage);
+    console.log('使用的用户消息配置:', baseUserMessage);
 
     // 提取纯 base64 数据（去掉 data:image/... 前缀）
     const pureBase64Image = compressedImage.startsWith('data:')
@@ -653,8 +669,8 @@ export async function analyzeImageLocalOptimized(
     }
 
     const userContent = standard?.standardImage
-      ? `${userMessage}\n\n第一张是标准参考图，第二张是待检测图，请对比分析。`
-      : userMessage;
+      ? `${baseUserMessage}\n\n第一张是标准参考图，第二张是待检测图，请对比分析。`
+      : baseUserMessage;
 
     const messages: Array<{ role: string; content: string; images?: string[] }> = [
       { role: 'system', content: systemPrompt },
@@ -693,8 +709,10 @@ export async function analyzeImageLocalOptimized(
     const isThinkingModel = config.modelName.includes('gemma4') || config.modelName.includes('qwq');
     const requestBody: Record<string, any> = {
       model: config.modelName,
+      ollama_host: config.ollamaHost || undefined,
       messages,
       stream: false,
+      format: 'json',
       ...(isThinkingModel ? { think: false } : {}),
       options: {
         temperature: config.temperature,
@@ -840,7 +858,7 @@ export async function analyzeImageLocalOptimized(
       // 网络连接错误
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Load failed')) {
         console.error('网络连接问题，检查服务状态');
-        const health = await checkOllamaHealth().catch(() => null);
+        const health = await checkOllamaHealth(config.ollamaHost).catch(() => null);
         if (health && !health.isHealthy) {
           throw new Error(`服务不可用: ${health.message}。请检查Ollama服务是否正在运行`);
         } else {

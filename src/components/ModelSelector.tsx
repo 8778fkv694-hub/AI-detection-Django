@@ -31,6 +31,7 @@
  */
 
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Label } from '@/components/ui/Label';
 import { Badge } from '@/components/ui/Badge';
@@ -63,6 +64,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   className = '',
   showModelCount = false,
 }) => {
+  const navigate = useNavigate();
   const {
     modelPool,
     activeModelId,
@@ -90,9 +92,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         {label && <Label className="mb-2">{label}</Label>}
         <div className="text-sm text-gray-500 p-3 border border-dashed rounded-lg text-center">
           暂无待选模型，请先在
-          <a href="#/model-management" className="text-blue-500 hover:underline mx-1">
+          <button
+            type="button"
+            onClick={() => navigate('/models')}
+            className="text-blue-500 hover:underline mx-1"
+          >
             模型管理
-          </a>
+          </button>
           页面将模型加入待选库
         </div>
       </div>

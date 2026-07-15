@@ -17,10 +17,12 @@ export interface OnnxYoloConfig {
   classNames: string[];
 }
 
-// PPE 模型 10 个类别
+// PPE 模型 17 个类别
 export const PPE_CLASS_NAMES = [
-  'Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest',
-  'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'
+  'Barefoots', 'Ear-protection', 'Harness', 'No_Ear-Protection', 'No_Glasses',
+  'Sandals', 'boots', 'face_mask', 'face_nomask', 'glasses',
+  'hand_glove', 'hand_noglove', 'head_helmet', 'head_nohelmet', 'person',
+  'shoes', 'vest'
 ];
 
 // 工业 14 个类别 (用于 best.onnx)

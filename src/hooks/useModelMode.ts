@@ -8,6 +8,7 @@ interface ModelModeConfig {
   mode: ModelMode;
   localModelConfig: {
     modelName: string;
+    ollamaHost?: string;
     systemPrompt: string;
     userMessage: string;
     temperature: number;
@@ -25,10 +26,11 @@ interface ModelModeConfig {
 }
 
 const DEFAULT_LOCAL_CONFIG = {
-  modelName: 'gemma4:e4b',
+  modelName: 'gemma4:e2b-it-qat',
+  ollamaHost: '', // 留空则默认使用后端 localhost
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
-  temperature: 0.2,
+  temperature: 0.1,
   maxTokens: 512,
   topP: 0.9,
   topK: 40,
@@ -55,9 +57,20 @@ export const useModelMode = () => {
       const savedConfig = localStorage.getItem('modelModeConfig');
       if (savedConfig) {
         const parsed = JSON.parse(savedConfig);
+        const loadedLocalConfig = { ...DEFAULT_LOCAL_CONFIG, ...parsed.localModelConfig };
+
+        // 自动升级旧的默认模型名称
+        if (loadedLocalConfig.modelName === 'gemma4:e4b') {
+          loadedLocalConfig.modelName = 'gemma4:e2b-it-qat';
+        }
+        // 自动将默认的 0.2 温度纠正为更稳定的 0.1
+        if (loadedLocalConfig.modelName === 'gemma4:e2b-it-qat' && loadedLocalConfig.temperature === 0.2) {
+          loadedLocalConfig.temperature = 0.1;
+        }
+
         setConfig({
           mode: parsed.mode || 'online',
-          localModelConfig: { ...DEFAULT_LOCAL_CONFIG, ...parsed.localModelConfig }
+          localModelConfig: loadedLocalConfig
         });
       }
     } catch (error) {
@@ -104,7 +117,11 @@ export const useModelMode = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
       
-      const response = await directBackendFetch('/ollama/status/', {
+      const host = config.localModelConfig.ollamaHost?.trim();
+      const url = host
+        ? `/ollama/status/?ollama_host=${encodeURIComponent(host)}`
+        : '/ollama/status/';
+      const response = await directBackendFetch(url, {
         method: 'GET',
         signal: controller.signal
       });

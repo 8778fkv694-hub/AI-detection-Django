@@ -27,6 +27,12 @@ export type { BackendYoloDetection };
 // 共享的单例 Canvas，用于防止移动端实时检测时高频 GC 卡顿
 let sharedCanvas: HTMLCanvasElement | null = null;
 
+// 本次会话内原生引擎是否已确认不可用（如插件未在原生侧注册成功）。
+// ensureLocalModel 加载失败时置位，detectVideoFrame 据此跳过逐帧 native 尝试直接走 WASM——
+// 避免 detectFrameNative 把"调用失败"与"确实零检出"混为一谈（它内部会吞掉错误返回空数组），
+// 导致逐帧检测永远拿到空结果、既不重试 WASM 也不报错。
+let nativeModelConfirmedUnavailable = false;
+
 export type DetectionSource = 'server' | 'local-onnx' | 'native' | 'stream-loop';
 
 export interface FrameDetectionResult {
@@ -78,13 +84,20 @@ export function getLocalEngineInfo(): {
 
 /**
  * 确保本地推理引擎加载了指定模型（离线客户端模型切换收口）。
- * native 环境走原生插件加载，否则走 WASM switchModel。
+ * native 环境走原生插件加载，失败（如插件未在原生侧注册成功）时回退 WASM，
+ * 与 detectImage 的降级语义保持一致——避免原生初始化失败导致模型完全加载不上。
  */
 export async function ensureLocalModel(modelId: string): Promise<boolean> {
   const { modelPath, classNames } = onnxYoloDetector.getModelConfigById(modelId);
   if (isNativeYoloSupported()) {
     // 4 线程、关闭 NNAPI（稳定性优先，与既有行为一致）
-    return initNativeYolo(modelPath, classNames, 4, false);
+    const success = await initNativeYolo(modelPath, classNames, 4, false);
+    if (success) {
+      nativeModelConfirmedUnavailable = false;
+      return true;
+    }
+    console.warn('[detect] Native model init failed, falling back to WASM:', modelId);
+    nativeModelConfirmedUnavailable = true;
   }
   return onnxYoloDetector.switchModel(modelPath, classNames);
 }
@@ -98,7 +111,7 @@ export async function detectImage(
   conf: number,
   options?: DetectImageOptions
 ): Promise<BackendYoloDetection[]> {
-  if (isNativeYoloSupported()) {
+  if (isNativeYoloSupported() && !nativeModelConfirmedUnavailable) {
     try {
       const result = await YoloNative.detectFrame({
         base64: imageBase64,
@@ -108,6 +121,7 @@ export async function detectImage(
       return (result.boxes || []) as unknown as BackendYoloDetection[];
     } catch (err) {
       console.error('[detect] Native image detection failed, falling back:', err);
+      nativeModelConfirmedUnavailable = true;
     }
   }
   return yoloDetectBackend(imageBase64, conf, options);
@@ -117,6 +131,11 @@ export async function detectImage(
  * 视频帧检测（实时预览路径，离线客户端）。
  * 引擎阶梯：native 插件 → WASM → （异常时）截全帧走服务器。
  * 行为与原 useLiveYoloDetection 内联实现一致。
+ *
+ * 注意：detectFrameNative 内部会吞掉调用异常并返回空数组（调用失败与真实零检出
+ * 无法区分），所以这里不能靠 try/catch 判断 native 是否可用——一旦 ensureLocalModel
+ * 已经确认过原生模型加载失败（nativeModelConfirmedUnavailable），本函数直接跳过
+ * native 分支走 WASM，避免逐帧检测永远拿到"假的"空结果。
  */
 export async function detectVideoFrame(
   video: HTMLVideoElement,
@@ -127,7 +146,7 @@ export async function detectVideoFrame(
     let detections: BackendYoloDetection[];
     let source: DetectionSource;
 
-    if (isNativeYoloSupported()) {
+    if (isNativeYoloSupported() && !nativeModelConfirmedUnavailable) {
       // 计算等比缩放后的尺寸（保证最大边不超过 320，防止过桥宽带爆表且避免形变）
       let targetW = 320;
       let targetH = 320;

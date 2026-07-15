@@ -169,7 +169,27 @@ export const usePPEDetection = ({
     let label = d.label;
     if (label === 'Person') label = 'person';
     else if (label === 'Mask') label = 'mask';
-    else if (label === 'Safety Vest') label = 'safety-vest';
+    else if (label === 'Safety Vest') label = 'Safety Vest';
+
+    // Map new YOLOv8n PPE model raw classes (offline/native)
+    else if (label === 'head_helmet') label = 'Hardhat';
+    else if (label === 'head_nohelmet') label = 'NO-Hardhat';
+    else if (label === 'face_mask') label = 'mask';
+    else if (label === 'face_nomask') label = 'NO-Mask';
+    else if (label === 'vest') label = 'Safety Vest';
+    else if (label === 'hand_glove') label = 'gloves';
+    else if (label === 'hand_noglove') label = 'no_gloves';
+    else if (label === 'glasses') label = 'glasses';
+    else if (label === 'No_Glasses') label = 'no_glasses';
+    else if (label === 'boots' || label === 'shoes') label = 'shoes';
+    else if (label === 'Ear-protection') label = 'ear';
+
+    // Map Django backend output mapping (online mode consistency)
+    else if (label === 'cleanroom_cap') label = 'Hardhat';
+    else if (label === 'no_cleanroom_cap') label = 'NO-Hardhat';
+    else if (label === 'safety_vest') label = 'Safety Vest';
+    else if (label === 'no_safety_vest') label = 'NO-Safety Vest';
+
     return {
       class: label,
       confidence: d.confidence,

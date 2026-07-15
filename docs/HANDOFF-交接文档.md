@@ -140,15 +140,43 @@
 
 1. **离线模式下并行 QR 检测 = 死代码**：`useRealtimeDetectionLoop.ts:278-282` 调 `/wechat-qr/detect/`，APK 内嵌 Node 服务无此路由 → 404 → `fireParallelQrDetection` 静默 `.catch()`（`:313`）。P3 接 ML Kit Barcode 后自然解决。
 2. **离线 OCR 推理时间/`source` 不在结果上**：`ocr.ts` NativeEngine 分支返回结构与 server 版字面对齐但没加 `source`，融合层没法判别。P3 收尾前补。
+3. **🔴 B3/B5（2026-07-05 真机确诊+复测，全 APK 最高优先级）：5001 重定向让 Capacitor 原生桥半瘫痪 → 原生检测引擎从未真正生效，全部检测都在跑单线程 WASM**。本节记录两轮真机调查的完整过程和结论——**B3 已修复并验证；B5 是修 B3 之后才暴露出的更深一层坑，仍未解决；一次尝试性修复（B4）验证后判定弊大于利，已回退，原因见下**。
+
+   **第一层（B3，已修复）：`capacitor.js` 桥文件从未真正复制成功**
+   - 构建日志实锤：`build-apk.sh` 步骤 7d 曾输出 `⚠️ 未在 assets 中找到 capacitor.js`——`android/app/src/main/assets/public/capacitor.js` 这个源路径**不存在**（新版 Capacitor 不产出物理 capacitor.js，运行时由 WebViewLocalServer 动态注入），所以 f0d9b14 引入的"5001 重定向桥复制"从未复制成功过，失败还被 ⚠️ 静默吞掉。
+   - 真机 logcat 实锤：WebView 重定向到 `http://localhost:5001/` 后，`capacitor.js` 请求被 Express 以 index.html 兜底应答 → `Uncaught SyntaxError: Unexpected token '<'` → `window.Capacitor` 不存在 → `isNativeYoloSupported()` 返回 false → 直落 WASM。
+   - **已修复**（commit 待落地，本节收尾时一并提交）：`build-apk.sh` 步骤 7d 的 `CAP_JS_SRC` 改为真实源 `node_modules/@capacitor/android/capacitor/src/main/assets/native-bridge.js`，复制为 `capacitor.js`；找不到源文件时从 ⚠️ 警告改为 `exit 1` 硬失败（不允许静默）。
+   - **验证结果（Pixel 3 XL 真机，B3 单独生效后）**：`Unexpected token '<'` 错误消失；`isNativeYoloSupported()` 确认变为 true——证据是 logcat 出现了**此前从未出现过**的新日志 `[YoloNativeBridge] Failed to initialize native model: Error: "YoloNative" plugin is not implemented on android`，说明代码这次真的**尝试**走了 native 分支（此前是直接跳过、连试都没试）。B3 本身是正确、必要的修复，予以保留。
+
+   **第二层（B5，新发现，未解决）：即使 B3 修好，原生插件调用依然全部失败**
+   - 上面那行新日志本身就是坏消息：`"YoloNative" plugin is not implemented on android`。深挖 Capacitor Android 源码（`Bridge.java` / `MessageHandler.java`）确认：Capacitor 的原生插件调用走的是 `androidBridge`（新版 WebView 用 `WebViewCompat.addWebMessageListener` 注入，**按来源白名单**限定，白名单来自 `capacitor.config.ts` 的 `server.allowNavigation`）。默认配置里没有 `http://localhost:5001` 这一项，所以 `:5001` 页面上 `androidBridge` 对象本身可能都拿不到。已尝试在 `allowNavigation` 里加入 `'http://localhost:5001'`（已验证写入了构建产物 `capacitor.config.json`），插件 in-list 检测确实变了（见上一条），但实际方法调用仍然失败。
+   - **根本原因判断（未完全证实，需要下一位接手者用 Chrome remote debug 连上 WebView 実測 `navigator.serviceWorker`/`androidBridge` 对象逐项确认）**：Capacitor 的"已注册插件列表"是 Java Bridge 初始化时一次性同步给 JS 侧的（配合最初加载的那份 `native-bridge.js`）。我们的架构是先加载 Capacitor 自己的 `http://localhost` 页面（此时插件列表正常同步），然后**整个 WebView 导航到一个完全不同的 origin**（内嵌 Express 的 `:5001`），那个新页面加载的是我们**复制过去的静态 native-bridge.js 副本**——这只是重建了客户端 API 形状，并不会重放"Java 告诉 JS 有哪些插件已注册"这个握手过程。也就是说：**这套"重定向到内嵌 Node 服务器"的架构，从设计上就没打算支持原生插件跨 origin 继续工作**，B3 只是修好了"桥对象存在"，"桥能正常收发消息"是另一回事。
+   - **这不是一个能快速打补丁解决的问题**。彻底解决需要二选一：
+     ① 深入 patch Capacitor Bridge/MessageHandler，让它在检测到 `:5001` 新页面加载时重放插件注册握手（侵入式修改三方库，风险高、维护成本高）；
+     ② **推荐**：从根上改变启动流程，让 WebView **不要**导航离开 Capacitor 自己的 `http://localhost` origin——内嵌 Node/Express 只作为后端 API 使用（前端继续 fetch 相对/绝对路径调用 `:5001` 的 API，不需要让 WebView 本身导航过去）。这是架构级改动，触及 `node-launcher.js` 的重定向逻辑和前端 API base URL 配置，工作量明显大于本轮的补丁式修复，建议单独立项，作为 APK 第二梯队新的最高优先级任务。
+   - 在②完成之前，**原生检测引擎在 APK 上事实不可用**，全部检测请求都会"先尝试 native（快速失败）→ 回退 WASM"，跟 B3 修复前相比只是错误处理更干净，速度没有实质变化。
+
+   **第三层（B4，尝试修复 WASM 单线程问题，已回退——过程中有一次误判，已用对照实验纠正，完整记录供参考）**
+   - 诊断：`coi-serviceworker.js`（第三方 v0.1.7 vendored 脚本）首次注册成功但不会控制当前页面（SW 规范：注册≠接管，需下次导航才生效），且它自带的"注册后自动 reload 一次"逻辑只在 `registration.active && !controller` 为真时触发——首次安装时 `registration.active` 必为 null，条件不成立，**永远不会自动刷新**，本次会话 `crossOriginIsolated` 保持 false，logcat 实锤 `numThreads=1`。
+   - 尝试的修复：改造 `coi-serviceworker.js`，让它监听 installing worker 的 `statechange` 到 `activated` 后主动 reload 一次（加 `sessionStorage` 防死循环）。
+   - **第一轮真机验证**：改动后 reload 确实触发了（logcat 可见"Update found，刷新页面..."），但紧接着的 YoloWorker 初始化仍然显示 `hasSharedArrayBuffer=false`——**没达成目的**。同一轮测试里，在 `pm clear`（清空应用数据，模拟全新安装）场景下，应用启动卡在"waiting for node-server-ready..."**长达 45 秒**（黑屏），当时**误判**为这个 reload 改动与前端自身的"等待内嵌 Node 就绪"轮询逻辑产生竞态导致——这个归因是错的，见下一条。
+   - **对照实验纠正误判**：把 `coi-serviceworker.js` 完全回退到原始内容（`git diff` 为空）后，重新构建、`pm clear`、冷启动复测——**45 秒延迟原样复现**（`14:57:56` "waiting for node-server-ready" → `14:58:41` "mountReact called"，与改动前后无关）。这证明 45 秒延迟是一个**独立于 B4 的、`pm clear`/全新安装场景下本就存在的慢启动问题**（大概率是内嵌 Node 首次启动要做数据库种子导入 + `nodejs-project` 资源从 assets 解包，日志可见"🌱 [Database] 发现出厂数据包，正在导入..."），不是本轮任何改动引入的回归，接手者不必因为这段记录而担心 B3 或本文档其它改动有问题。**该慢启动问题本身值得单独记录为新 bug（B6，见下）**，但与 B4 的去留无关。
+   - **决策：B4 仍然回退**，但理由改为纯粹的"收益不确定"：两轮测试（改前、改后）`hasSharedArrayBuffer` 都是 false，即 B4 从未证实带来任何好处，既然没有收益就没必要保留这个改动的复杂度。另外发现一个更值得走的路：`android-app/www/nodejs-project/main.js:45-47` 里内嵌 Express **本来就已经**对所有响应设置了 `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy`/`Cross-Origin-Resource-Policy` 头——理论上 `:5001` 页面不需要任何 Service Worker 把戏就该天然获得跨源隔离。`coi-serviceworker.js` 存在的意义可能仅仅是给**重定向前**的 Capacitor 原生 `http://localhost` 页面（Express 管不到那里）提供隔离，对 `:5001` 页面而言它是冗余的。**接手者的下一步**：不要重新尝试 B4 那种"改 SW 逻辑"的补丁，而是先搞清楚"Express 已经在设置正确响应头的前提下，`:5001` 页面的 `crossOriginIsolated` 到底是不是 true"——用 Chrome remote debug（`chrome://inspect`）连上这个 WebView 直接在 console 里读 `window.crossOriginIsolated`，并在 Network 面板核对 `:5001` 主文档请求的实际响应头，而不是先急着动代码。如果 Express 的头已经生效但 `crossOriginIsolated` 仍是 false，说明问题出在别处（比如 ONNX Runtime WASM build 本身的线程开关、或这个 WebView 版本对 COEP 的支持程度），需要重新诊断，而不是继续在 Service Worker 层面打转。
+   - **B6（新记录，未解决，优先级低于 B5）**：`pm clear`/全新安装场景下冷启动耗时 45 秒（正常场景 5–8 秒），怀疑是内嵌 Node 首次启动的数据库种子导入或资源解包阻塞了健康检查轮询。影响面：仅首次安装/清除数据后的第一次启动，不影响日常使用，優先级低，但如果要发布给真实用户，45 秒黑屏的首次启动体验需要至少加一个可见的加载提示（目前是纯黑屏，用户会以为卡死——本次调查中我自己都一度误判为卡死）。
+   - **教训（写给接手者，也是写给我自己的）**：①观察到"改动后出现异常"不等于"改动导致异常"——必须做对照实验（把改动去掉，同样的操作序列复测一遍），否则会把无关的预先存在的 bug 错怪到当前改动头上，浪费回退的精力，还可能让人对一个其实无害的改动产生不必要的恐慌。②真机验证不能只看"改动后有没有报错"，冷启动（`pm clear`/卸载重装）路径要专门测一次，因为很多时序问题只在这个特定窗口出现——这条本身仍然成立，只是这次撞见的冷启动问题恰好和被怀疑的改动无关。
+   - **实测参考数据**（供后续对照）：B3 修复前，单线程 WASM 640 输入推理耗时 PPE 3615ms（平板）/ OCR 1087ms（Pixel 3 XL）。这仍是 B3+B5 未完全解决、B4 已回退状态下的当前基线。
 
 ### 2.4 接手优先级（按建议执行顺序，每项独立 commit）
 
-1. **P4 急救**（最先做，体积不达标纯属工程问题）：开 R8 + ONNX 文件去重重定向 ≤2 处。预期一轮就能降到 ≤150MB。纯 `build-apk.sh` + `build.gradle` 改动，≤3 文件。
+0. **🔴 B5 架构级修复**（插队到最前，2026-07-05 新增，未解决）：让 WebView 不要导航离开 Capacitor 自己的 origin（方案见上，2.3 第二层）；或先用 Chrome remote debug 确认 `:5001` 页面 `crossOriginIsolated` 实际状态，重新诊断 WASM 单线程的真正原因。B3（桥文件复制）已修复且应保留；B4（SW reload 改造）已回退，**不要重新尝试同类补丁**，先用远程调试拿到确凿证据再动手。
+1. **P4 急救**（体积不达标纯属工程问题）：开 R8 + ONNX 文件去重重定向 ≤2 处。预期一轮就能降到 ≤150MB。纯 `build-apk.sh` + `build.gradle` 改动，≤3 文件。
 2. **P3 收尾**：加 ML Kit `BarcodeScanner` 插件 OR 把离线并行 QR 改为 stub/丢弃；`detect.ts` / `ocr.ts` 在结果上补 `source` 字段。
 3. **P1 EXIF + per-class NMS + `inferMs/source` 返回**：飞行模式拍照距 PC `best.pt` 对齐率达标的关键。改 `YoloNativeDetector.java` / `YoloNativePlugin.java` / `yoloNativeBridge.ts` 三个文件。
-4. **P2 路径统一**：把 PPE (`usePPEDetection.ts`) 与 OCR (`useRealtimeDetectionLoop.ts`) 的检测循环也走 `detectVideoFrame`，复用 320 letterbox + 背压 + 逆映射；后续 `requestVideoFrameCallback` 替换 setTimeout。
+4. **P2 路径统一**（B3 修复后优先级上调）：把 PPE (`usePPEDetection.ts`) 与 OCR (`useRealtimeDetectionLoop.ts`) 的检测循环也走 `detectVideoFrame`，复用 320 letterbox + 背压 + 逆映射——这两条线现在直传全分辨率帧，是慢的第二大来源（第一大是 B3）；后续 `requestVideoFrameCallback` 替换 setTimeout。
 5. **H10 旋转**：拍照与实时都加 EXIF 矫正。
-6. **全屏检测反馈**（下一节详细方案）。
+6. **全屏检测反馈**（第 3 节，✅ 已完成）。
+
+**性能预期基准（Pixel 3 XL / 骁龙845 级别硬件，供修复后对照）**：单线程 WASM 640 输入 ≈ 1–4s（当前实测值）；4 线程 WASM+SIMD ≈ 400–800ms；native C++ ORT 4 线程 640 ≈ 150–300ms；native + 320 letterbox ≈ 50–120ms（≈5–10 FPS，半实时可用）。修完 B3+P2 后达不到最后一档就再查。
 
 ---
 
@@ -331,3 +359,47 @@ cd android-app && bash scripts/build-apk.sh debug
 2. **`yoloDetectBackend` 里的 WASM 离线分支**：Electron/离线 web 还在用，APK native 化完成前不删（第 6 节坑 2）。
 3. **`models/yolo10x.pt` 游离文件**：17 类 PPE 模型，暂无配置引用。M6 做 manifest 时一并处置（收编或归档），现在别动。
 4. **大文件同步纪律**：`.pt/.onnx` 不进 git，改动模型后按 AGENTS.md 手动同步，Jetson 走 `ssh jetson` + git pull。忘了这条，生产和开发的模型会悄悄分叉——这正是 B1 类事故的温床。
+
+---
+
+## 8. 2026-07-10 审计与首轮收口（当前接手点）
+
+### 8.1 审计范围与结论
+
+- 审计覆盖 2026-07-04 至 07-07 的 56 个提交、领先远端的 12 个提交，以及当时工作区的 Android、Django、前端未提交改动。
+- `npm run build`、Django 模型差异检查通过；debug APK 可完整构建，产物约 255MB。构建包内确认含 `capacitor.js` 和 `best.onnx` / `ppe.onnx` / `yolov8n.onnx`。
+- 本轮**不处理** B5（WebView 导航离开 Capacitor origin 导致原生桥失效）的架构问题；它需要真机证据和单独立项，不能混进安全/元数据补丁。
+
+### 8.2 本地小模型提示词决策（已确认）
+
+本地多模态模型能力有限，长系统提示词会增加幻觉和遗漏，故保持短提示词策略：只保留任务目标、必要标准与 JSON 输出格式。保守质检边界不应依赖继续加长提示词；后续应由结果解析、OCR/YOLO 规则比对和 JSON schema 校验来兜底，冲突或解析失败统一降级为`需复检`。
+
+### 8.3 本轮已修复项
+
+1. **Ollama 远程代理 SSRF**：`ollama_host` 不再可任意指定。后端仅接受默认 `OLLAMA_HOST` 或环境变量 `OLLAMA_ALLOWED_HOSTS`（逗号分隔、完整 origin）中明确列出的 `http(s)://host:port`；拒绝路径、账号、查询参数和重定向。部署远程 Ollama 前必须显式配置，例如：`OLLAMA_ALLOWED_HOSTS=http://192.168.55.1:11434`。
+2. **PPE 端侧 10/17 类漂移**：已确认 `ppe.onnx` 输出 `[1, 21, 2100]`，即 4 个框参数 + 17 类；`.pt` 同样是 17 类。Node 端模型播种信息同步为 17 类、补齐中文名，并从版本 3 升至版本 4，使既有 APK 本地数据库在升级后重新播种。
+3. **远程 Ollama 健康检查**：健康检查、等待重试和失败诊断现在使用所选的远程地址，缓存按地址隔离；UI 提示远程地址必须由服务端白名单授权。
+4. **大文件误提交防护**：`.gitignore` 已忽略 `*.large_backup`，防止三个共 334MB 的模型备份被 `git add -A` 误纳入提交。
+
+验证记录：新增 Django 安全回归 4 项全部通过；Web 与移动端 TypeScript/Vite 构建通过；APK 内嵌 Node 服务已确认写入 `MOBILE_MODELS_VERSION = 4` 和 17 类 PPE 定义。
+
+### 8.4 后续优先级
+
+1. 为模型建立唯一 manifest（文件 SHA256、类别表、阈值、输入尺寸），再由 Django、前端和 APK Node 服务读取/生成，彻底避免多处硬编码漂移。
+2. 抽取 Live/OCR/PPE 共用的旋转台采集状态机；先补模拟串口测试，再改三页流程。
+3. B5 继续按第 2.3 节的真机诊断路径处理，优先验证而不是再做跨 origin 桥补丁。
+
+---
+
+## 9. 2026-07-10 平板启动闪退修复
+
+- **现象**：安装 debug APK 后启动即退出，Android crash buffer 出现 `FORTIFY: pthread_mutex_lock called on a destroyed mutex`。
+- **直接原因**：内嵌 Node 服务监听 `0.0.0.0:5001` 时收到 `EADDRINUSE`。现场确认平板上的 `com.checklist.offline`（UID 10364）已占用 5001；nodejs-mobile 在未能处理该冲突时连带退出宿主进程。
+- **修复**：AI 检测 APK 的内嵌服务统一迁移到 5002：`node-launcher.js`、`nodejs-project/main.js`、Capacitor `allowNavigation`、前端 `LOCAL_NODE_PORT`、连接测试提示同步更新。保留 5001 给平板上的其他应用，不停止或覆盖它。
+- **真机验证**：平板序列号 `551c3203` 已重新安装；应用进程保持运行（PID 28062），`0.0.0.0:5002` 正常监听，`/health` 返回 `{"status":"ok","port":5002}`；未新增 crash 记录。当前 APK 仍保留 5001 的外部监听，但 AI 客户端不再使用该端口。
+
+## 10. 2026-07-10 Web/APK 交互回归修复
+
+- **模型管理入口失效**：`ModelUnavailableDialog` 使用了不存在的 `/model-management`，`ModelSelector` 使用了旧版 hash 地址 `#/model-management`。两者统一改为 React Router 的 `/models` 应用内导航，Web 不再打开空白新窗口，APK 也能正常跳转。
+- **旧结果页返回链断裂**：历史组件仍跳转 `/results`、`/results/:id` 和 `/live`，但主路由只注册了 `/results-debug`、`/live-inspection`。Web 与 APK 均补齐结果列表、结果详情及 `/live` 兼容路由，避免增强检测完成或查看详情后落到空白页。
+- **Web 冒烟验证**：本地 Vite 预览中，模型池入口到 `/models` 正常；齐套化页面在“暂无待选模型”状态点击“模型管理”后到 `/models`，模型管理标题可见。

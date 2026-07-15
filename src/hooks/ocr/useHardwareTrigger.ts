@@ -33,12 +33,15 @@ export interface HardwareTriggerOptions {
   enabled?: boolean;
   /** 配方定义的设备动作配置，用于自定义信号映射 */
   actionMap?: Record<string, Record<string, string>>;
+  /** 移动视角就位信号字符串 (默认 'STOP_CAPTURE')，收到该字符串触发 onStopCapture */
+  stopSignal?: string;
 }
 
 export const useHardwareTrigger = ({
   callbacks,
   enabled = true,
   actionMap,
+  stopSignal = 'STOP_CAPTURE',
 }: HardwareTriggerOptions) => {
   const devices = useDeviceStore((s) => s.devices);
   const simulationMode = useDeviceStore((s) => s.simulationMode);
@@ -113,10 +116,10 @@ export const useHardwareTrigger = ({
         }
       }
 
-      // 5. 结束采集 / 旋转完毕
-      else if (cleanData === 'CAPTURE_END' || cleanData === 'STOP_CAPTURE' || cleanData === 'COMPLETE') {
+      // 5. 结束采集 / 旋转完毕 (优先匹配配方配置的就位信号，回退到通用白名单)
+      else if (cleanData === stopSignal.trim().toUpperCase() || cleanData === 'STOP_CAPTURE' || cleanData === 'CAPTURE_END' || cleanData === 'COMPLETE') {
         if (callbacksRef.current.onStopCapture) {
-          toast.success('采集结束：旋转台就位', { id: 'hardware-stop-capture' });
+          toast.success('采集结束：移动视角就位', { id: 'hardware-stop-capture' });
           callbacksRef.current.onStopCapture();
         }
       }

@@ -9,6 +9,7 @@ export async function analyzeImageLocal(
     image: string,
     localConfig: {
         modelName: string;
+        ollamaHost?: string;
         systemPrompt: string;
         temperature: number;
         maxTokens: number;
@@ -56,6 +57,7 @@ export async function analyzeImageLocal(
             signal: controller.signal,
             body: JSON.stringify({
                 model: localConfig.modelName,
+                ollama_host: localConfig.ollamaHost || undefined,
                 messages,
                 stream: false,
                 options: {

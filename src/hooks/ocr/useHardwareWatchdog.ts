@@ -2,7 +2,7 @@
  * useHardwareWatchdog
  *
  * 眬顾:硬件采集流程的看门狗。当 Arduino 等外设向网页发送 TRIGGER 启动旋转/采集后,
- * 如果在 timeoutMs 内未收到 STOP_CAPTURE 信号(例如:旋转台失灵/断电/串口被拔/
+ * 如果在 timeoutMs 内未收到 STOP_CAPTURE 信号(例如:移动视角失灵/断电/串口被拔/
  * 信号线脱落),本 hook 自动触发 onTimeout 回调,让上层执行降级评估或复位,
  * 避免工作流无止境卡在 'capturing' 状态等待信号。
  *
@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export interface UseHardwareWatchdogOptions {
   /** 是否布防(页面处于采集中且依赖硬件结束时为 true) */
   armed: boolean;
-  /** 超时阈值(毫秒),默认 30s -- 给旋转台完整周期留够时间 */
+  /** 超时阈值(毫秒),默认 30s -- 给移动视角完整周期留够时间 */
   timeoutMs?: number;
   /** 超时回调(典型:降级触发与 STOP_CAPTURE 等价的评估流程) */
   onTimeout: () => void;

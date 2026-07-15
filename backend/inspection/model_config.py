@@ -40,7 +40,7 @@ class PPEModelConfig:
                 'description': 'PPE专用检测',
                 'version': 'v1.0.0',
                 'created_at': '2024-01-15',
-                'classes': ['person', 'mask', 'no_mask', 'Hardhat', 'NO-Hardhat', 'NO-Safety Vest', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'],
+                'classes': ['Barefoots', 'Ear-protection', 'Harness', 'No_Ear-Protection', 'No_Glasses', 'Sandals', 'boots', 'face_mask', 'face_nomask', 'glasses', 'hand_glove', 'hand_noglove', 'head_helmet', 'head_nohelmet', 'person', 'shoes', 'vest'],
                 'confidence_threshold': 0.5,  # 提高阈值减少误识别
                 'iou_threshold': 0.4,        # 提高IOU阈值，减少重复检测
                 'is_default': True,          # 设置为默认模型
@@ -158,21 +158,24 @@ class PPEModelConfig:
             'ppe_detection': {
                 # PPE检测模型的PPE映射 - 包含洁净帽
                 'person': 'person',
-                'mask': 'mask',
-                'no_mask': 'no_mask',
-                'Hardhat': 'cleanroom_cap',      # 安全帽映射为洁净帽
-                'NO-Hardhat': 'no_cleanroom_cap', # 未戴安全帽
-                'NO-Safety Vest': 'no_safety_vest', # 未穿安全背心
-                'Safety Cone': 'safety_cone',    # 安全锥
-                'Safety Vest': 'safety_vest',    # 安全背心（不是洁净服）
-                'machinery': 'machinery',        # 机械设备
-                'vehicle': 'vehicle',            # 车辆
-                # 添加更多安全帽相关映射
-                'helmet': 'cleanroom_cap',       # 头盔映射为洁净帽
-                'safety_helmet': 'cleanroom_cap', # 安全头盔映射为洁净帽
-                'hard_hat': 'cleanroom_cap',     # 硬帽映射为洁净帽
-                'construction_hat': 'cleanroom_cap', # 施工帽映射为洁净帽
-                'work_hat': 'cleanroom_cap'      # 工作帽映射为洁净帽
+                'face_mask': 'mask',
+                'face_nomask': 'no_mask',
+                'head_helmet': 'cleanroom_cap',      # 帽子映射为洁净帽
+                'head_nohelmet': 'no_cleanroom_cap', # 未戴洁净帽
+                'vest': 'safety_vest',               # 安全背心/衣服
+
+                # 下面是辅助类的映射以防万一
+                'hand_glove': 'safety_gloves',
+                'hand_noglove': 'no_safety_gloves',
+                'glasses': 'safety_glasses',
+                'No_Glasses': 'no_safety_glasses',
+                'boots': 'safety_shoes',
+                'shoes': 'safety_shoes',
+                'Sandals': 'sandals',
+                'Barefoots': 'barefoots',
+                'Harness': 'harness',
+                'Ear-protection': 'ear_mufs',
+                'No_Ear-Protection': 'no_ear_mufs'
             },
             'yolo8x': {
                 # YOLO8X模型的PPE映射 - 过滤掉身体器官，只显示主要PPE
@@ -463,6 +466,13 @@ class PPEModelConfig:
             'no_cleanroom_cap': '未戴洁净帽',
             'no_safety_vest': '未穿安全背心',
             'safety_cone': '安全锥',
+            'safety_vest': '安全背心',
+            'no_safety_gloves': '未戴手套',
+            'no_safety_glasses': '未戴眼镜',
+            'no_ear_mufs': '未戴耳罩',
+            'barefoots': '光脚',
+            'harness': '安全带',
+            'sandals': '凉鞋',
             # 通用检测类别（部分常见类别）
             'bicycle': '自行车',
             'car': '汽车',

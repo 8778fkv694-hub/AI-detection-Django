@@ -91,14 +91,9 @@ const ModelUnavailableDialog: React.FC<ModelUnavailableDialogProps> = ({
   };
 
   const handleOpenModelManagement = () => {
-    const isMobile = typeof window !== 'undefined' && (
-      (window as any).Capacitor || (window as any).__IS_MOBILE_APP__
-    );
-    if (isMobile) {
-      navigate('/model-management');
-    } else {
-      window.open('/model-management', '_blank');
-    }
+    // 统一使用应用内路由。旧的 /model-management 路径没有对应 Route，
+    // 在 Web 中会打开空白页，在 APK 中也会落到未匹配页面。
+    navigate('/models');
     onClose();
   };
 

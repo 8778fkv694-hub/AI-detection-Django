@@ -1,33 +1,19 @@
 import type { Standard } from '@/types';
 
-export const LLM_HANDSHAKE_SYSTEM_PROMPT = `你是本项目中的工业视觉检验LLM，用于结合图片、OCR结果、检测标准、ROI区域和上下文信息，输出稳定、保守、可解析的质检结论。
-
-职责：
-1. 判断外观缺陷、标签状态、文字清晰度、OCR关键信息一致性、贴附是否端正及其他不合规项。
-2. 优先依据业务标准、标准图、区域信息和调用方字段要求进行判定。
-3. 证据不足、图像模糊、区域缺失、OCR不稳定或结果冲突时，必须输出“需复检”，不能强行判为“合格”。
-
-回复要求：
-1. 默认使用简体中文。
-2. 以结构化结果为主，不写寒暄和无关说明。
-3. 若要求返回 JSON，则只能输出合法 JSON。
-4. 字段名保持稳定，不缺少必填字段。
-5. reason 直接说明判定依据，不要编造未观察到的事实。
-
-默认结果约束：
+export const LLM_HANDSHAKE_SYSTEM_PROMPT = `你是工业质检AI。请检查输入图片是否符合标准要求，并严格只返回 JSON 格式结果。
+返回字段限制：
 - overallQuality: "合格" | "存疑" | "需复检"
 - score: 0-100 整数
-- reason: 1-3句核心理由
-- reasonKeywords: 字符串数组或逗号分隔关键词
-- defects: 数组；无缺陷返回 []
-- defects[].severity: 优先使用业务既有枚举
+- reason: 判定理由（1-2句）
+- reasonKeywords: 关键词数组
+- defects: 缺陷数组，无缺陷返回 []
 
-默认返回示例：
-{"overallQuality":"合格","score":95,"reason":"未见明显异常，关键文字清晰且与要求一致。","reasonKeywords":["外观正常","文字清晰"],"defects":[]}`;
+返回示例：
+{"overallQuality":"合格","score":95,"reason":"未见明显异常，符合检测要求。","reasonKeywords":["正常"],"defects":[]}`;
 
-export const DEFAULT_LLM_TASK_PROMPT = `请作为工业视觉检验模型，对当前输入执行严格质检，并返回 JSON 结果。重点关注外观缺陷、标签状态、OCR关键信息一致性、印刷清晰度、贴附是否端正，以及标准中明确要求的关键项。`;
+export const DEFAULT_LLM_TASK_PROMPT = `作为工业质检模型，根据检测要求分析输入图片，并严格只返回 JSON 格式的检验结论。`;
 
-export const DEFAULT_LLM_USER_MESSAGE = `请按照系统提示词和当前检测标准严格分析输入内容，只返回 JSON。返回结构示例：{"overallQuality":"合格/存疑/需复检","score":85,"reason":"检测原因","reasonKeywords":["关键词1","关键词2"],"defects":[{"type":"缺陷类型","description":"缺陷描述","severity":"轻微/一般/严重/致命"}]}`;
+export const DEFAULT_LLM_USER_MESSAGE = `请分析图片是否符合检测标准，并严格只返回符合格式要求的 JSON 结果。`;
 
 function normalizePrompt(prompt?: string | null): string {
   return (prompt || '').trim();
@@ -85,12 +71,35 @@ export function composeInspectionSystemPrompt(options: {
   customPrompt?: string;
   standard?: Standard;
 }): string {
-  const sections = [LLM_HANDSHAKE_SYSTEM_PROMPT];
+  const standard = options.standard;
+  const isOcrTask = !!(
+    standard?.keywords ||
+    (standard as any)?.keywordConfigs ||
+    (standard as any)?.barcodeConfigs ||
+    (standard as any)?.barcode_configs ||
+    (standard as any)?.keyword_configs
+  );
+
+  const focusClause = isOcrTask
+    ? "核对图片中的印刷与OCR文字是否符合标准要求。"
+    : "分析图片中的物理外观、特征或装备佩戴状态。不要寻找或虚构照片中不存在的 OCR 文本。";
+
+  const dynamicHandshake = `你是工业质检AI。任务目标：${focusClause}
+请严格只返回以下格式的 JSON，不要有任何额外解释或 Markdown 包装：
+{
+  "overallQuality": "合格" | "存疑" | "需复检",
+  "score": 0-100,
+  "reason": "判定依据（1-2句）",
+  "reasonKeywords": ["关键词"],
+  "defects": []
+}`;
+
+  const sections = [dynamicHandshake];
   const customPrompt = normalizePrompt(options.customPrompt) || DEFAULT_LLM_TASK_PROMPT;
 
   sections.push(`当前业务补充要求：\n${customPrompt}`);
 
-  const standardDetails = buildStandardDetailsPrompt(options.standard);
+  const standardDetails = buildStandardDetailsPrompt(standard);
   if (standardDetails) {
     sections.push(standardDetails.trim());
   }

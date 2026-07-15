@@ -199,15 +199,20 @@ else
 fi
 
 # ── 7d. 复制 capacitor.js 保证 5001 端口重定向后正常识别原生桥 ──
+# 注意：新版 Capacitor 不产出物理 android/.../public/capacitor.js（运行时由
+# WebViewLocalServer 动态注入），真正的桥代码源文件是 @capacitor/android 包内的
+# native-bridge.js。此前指向不存在的旧路径，⚠️ 静默失败，导致 5001 重定向后
+# window.Capacitor 从未定义，原生检测引擎判定为不可用，全部退化到慢速 WASM。
 echo "[build-apk] 步骤 7d/8：复制 capacitor.js 到 nodejs-project 托管的前端目录..."
-CAP_JS_SRC="android/app/src/main/assets/public/capacitor.js"
+CAP_JS_SRC="node_modules/@capacitor/android/capacitor/src/main/assets/native-bridge.js"
 if [ -f "$CAP_JS_SRC" ]; then
   cp "$CAP_JS_SRC" "www/nodejs-project/dist/capacitor.js"
   mkdir -p "android/app/src/main/assets/public/nodejs-project/dist"
   cp "$CAP_JS_SRC" "android/app/src/main/assets/public/nodejs-project/dist/capacitor.js"
-  echo "[build-apk]   ✅ capacitor.js 已复制到 nodejs-project/dist 托管目录"
+  echo "[build-apk]   ✅ capacitor.js（来自 native-bridge.js）已复制到 nodejs-project/dist 托管目录"
 else
-  echo "[build-apk]   ⚠️ 未在 assets 中找到 capacitor.js"
+  echo "[build-apk]   ❌ 未找到 native-bridge.js（$CAP_JS_SRC），原生检测引擎将在 5001 重定向后失效"
+  exit 1
 fi
 
 # ── 8. 执行编译打包 APK ──────────────────────────────

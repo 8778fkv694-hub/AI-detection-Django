@@ -2,8 +2,10 @@ import * as ort from 'onnxruntime-web';
 
 // 默认 PPE 类名
 const DEFAULT_CLASS_NAMES = [
-  'Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest',
-  'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'
+  'Barefoots', 'Ear-protection', 'Harness', 'No_Ear-Protection', 'No_Glasses',
+  'Sandals', 'boots', 'face_mask', 'face_nomask', 'glasses',
+  'hand_glove', 'hand_noglove', 'head_helmet', 'head_nohelmet', 'person',
+  'shoes', 'vest'
 ];
 
 // COCO 80 类别名 (用于 YOLOv8n 等通用模型基准测试)

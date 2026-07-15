@@ -253,7 +253,7 @@ const HomeDashboard: React.FC = () => {
           name: 'Express 离线服务', 
           ok: backendOk as boolean, 
           loading: false, 
-          detail: '本地端口: 5001' 
+          detail: '本地端口: 5002'
         },
         { 
           name: 'YOLO 本地推理', 

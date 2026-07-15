@@ -18,6 +18,7 @@ export interface UseFusionAIOptions {
   fusionModeEnabled: boolean;
   selectedStandardId: string | null;
   config: any;
+  standards?: any[];
 }
 
 export interface UseFusionAIReturn {
@@ -41,7 +42,7 @@ function getModelModeConfig() {
 }
 
 export const useFusionAI = (options: UseFusionAIOptions): UseFusionAIReturn => {
-  const { fusionModeEnabled, selectedStandardId, config } = options;
+  const { fusionModeEnabled, selectedStandardId, config, standards } = options;
 
   const [aiAnalysisResult, setAiAnalysisResult] = useState<InspectionResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -50,20 +51,28 @@ export const useFusionAI = (options: UseFusionAIOptions): UseFusionAIReturn => {
   const analyzeViaOllama = useCallback(async (imageBase64: string): Promise<InspectionResult | null> => {
     const modeConfig = getModelModeConfig();
     const localConfig = modeConfig?.localModelConfig || {};
-    const modelName = localConfig.modelName || 'gemma4:e4b';
+    const modelName = localConfig.modelName || 'gemma4:e2b-it-qat';
 
     // 提取纯 base64
     const pureBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
 
     const isThinkingModel = modelName.includes('gemma4') || modelName.includes('qwq');
 
+    const matchedStandard = standards?.find(s => s.id === selectedStandardId);
+    const standardCriteria = matchedStandard?.criteria || '';
+
     const systemPrompt = localConfig.systemPrompt ||
       '你是一个专业的工业质检AI助手。请用中文回答，返回JSON格式结果。';
-    const userMessage = localConfig.userMessage ||
+    const baseUserMessage = localConfig.userMessage ||
       '请分析图片质量，返回JSON格式：{"overallQuality": "合格/存疑/需复检", "score": 85, "reason": "检测原因", "reasonKeywords": "关键词", "defects": []}';
+
+    const userMessage = standardCriteria
+      ? `检测任务：请分析图片是否符合以下检测要求：\n"标准要求：${standardCriteria}。请仔细核对画面中的细节。"\n\n请严格返回 JSON 格式结果。格式要求示例：\n${baseUserMessage}`
+      : baseUserMessage;
 
     const requestBody: Record<string, any> = {
       model: modelName,
+      ollama_host: localConfig.ollamaHost || undefined,
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -73,9 +82,10 @@ export const useFusionAI = (options: UseFusionAIOptions): UseFusionAIReturn => {
         }
       ],
       stream: false,
+      format: 'json',
       ...(isThinkingModel ? { think: false } : {}),
       options: {
-        temperature: localConfig.temperature ?? 0.2,
+        temperature: localConfig.temperature ?? 0.1,
         num_predict: localConfig.maxTokens ?? 512,
         num_ctx: localConfig.contextLength ?? 8192,
       }

@@ -51,6 +51,11 @@ export interface StageRecipe {
   // 设备动作配置
   deviceActionMap: Record<string, Record<string, string>>;
   requiredDeviceTypes: string[];
+  // 移动视角 / 就位信号（可选）— 控制采集工作流是否启用移动视角联控
+  turntableEnabled: boolean;
+  turntableStartCommand: string;
+  turntableStopSignal: string;
+  turntableTimeoutSeconds: number;
 }
 
 type RecipePayload = Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'>;
@@ -101,6 +106,10 @@ function mapFromApi(data: any): StageRecipe {
     createdBy: data.created_by ?? '',
     deviceActionMap: data.device_action_map ?? { alarm: { qualified: 'GREEN\n', unqualified: 'RED\n', idle: 'OFF\n' } },
     requiredDeviceTypes: data.required_device_types ?? [],
+    turntableEnabled: data.turntable_enabled ?? false,
+    turntableStartCommand: data.turntable_start_command ?? 'START_ROTATE\n',
+    turntableStopSignal: data.turntable_stop_signal ?? 'STOP_CAPTURE',
+    turntableTimeoutSeconds: data.turntable_timeout_seconds ?? 30,
   };
 }
 
@@ -147,6 +156,10 @@ function mapToApi(payload: Partial<RecipePayload>): Record<string, any> {
   if (payload.createdBy !== undefined) result.created_by = payload.createdBy;
   if (payload.deviceActionMap !== undefined) result.device_action_map = payload.deviceActionMap;
   if (payload.requiredDeviceTypes !== undefined) result.required_device_types = payload.requiredDeviceTypes;
+  if (payload.turntableEnabled !== undefined) result.turntable_enabled = payload.turntableEnabled;
+  if (payload.turntableStartCommand !== undefined) result.turntable_start_command = payload.turntableStartCommand;
+  if (payload.turntableStopSignal !== undefined) result.turntable_stop_signal = payload.turntableStopSignal;
+  if (payload.turntableTimeoutSeconds !== undefined) result.turntable_timeout_seconds = payload.turntableTimeoutSeconds;
   return result;
 }
 

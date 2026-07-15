@@ -3,6 +3,9 @@ const isDevelopment = import.meta.env.DEV;
 // 检测当前协议
 const isHTTPS = window.location.protocol === 'https:';
 
+// Android 平板上的 com.checklist.offline 已占用 5001，AI 检测客户端使用独立端口。
+export const LOCAL_NODE_PORT = 5002;
+
 // v2: 基于端口的动态环境检测
 // 支持 Jetson Nano 生产部署
 export const API_BASE_URL = (() => {
@@ -24,7 +27,7 @@ export const API_BASE_URL = (() => {
     (typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron'))
   );
   if (isMobileApp) {
-    const localNodePort = (window as any).__NODE_SERVER_PORT || 5001;
+    const localNodePort = (window as any).__NODE_SERVER_PORT || LOCAL_NODE_PORT;
     console.log(`📱💻 [Config] 离线客户端模式: 默认连接本地服务端口 ${localNodePort}`);
     return `http://127.0.0.1:${localNodePort}/api`;
   }
@@ -85,8 +88,8 @@ export const DIRECT_BACKEND_API_BASE_URL = (() => {
 export function isLocalOfflineMode(): boolean {
   if (typeof window === 'undefined') return false;
   
-  // 1. 如果 API_BASE_URL 显式包含了 5001 端口，说明正在使用本地内置 Express 服务
-  if (API_BASE_URL.includes('5001')) {
+  // 1. 如果 API_BASE_URL 显式包含了本地 Node 端口，说明正在使用内置 Express 服务
+  if (API_BASE_URL.includes(`:${LOCAL_NODE_PORT}`)) {
     return true;
   }
   

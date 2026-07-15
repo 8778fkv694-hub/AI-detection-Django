@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Home, Camera, Layers, BarChart2, Shield, FileText, Eye, ExternalLink, HelpCircle, Video, Cpu, Settings, AlertTriangle } from 'lucide-react';
 import { useAppStore } from '@/state/appStore';
@@ -32,6 +32,7 @@ import OCRInspectionResultsScreen from '@/screens/OCRInspectionResultsScreen';
 import AnomalyDashboardScreen from '@/screens/AnomalyDashboardScreen';
 // import OCRErrorPreventionResultsScreen from '@/screens/OCRErrorPreventionResultsScreen'; // 已隐藏，移至备份文件夹
 import ResultsDebugScreen from '@/screens/ResultsDebugScreen';
+import ResultDetailScreen from '@/screens/ResultDetailScreen';
 import HelpScreen from '@/screens/HelpScreen';
 import StreamSettingsScreen from '@/screens/StreamSettingsScreen';
 // import OCRTestScreen from '@/screens/OCRTestScreen';
@@ -231,6 +232,11 @@ const App: React.FC = () => {
             <Route path="/ocr-results" element={<OCRInspectionResultsScreen />} />
             {/* <Route path="/ocr-error-prevention-results" element={<OCRErrorPreventionResultsScreen />} /> */} {/* 已隐藏，移至备份文件夹 */}
             <Route path="/results-debug" element={<ResultsDebugScreen />} />
+            {/* 兼容结果页及旧版返回链接 */}
+            <Route path="/results" element={<ResultsDebugScreen />} />
+            <Route path="/results/:resultId" element={<ResultDetailScreen />} />
+            <Route path="/live" element={<Navigate to="/live-inspection" replace />} />
+            <Route path="/model-management" element={<Navigate to="/models" replace />} />
             <Route path="/help" element={<HelpScreen />} />
             {/* <Route path="/ocr-test" element={<OCRTestScreen />} /> */}
             <Route path="/config" element={<LocalModelScreen />} />

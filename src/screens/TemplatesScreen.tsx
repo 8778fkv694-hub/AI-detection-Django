@@ -77,6 +77,10 @@ const EMPTY_RECIPE: Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'> = {
   createdBy: '',
   deviceActionMap: { alarm: { qualified: 'GREEN\n', unqualified: 'RED\n', idle: 'OFF\n' } },
   requiredDeviceTypes: [],
+  turntableEnabled: false,
+  turntableStartCommand: 'START_ROTATE\n',
+  turntableStopSignal: 'STOP_CAPTURE',
+  turntableTimeoutSeconds: 30,
 };
 
 export type RecipeFormData = Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'>;

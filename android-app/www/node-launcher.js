@@ -10,17 +10,21 @@
 (function () {
   'use strict';
 
-  var NODE_PORT = 5001;
+  // 5001 已被平板上的其他离线应用占用，AI 检测客户端固定使用 5002。
+  var NODE_PORT = 5002;
   var HEALTH_URL = 'http://127.0.0.1:' + NODE_PORT + '/health';
   var MAX_RETRY = 60;
   var RETRY_INTERVAL = 500;
 
   // 不在 Capacitor 环境（浏览器开发调试）— 直接跳过
-  // 如果已经运行在端口 5001，直接跳过 Node 进程的重复启动，只关闭 Loading 即可
-  if (window.location.port === "5001") {
-    console.log('[NodeLauncher] Already running on port 5001, skipping node bootstrap');
+  // 如果已经运行在端口 5002，直接跳过 Node 进程的重复启动，只关闭 Loading 即可
+  if (window.location.port === "5002") {
+    console.log('[NodeLauncher] Already running on port 5002, skipping node bootstrap');
+    window.__NODE_SERVER_READY = true;
+    window.__NODE_SERVER_PORT = NODE_PORT;
     setTimeout(function() {
       if (window._hideAppLoading) window._hideAppLoading();
+      window.dispatchEvent(new CustomEvent('node-server-ready', { detail: { status: 'ok', port: NODE_PORT } }));
     }, 100);
     return;
   }
@@ -61,7 +65,19 @@
       console.error('[NodeLauncher] Node error:', err);
     });
 
-    // 启动 Node
+    // 覆盖安装或异常退出后，旧的 embedded Node 实例可能短暂保留端口。
+    // 先复用健康实例，避免重复 start 触发 EADDRINUSE 并让 nodejs-mobile 原生层退出。
+    probeExistingServer(function (isRunning) {
+      if (isRunning) {
+        console.log('[NodeLauncher] Reusing existing Node server on port ' + NODE_PORT);
+        startHealthCheck();
+        return;
+      }
+      startNode(nodejs);
+    });
+  }
+
+  function startNode(nodejs) {
     nodejs.start('main.js', function (err) {
       if (err) {
         console.error('[NodeLauncher] Failed to start Node:', err);
@@ -71,6 +87,31 @@
         startHealthCheck();
       }
     });
+  }
+
+  function probeExistingServer(callback) {
+    var xhr = new XMLHttpRequest();
+    var settled = false;
+    var timer = setTimeout(function () { finish(false); }, 1500);
+
+    function finish(isRunning) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(isRunning);
+    }
+
+    try {
+      xhr.open('GET', HEALTH_URL, true);
+      xhr.timeout = 1200;
+      xhr.onload = function () { finish(xhr.status === 200); };
+      xhr.onerror = function () { finish(false); };
+      xhr.ontimeout = function () { finish(false); };
+      xhr.send();
+    } catch (err) {
+      console.warn('[NodeLauncher] Existing server probe failed:', err);
+      finish(false);
+    }
   }
 
   function startHealthCheck() {
@@ -88,10 +129,10 @@
             window.__NODE_SERVER_READY = true;
             window.__NODE_SERVER_PORT = NODE_PORT;
 
-            // 如果当前不在 5001 端口（即在 Capacitor 默认的 http://localhost 下），则跳转至真实的 Node.js 端口以获得 COOP/COEP 跨域隔离支持
-            if (window.location.port !== "5001") {
-              console.log('[NodeLauncher] Redirecting WebView to Node server http://localhost:5001/');
-              window.location.href = 'http://localhost:5001/';
+            // 如果当前不在 5002 端口（即在 Capacitor 默认的 http://localhost 下），则跳转至真实的 Node.js 端口以获得 COOP/COEP 跨域隔离支持
+            if (window.location.port !== "5002") {
+              console.log('[NodeLauncher] Redirecting WebView to Node server http://localhost:5002/');
+              window.location.href = 'http://localhost:5002/';
               return;
             }
 

@@ -17,7 +17,8 @@ const config: CapacitorConfig = {
     allowNavigation: [
       '127.0.0.1',
       'localhost',
-      '*.local'
+      '*.local',
+      'http://localhost:5002'
     ],
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',

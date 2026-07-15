@@ -143,9 +143,9 @@ export const useLiveImageProcessing = (): UseLiveImageProcessingResult => {
               maxY = Math.max(maxY, y2);
             });
 
-            // 添加边距（10%）
-            const marginX = (maxX - minX) * 0.1;
-            const marginY = (maxY - minY) * 0.1;
+            // 添加边距（20% 确保大模型能看到足够的脸部/背景上下文，防止误判）
+            const marginX = (maxX - minX) * 0.2;
+            const marginY = (maxY - minY) * 0.2;
 
             const cropX = Math.max(0, minX - marginX);
             const cropY = Math.max(0, minY - marginY);

@@ -102,30 +102,36 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
 
   // 获取并监听配方中的硬件指令覆盖
   const [recipeActionMap, setRecipeActionMap] = useState<Record<string, Record<string, string>> | undefined>(undefined);
+  // 移动视角联控配置(由配方保存,未启用时全部旁路)
+  const [turntableEnabled, setTurntableEnabled] = useState(false);
+  const [turntableStartCmd, setTurntableStartCmd] = useState('START_ROTATE\n');
+  const [turntableStopSignal, setTurntableStopSignal] = useState('STOP_CAPTURE');
+  const [turntableTimeoutMs, setTurntableTimeoutMs] = useState(30_000);
 
   useEffect(() => {
     const stageCode = binding.traceContext.processStageCode;
     if (!stageCode) {
       setRecipeActionMap(undefined);
+      setTurntableEnabled(false);
       return;
     }
-    
+
     let isMounted = true;
     void fetchRecipes()
       .then((recipes) => {
-        if (isMounted) {
-          const matched = recipes.find((r) => r.processStageCode === stageCode);
-          if (matched?.deviceActionMap) {
-            setRecipeActionMap(matched.deviceActionMap);
-          } else {
-            setRecipeActionMap(undefined);
-          }
-        }
+        if (!isMounted) return;
+        const matched = recipes.find((r) => r.processStageCode === stageCode);
+        if (matched?.deviceActionMap) setRecipeActionMap(matched.deviceActionMap);
+        else setRecipeActionMap(undefined);
+        setTurntableEnabled(!!matched?.turntableEnabled);
+        setTurntableStartCmd(matched?.turntableStartCommand?.trim() || 'START_ROTATE\n');
+        setTurntableStopSignal(matched?.turntableStopSignal?.trim() || 'STOP_CAPTURE');
+        setTurntableTimeoutMs(Math.max(3000, (matched?.turntableTimeoutSeconds ?? 30) * 1000));
       })
       .catch((err) => {
         console.warn('获取配方设备配置失败:', err);
       });
-      
+
     return () => {
       isMounted = false;
     };
@@ -300,13 +306,14 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
 
   useEffect(() => { handleHardwareStopCaptureRef.current = handleHardwareStopCapture; }, [handleHardwareStopCapture]);
 
-  // 看门狗:硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级评估(防卡死)
+  // 看门狗:硬件 TRIGGER 后若未收到就位信号,自动降级评估(防卡死)
+  // 仅在配方启用移动视角联控时布防,避免对固定机位的产线造成干扰
   const watchdog = useHardwareWatchdog({
-    armed: camera.isCameraOn && capture.localCapturedImages.length > 0 && !detection.isDetecting,
-    timeoutMs: 30_000,
+    armed: turntableEnabled && camera.isCameraOn && capture.localCapturedImages.length > 0 && !detection.isDetecting,
+    timeoutMs: turntableTimeoutMs,
     debug: true,
     onTimeout: () => {
-      toast('采集超时:30 秒未收到旋转台就位信号,自动启动 PPE 评估', { icon: '⏰' });
+      toast(`采集超时:${(turntableTimeoutMs / 1000).toFixed(0)} 秒未收到移动视角就位信号,自动启动 PPE 评估`, { icon: '⏰' });
       handleHardwareStopCaptureRef.current();
     },
   });
@@ -315,11 +322,11 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
   const handleHardwareTrigger = useCallback(() => {
     if (!camera.isCameraOn) return;
     capture.handleManualCapture();
-    if (capture.localCapturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
-      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    if (turntableEnabled && capture.localCapturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData(turntableStartCmd);
     }
     markActivity();
-  }, [camera.isCameraOn, capture.localCapturedImages.length, capture.handleManualCapture, markActivity]);
+  }, [camera.isCameraOn, capture.localCapturedImages.length, capture.handleManualCapture, markActivity, turntableEnabled, turntableStartCmd]);
 
   const hardwareTrigger = useHardwareTrigger({
     callbacks: {
@@ -331,6 +338,7 @@ export const usePPEScreenController = (): UsePPEScreenControllerResult => {
     },
     enabled: true,
     actionMap: recipeActionMap,
+    stopSignal: turntableStopSignal,
   });
   hardwareTriggerRef.current = hardwareTrigger;
 

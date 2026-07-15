@@ -595,6 +595,13 @@ class StageRecipeTemplate(models.Model):
     device_action_map      = models.JSONField(default=dict, blank=True, help_text='检测结果→设备指令映射 {"alarm":{"qualified":"GREEN\\n","unqualified":"RED\\n","idle":"OFF\\n"}}')
     required_device_types  = models.JSONField(default=list, blank=True, help_text='必需设备类型 ["alarm","scanner"]')
 
+    # 移动视角 / 就位信号（可选）— 控制采集工作流是否启用移动视角联控
+    # 关闭时：不反向下发 START_ROTATE、不布防看门狗；避免对无移动视角的产线造成干扰
+    turntable_enabled          = models.BooleanField(default=False, help_text='启用移动视角多面采集联控')
+    turntable_start_command    = models.CharField(max_length=64, blank=True, default='START_ROTATE\\n', help_text='触发采集时反向下发的启动旋转指令')
+    turntable_stop_signal      = models.CharField(max_length=64, blank=True, default='STOP_CAPTURE', help_text='移动视角就位完成信号(串口收到该字符串视为采集结束)')
+    turntable_timeout_seconds  = models.FloatField(default=30, help_text='等待就位信号的超时阈值(秒)，超时降级自动评估')
+
     # 元数据
     is_default  = models.BooleanField(default=False)
     is_active   = models.BooleanField(default=True)

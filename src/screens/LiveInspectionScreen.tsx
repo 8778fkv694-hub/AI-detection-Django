@@ -65,18 +65,24 @@ const LiveInspectionScreen: React.FC = () => {
     return urlParams.get('stage_code')?.trim() || '';
   });
   const [recipeActionMap, setRecipeActionMap] = useState<Record<string, Record<string, string>> | undefined>(undefined);
+  // 移动视角联控配置(由配方保存,未启用时全部旁路)
+  const [turntableEnabled, setTurntableEnabled] = useState(false);
+  const [turntableStartCmd, setTurntableStartCmd] = useState('START_ROTATE\n');
+  const [turntableStopSignal, setTurntableStopSignal] = useState('STOP_CAPTURE');
+  const [turntableTimeoutMs, setTurntableTimeoutMs] = useState(30_000);
 
   useEffect(() => {
     if (!stageCode) return;
     let isMounted = true;
     void fetchRecipes()
       .then((recipes) => {
-        if (isMounted) {
-          const matched = recipes.find((r) => r.processStageCode === stageCode);
-          if (matched?.deviceActionMap) {
-            setRecipeActionMap(matched.deviceActionMap);
-          }
-        }
+        if (!isMounted) return;
+        const matched = recipes.find((r) => r.processStageCode === stageCode);
+        if (matched?.deviceActionMap) setRecipeActionMap(matched.deviceActionMap);
+        setTurntableEnabled(!!matched?.turntableEnabled);
+        setTurntableStartCmd(matched?.turntableStartCommand?.trim() || 'START_ROTATE\n');
+        setTurntableStopSignal(matched?.turntableStopSignal?.trim() || 'STOP_CAPTURE');
+        setTurntableTimeoutMs(Math.max(3000, (matched?.turntableTimeoutSeconds ?? 30) * 1000));
       })
       .catch((err) => {
         console.warn('获取配方设备配置失败:', err);
@@ -421,13 +427,14 @@ const LiveInspectionScreen: React.FC = () => {
     }
   }, [tempFolderPath]);
 
-  // 看门狗(先创建以便回调复用 markActivity):硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级 AI 评估
+  // 看门狗(先创建以便回调复用 markActivity):硬件 TRIGGER 后若收到就位信号，自动降级 AI 评估
+  // 仅在配方启用移动视角联控时布防,避免对固定机位的产线造成干扰
   const watchdog = useHardwareWatchdog({
-    armed: !isInspecting && capturedImages.length > 0,
-    timeoutMs: 30_000,
+    armed: turntableEnabled && !isInspecting && capturedImages.length > 0,
+    timeoutMs: turntableTimeoutMs,
     debug: true,
     onTimeout: () => {
-      toast('采集超时:30 秒未收到旋转台就位信号,自动启动 AI 评估', { icon: '⏰' });
+      toast(`采集超时:${(turntableTimeoutMs / 1000).toFixed(0)} 秒未收到移动视角就位信号,自动启动 AI 评估`, { icon: '⏰' });
       handleHardwareStopCaptureRef.current();
     },
   });
@@ -436,12 +443,12 @@ const LiveInspectionScreen: React.FC = () => {
   const handleHardwareTrigger = useCallback(() => {
     if (!isCameraOn) return;
     handleCapture();
-    // 第一次抓拍时反向写入 Arduino 启动旋转
-    if (capturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
-      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    // 第一次抓拍时反向下发启动移动视角指令(仅在配方启用时)
+    if (turntableEnabled && capturedImages.length === 0 && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData(turntableStartCmd);
     }
     markActivity();
-  }, [isCameraOn, handleCapture, capturedImages.length, markActivity]);
+  }, [isCameraOn, handleCapture, capturedImages.length, markActivity, turntableEnabled, turntableStartCmd]);
 
   const handleHardwareStopCapture = useCallback(() => {
     if (capturedImages.length > 0 && !isInspecting) {
@@ -465,6 +472,7 @@ const LiveInspectionScreen: React.FC = () => {
     },
     enabled: true,
     actionMap: recipeActionMap,
+    stopSignal: turntableStopSignal,
   });
   hardwareTriggerRef.current = hardwareTrigger;
 

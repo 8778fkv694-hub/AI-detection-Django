@@ -40,6 +40,7 @@ interface OllamaStatus {
 
 interface LocalModelConfig {
   modelName: string;
+  ollamaHost?: string;
   systemPrompt: string;
   userMessage: string;
   temperature: number;
@@ -69,7 +70,7 @@ const LocalModelScreen: React.FC = () => {
 
   const [config, setConfig] = useState<LocalModelConfig>(() => {
     // 如果localModelConfig是默认配置，则应用高内存模式
-    const isDefaultConfig = (localModelConfig.modelName === 'moondream:latest' || localModelConfig.modelName === 'gemma4:e4b') &&
+    const isDefaultConfig = (localModelConfig.modelName === 'moondream:latest' || localModelConfig.modelName === 'gemma4:e2b-it-qat') &&
                            localModelConfig.maxTokens <= 1024;
     
     if (isDefaultConfig) {
@@ -105,18 +106,20 @@ const LocalModelScreen: React.FC = () => {
     setOllamaStatus(prev => ({ ...prev, isLoading: true, error: null }));
     
     try {
-      // 直接请求 Django 8000 端口，避免经过静态服务器代理
-      const statusResponse = await directBackendFetch('/ollama/status/', {
+      // 允许将自定义主机地址传递给后端，获取远程设备上的 Ollama 模型列表
+      const url = config.ollamaHost
+        ? `/ollama/status/?ollama_host=${encodeURIComponent(config.ollamaHost)}`
+        : '/ollama/status/';
+
+      const statusResponse = await directBackendFetch(url, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         }
       });
       
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json();
-        
-        if (statusData.success && statusData.status === 'running') {
+      const statusData = await statusResponse.json().catch(() => null);
+      if (statusResponse.ok && statusData?.success && statusData.status === 'running') {
           // 服务运行正常，使用状态API返回的模型信息
           // 优先显示用户选择的模型，如果没有则显示第一个可用模型
           const selectedModel = statusData.models?.find((m: any) => m.name === config.modelName);
@@ -133,11 +136,8 @@ const LocalModelScreen: React.FC = () => {
           });
           
           toast.success('本地模型服务运行正常');
-        } else {
-          throw new Error(statusData.message || '服务未运行');
-        }
       } else {
-        throw new Error('状态检查失败');
+        throw new Error(statusData?.message || '状态检查失败');
       }
     } catch (error) {
       setOllamaStatus({
@@ -151,7 +151,7 @@ const LocalModelScreen: React.FC = () => {
       
       toast.error('无法连接到本地模型服务');
     }
-  }, []);
+  }, [config.modelName, config.ollamaHost]);
 
   // 复制命令到剪贴板
   const copyCommand = useCallback(async (command: string) => {
@@ -361,7 +361,6 @@ const LocalModelScreen: React.FC = () => {
     }
   }, [config]);
 
-  // 测试本地模型
   const testLocalModel = useCallback(async () => {
     if (!ollamaStatus.isRunning) {
       toast.error('请先启动本地模型服务');
@@ -382,6 +381,7 @@ const LocalModelScreen: React.FC = () => {
         },
         body: JSON.stringify({
           model: config.modelName,
+          ollama_host: config.ollamaHost || undefined,
           messages: [
             {
               role: 'user',
@@ -409,7 +409,7 @@ const LocalModelScreen: React.FC = () => {
         toast.error(`测试失败: ${error instanceof Error ? error.message : '未知错误'}`, { id: 'test-model' });
       }
     }
-  }, [ollamaStatus.isRunning, config.modelName]);
+  }, [ollamaStatus.isRunning, config.modelName, config.ollamaHost]);
 
   // 组件加载时检查状态和加载配置
   useEffect(() => {
@@ -694,12 +694,12 @@ const LocalModelScreen: React.FC = () => {
                       </div>
                     </div>
                   </SelectItem>
-                  <SelectItem value="gemma4:e4b">
+                  <SelectItem value="gemma4:e2b-it-qat">
                     <div className="flex items-center gap-2">
                       <Target className="h-4 w-4" />
                       <div>
-                        <div className="font-medium">Gemma 4</div>
-                        <div className="text-xs text-slate-500">Google多模态模型，9.6GB，支持图像理解</div>
+                        <div className="font-medium">Gemma 4 (Edge 2B QAT)</div>
+                        <div className="text-xs text-slate-500">Google多模态模型，4.3GB，支持图像理解</div>
                       </div>
                     </div>
                   </SelectItem>
@@ -838,7 +838,18 @@ const LocalModelScreen: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="ollama-host">Ollama 服务地址</Label>
+              <Input
+                id="ollama-host"
+                value={config.ollamaHost || ''}
+                onChange={(e) => setConfig(prev => ({ ...prev, ollamaHost: e.target.value }))}
+                placeholder="默认: http://localhost:11434"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">远程地址需由服务端的 OLLAMA_ALLOWED_HOSTS 明确授权。</p>
+            </div>
+
             <div>
               <Label htmlFor="model-name">模型名称</Label>
               <Input

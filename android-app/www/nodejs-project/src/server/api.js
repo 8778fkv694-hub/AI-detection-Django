@@ -71,9 +71,33 @@
     };
 
     const composeInspectionSystemPrompt = (customPrompt, standard) => {
+      const isOcrTask = !!(
+        standard && (
+          standard.keywords ||
+          standard.keywordConfigs ||
+          standard.barcodeConfigs ||
+          standard.barcode_configs ||
+          standard.keyword_configs
+        )
+      );
+
+      const focusClause = isOcrTask
+        ? '核对图片中的印刷与OCR文字是否符合标准要求。'
+        : '分析图片中的物理外观、特征或装备佩戴状态。不要寻找或虚构照片中不存在的 OCR 文本。';
+
+      const dynamicHandshake = `你是工业质检AI。任务目标：${focusClause}
+请严格只返回以下格式的 JSON，不要有任何额外解释或 Markdown 包装：
+{
+  "overallQuality": "合格" | "存疑" | "需复检",
+  "score": 0-100,
+  "reason": "判定依据（1-2句）",
+  "reasonKeywords": ["关键词"],
+  "defects": []
+}`;
+
       const prompt = (customPrompt || '').trim() || DEFAULT_LLM_TASK_PROMPT;
       const sections = [
-        LLM_HANDSHAKE_SYSTEM_PROMPT,
+        dynamicHandshake,
         `当前业务补充要求：\n${prompt}`
       ];
       const standardDetails = buildStandardDetailsPrompt(standard);
@@ -352,8 +376,8 @@ const withModelFileInfo = (model) => {
     };
 };
 
-// v3: 包含工业质检、YOLOv8N轻量以及 PPE 安全防护检测模型
-const MOBILE_MODELS_VERSION = 3; // 递增此版本号以触发 DB 重新播种
+// v4: PPE 模型从历史 10 类切换为实际权重的 17 类，强制旧端侧数据库重新播种。
+const MOBILE_MODELS_VERSION = 4; // 递增此版本号以触发 DB 重新播种
 const getDefaultMobileModels = () => ([
     {
         id: 'best_industrial',
@@ -389,26 +413,33 @@ const getDefaultMobileModels = () => ([
         id: 'ppe_detection',
         name: 'PPE检测专用模型',
         file: 'ppe.onnx',
-        description: '端侧个人防护装备检测模型，支持安全帽、口罩、反光背心等 10 类洁净室与防护装备检测',
-        version: 'v2.0.0',
-        created_at: '2025-07-05',
-        classes: ['Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest', 'Person', 'Safety Cone', 'Safety Vest', 'machinery', 'vehicle'],
+        description: '端侧个人防护装备检测模型，支持头部、面部、手部、足部与身体防护等 17 类检测',
+        version: 'v3.0.0',
+        created_at: '2026-07-10',
+        classes: ['Barefoots', 'Ear-protection', 'Harness', 'No_Ear-Protection', 'No_Glasses', 'Sandals', 'boots', 'face_mask', 'face_nomask', 'glasses', 'hand_glove', 'hand_noglove', 'head_helmet', 'head_nohelmet', 'person', 'shoes', 'vest'],
         detection_type: 'cleanroom_ppe',
         confidence_threshold: 0.5,
         iou_threshold: 0.4,
         is_default: false,
         category: 'ppe_specialized',
         class_names: {
-            Hardhat: '安全帽/洁净帽',
-            Mask: '口罩',
-            'NO-Hardhat': '未戴安全帽/洁净帽',
-            'NO-Mask': '未戴口罩',
-            'NO-Safety Vest': '未穿反光背心',
-            Person: '人员',
-            'Safety Cone': '安全锥',
-            'Safety Vest': '反光背心',
-            machinery: '机械设备',
-            vehicle: '车辆'
+            Barefoots: '光脚',
+            'Ear-protection': '耳罩',
+            Harness: '安全带',
+            'No_Ear-Protection': '未戴耳罩',
+            'No_Glasses': '未戴护目镜',
+            Sandals: '凉鞋',
+            boots: '安全鞋',
+            face_mask: '佩戴口罩',
+            face_nomask: '未戴口罩',
+            glasses: '护目镜',
+            hand_glove: '手套',
+            hand_noglove: '未戴手套',
+            head_helmet: '安全帽/洁净帽',
+            head_nohelmet: '未戴安全帽/洁净帽',
+            person: '人员',
+            shoes: '鞋',
+            vest: '安全背心'
         }
     },
     {

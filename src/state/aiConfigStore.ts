@@ -16,9 +16,9 @@ import { DEFAULT_LLM_TASK_PROMPT, DEFAULT_LLM_USER_MESSAGE } from '@/lib/llmProm
       systemPrompt: DEFAULT_LLM_TASK_PROMPT,
       userMessage: DEFAULT_LLM_USER_MESSAGE,
       compressionEnabled: true,
-      compressionQuality: 0.8, // 提高质量到80%
-      imageWidth: 600, // 提高分辨率到600x600
-      imageHeight: 600, // 适合24GB内存的高质量模式
+      compressionQuality: 0.5, // 50% 压缩质量是最完美的黄金点，兼顾网络延迟与细节
+      imageWidth: 400, // 调整分辨率为 400x400 适合边缘推理耗时
+      imageHeight: 400,
     };
 
     export const useAIConfigStore = create<AIConfigState>()(

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { 
+import {
   Play, Shield, Cpu, Lightbulb,
   Zap, Info, Trash2, Sliders, Settings,
-  GitBranch, AlertTriangle
+  GitBranch, AlertTriangle, RotateCw, MapPin
 } from 'lucide-react';
 import { useAppStore } from '@/state/appStore';
 import type { RecipeFormData } from '@/screens/TemplatesScreen';
@@ -344,8 +344,12 @@ export function RecipeWorkflowEditor({
               <div className="text-[11px] text-slate-400 space-y-1">
                 <p>触发源: {form.autoCapture ? '自动循环' : '外部脉冲'}</p>
                 <p>延时: {form.captureDelaySeconds}s</p>
+                <p className={`flex items-center gap-1 ${form.turntableEnabled ? 'text-amber-400' : 'text-slate-500'}`}>
+                  <RotateCw className="h-3 w-3" />
+                  移动视角: {form.turntableEnabled ? '联控 (就位等待)' : '旁路 (无)'}
+                </p>
               </div>
-              
+
               {/* Output Handle */}
               <div 
                 data-handle="trigger-out" 
@@ -629,12 +633,75 @@ export function RecipeWorkflowEditor({
               </div>
               <div>
                 <label className="block text-[11px] text-muted-foreground mb-1">条码/二维码识别冷却期 (秒)</label>
-                <input 
+                <input
                   type="number" step="1" min="1"
                   value={form.qrDetectIntervalSeconds}
                   onChange={e => set('qrDetectIntervalSeconds', parseInt(e.target.value) || 3)}
                   className="w-full rounded border border-border/50 bg-slate-800/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-cyan-500"
                 />
+              </div>
+
+              {/* 移动视角 / 就位信号 (可选) */}
+              <div className="border-t border-border/20 pt-3 space-y-3">
+                <div className="flex items-center justify-between py-1">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+                    <RotateCw className="h-3.5 w-3.5" />
+                    移动视角多面采集联控 (可选)
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={form.turntableEnabled}
+                    onChange={e => set('turntableEnabled', e.target.checked)}
+                    className="h-4 w-4 accent-amber-500 cursor-pointer"
+                  />
+                </div>
+                {!form.turntableEnabled ? (
+                  <div className="rounded-lg bg-slate-950/40 border border-border/20 p-2.5">
+                    <p className="text-[10px] text-slate-500">
+                      已旁路。不反向下发启动移动指令、不布防就位看门狗；适用于无移动视角的产线，避免对串口控制器造成干扰。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pl-3 border-l border-amber-500/30">
+                    <div className="rounded-lg bg-amber-950/20 border border-amber-500/20 p-2.5 flex gap-2">
+                      <MapPin className="h-3.5 w-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-amber-400/90 leading-relaxed">
+                        触发采集时下发启动移动指令 → 移动视角到位 → 到位后串口回传就位信号 → 网页结束采集并启动评估。若 {form.turntableTimeoutSeconds}s 内未收到就位信号，自动降级评估防卡死。
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground mb-1">启动移动视角指令 (反向写串口)</label>
+                      <input
+                        type="text"
+                        value={form.turntableStartCommand}
+                        onChange={e => set('turntableStartCommand', e.target.value)}
+                        placeholder="如: START_ROTATE\n"
+                        className="w-full rounded border border-border/50 bg-slate-800/80 px-2.5 py-1.5 text-xs font-mono text-foreground outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground mb-1">就位完成信号 (串口上行字符串)</label>
+                      <input
+                        type="text"
+                        value={form.turntableStopSignal}
+                        onChange={e => set('turntableStopSignal', e.target.value)}
+                        placeholder="如: STOP_CAPTURE"
+                        className="w-full rounded border border-border/50 bg-slate-800/80 px-2.5 py-1.5 text-xs font-mono text-foreground outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground mb-1">
+                        就位等待超时 ({form.turntableTimeoutSeconds}s)
+                      </label>
+                      <input
+                        type="number" step="1" min="3" max="300"
+                        value={form.turntableTimeoutSeconds}
+                        onChange={e => set('turntableTimeoutSeconds', Math.max(3, parseInt(e.target.value) || 30))}
+                        className="w-full rounded border border-border/50 bg-slate-800/80 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -149,6 +149,7 @@ INFO_TEMP_BACKUP/
 # Large files
 *.pt
 *.backup
+*.large_backup
 model_backups/
 PPE_detection_YOLO/
 runs/

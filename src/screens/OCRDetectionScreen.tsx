@@ -288,6 +288,7 @@ const OCRDetectionScreen: React.FC = () => {
     fusionModeEnabled,
     selectedStandardId: selectedStandardId || null,
     config,
+    standards,
   });
 
   const { refreshHistory } = useOCRHistory({ setDetectionHistory });
@@ -1016,13 +1017,19 @@ const OCRDetectionScreen: React.FC = () => {
 
   useEffect(() => { handleHardwareStopCaptureRef.current = handleHardwareStopCapture; }, [handleHardwareStopCapture]);
 
-  // 看门狗:硬件 TRIGGER 后若 30s 未收到 STOP_CAPTURE,自动降级评估(防卡死)
+  // 看门狗:硬件 TRIGGER 后若未收到就位信号,自动降级评估(防卡死)
+  // 仅在配方启用移动视角联控时布防,避免对无移动视角的产线造成干扰
+  const turntableEnabled = !!appliedRecipeSnapshot?.turntableEnabled;
+  const turntableStartCmd = appliedRecipeSnapshot?.turntableStartCommand?.trim() || 'START_ROTATE\n';
+  const turntableStopSignal = appliedRecipeSnapshot?.turntableStopSignal?.trim() || 'STOP_CAPTURE';
+  const turntableTimeoutMs = Math.max(3000, (appliedRecipeSnapshot?.turntableTimeoutSeconds ?? 30) * 1000);
+
   const watchdog = useHardwareWatchdog({
-    armed: workflowState !== 'idle' && workflowState !== 'completed' && !isAnalyzing,
-    timeoutMs: 30_000,
+    armed: turntableEnabled && workflowState !== 'idle' && workflowState !== 'completed' && !isAnalyzing,
+    timeoutMs: turntableTimeoutMs,
     debug: true,
     onTimeout: () => {
-      toast('采集超时:30 秒未收到旋转台就位信号,自动启动评估', { icon: '⏰' });
+      toast(`采集超时:${(turntableTimeoutMs / 1000).toFixed(0)} 秒未收到移动视角就位信号,自动启动评估`, { icon: '⏰' });
       handleHardwareStopCaptureRef.current();
     },
   });
@@ -1030,14 +1037,14 @@ const OCRDetectionScreen: React.FC = () => {
 
   const handleHardwareTrigger = useCallback(() => {
     if (!isCameraOn) return;
-    if (workflowState === 'idle' && hardwareTriggerRef.current?.sendData) {
-      void hardwareTriggerRef.current.sendData('START_ROTATE\n');
+    if (turntableEnabled && workflowState === 'idle' && hardwareTriggerRef.current?.sendData) {
+      void hardwareTriggerRef.current.sendData(turntableStartCmd);
     }
     if (!isRealtimeActive && workflowState === 'idle') {
       handleManualCapture();
     }
     markActivity();
-  }, [isCameraOn, workflowState, isRealtimeActive, handleManualCapture, markActivity]);
+  }, [isCameraOn, workflowState, isRealtimeActive, handleManualCapture, markActivity, turntableEnabled, turntableStartCmd]);
 
   const hardwareTrigger = useHardwareTrigger({
     callbacks: {
@@ -1049,6 +1056,7 @@ const OCRDetectionScreen: React.FC = () => {
     },
     enabled: true,
     actionMap: appliedRecipeSnapshot?.deviceActionMap as any,
+    stopSignal: turntableStopSignal,
   });
   hardwareTriggerRef.current = hardwareTrigger;
 

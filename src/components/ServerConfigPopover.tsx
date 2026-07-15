@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Wifi, X, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import { LOCAL_NODE_PORT } from '@/lib/config';
 
 export const ServerConfigPopover: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -29,7 +30,7 @@ export const ServerConfigPopover: React.FC = () => {
 
   const handleTest = async () => {
     const trimmed = url.trim();
-    const testUrl = trimmed ? `${trimmed.replace(/\/$/, '')}/health` : 'http://127.0.0.1:5001/health';
+    const testUrl = trimmed ? `${trimmed.replace(/\/$/, '')}/health` : `http://127.0.0.1:${LOCAL_NODE_PORT}/health`;
 
     setTesting(true);
     setTestResult({ status: 'idle', message: '正在连接测试...' });
@@ -86,7 +87,7 @@ export const ServerConfigPopover: React.FC = () => {
           </div>
 
           <p className="text-xs text-muted-foreground mb-4">
-            配置移动端要连接的后端地址。留空则自动运行本地内置 Node 离线服务（端口 5001）。
+            配置移动端要连接的后端地址。留空则自动运行本地内置 Node 离线服务（端口 {LOCAL_NODE_PORT}）。
           </p>
 
           <div className="space-y-3 mb-4">

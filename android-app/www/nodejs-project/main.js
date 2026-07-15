@@ -1,6 +1,6 @@
 /**
  * WYL AI 检测系统移动端 Node 服务入口
- * 监听 0.0.0.0:5001，前端 WebView 通过 localhost 访问
+ * 监听 0.0.0.0:5002，前端 WebView 通过 localhost 访问
  */
 'use strict';
 
@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
-const PORT = 5001;
+const PORT = 5002;
 const HOST = '0.0.0.0';
 
 const app = express();
@@ -91,7 +91,7 @@ app.use((err, req, res, next) => {
 
 // 启动服务器
 function start() {
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log('[mobile-node] listening on http://' + HOST + ':' + PORT);
 
     // 通知前端 Node 已就绪
@@ -101,6 +101,17 @@ function start() {
         cordova.channel.post('server-ready', { port: PORT, host: HOST });
       }
     } catch (e) { }
+  });
+
+  // nodejs-mobile 在未处理的 listen 错误后可能连带终止 Android 宿主进程。
+  // 覆盖安装/异常重启时，旧实例可短暂占用 5002；启动器会复用该健康实例，
+  // 因此这里仅保持运行时存活并交由健康轮询确认服务，而不是抛出致命异常。
+  server.on('error', (err) => {
+    console.error('[mobile-node] server listen error:', err && err.code ? err.code : err);
+    if (err && err.code === 'EADDRINUSE') {
+      console.warn('[mobile-node] port ' + PORT + ' is already occupied; launcher will reuse the existing server');
+    }
+    setInterval(() => {}, 60000);
   });
 }
 
