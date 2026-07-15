@@ -145,7 +145,8 @@ export default defineConfig({
   // 添加构建配置
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // 生产默认不生成大型 source map；排障构建可显式开启。
+    sourcemap: process.env.BUILD_SOURCEMAP === 'true',
   },
   // 添加解析配置
   resolve: {

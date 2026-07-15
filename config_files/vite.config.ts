@@ -142,7 +142,7 @@ export default defineConfig({
   // 添加构建配置
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: process.env.BUILD_SOURCEMAP === 'true',
   },
   // 添加解析配置
   resolve: {
@@ -151,4 +151,3 @@ export default defineConfig({
     },
   },
 });
-  

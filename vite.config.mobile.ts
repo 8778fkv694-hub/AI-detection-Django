@@ -8,7 +8,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, 'android-app/www/dist'),
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: process.env.BUILD_SOURCEMAP === 'true',
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index-mobile.html'),

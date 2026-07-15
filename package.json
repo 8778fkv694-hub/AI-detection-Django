@@ -10,6 +10,7 @@
             "dev:proxy": "node ollama-proxy.js",
             "dev:full": "concurrently \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:proxy\" \"npm:dev:rpa\"",
             "build": "tsc --noEmit && vite build",
+            "postbuild": "node scripts/compress-dist.mjs && node scripts/check-bundle-budget.mjs",
             "build:mobile": "tsc --noEmit && vite build --config vite.config.mobile.ts && cp android-app/www/node-launcher.js android-app/www/dist/node-launcher.js && mv android-app/www/dist/index-mobile.html android-app/www/dist/index.html",
             "preview": "vite preview",
             "start": "node deploy.js",

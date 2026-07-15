@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { 
@@ -10,31 +10,34 @@ import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
 import { StreamSettingsPopover } from '@/components/StreamSettingsPopover';
 import { ServerConfigPopover } from '@/components/ServerConfigPopover';
+import RouteLoadingFallback from '@/components/RouteLoadingFallback';
 import { cn } from '@/lib/utils';
 import { initCsrfToken } from '@/lib/config';
 import { buildClientRouteUrl } from '@/lib/navigation';
 
 import HomeScreen from '@/screens/HomeScreen';
-import LiveInspectionScreen from '@/screens/LiveInspectionScreen';
-import BatchInspectionScreen from '@/screens/BatchInspectionScreen';
-import TemplatesScreen from '@/screens/TemplatesScreen';
-import EnhancedInspectionScreen from '@/screens/EnhancedInspectionScreen';
-import SafetyEquipmentScreen from '@/screens/SafetyEquipmentScreen';
-import CleanroomInspectionResultsScreen from '@/screens/CleanroomInspectionResultsScreen';
-import KitMatchingScreen from '@/screens/KitMatchingScreen';
-import KitMatchingResultsScreen from '@/screens/KitMatchingResultsScreen';
-import OCRDetectionScreen from '@/screens/OCRDetectionScreen';
-import GuidedWeChatQRTestScreen from '@/screens/GuidedWeChatQRTestScreen';
-import OCRGuidedTestScreen from '@/screens/OCRGuidedTestScreen';
-import LiveInspectionResultsScreen from '@/screens/LiveInspectionResultsScreen';
-import BatchInspectionResultsScreen from '@/screens/BatchInspectionResultsScreen';
-import OCRInspectionResultsScreen from '@/screens/OCRInspectionResultsScreen';
-import AnomalyDashboardScreen from '@/screens/AnomalyDashboardScreen';
-import ResultsDebugScreen from '@/screens/ResultsDebugScreen';
-import ResultDetailScreen from '@/screens/ResultDetailScreen';
-import HelpScreen from '@/screens/HelpScreen';
-import ModelManagementScreen from '@/screens/ModelManagementScreen';
-import StreamSettingsScreen from '@/screens/StreamSettingsScreen';
+
+// 移动端与桌面端保持同一拆包边界，避免 APK/WebView 首次解析全部页面。
+const LiveInspectionScreen = lazy(() => import('@/screens/LiveInspectionScreen'));
+const BatchInspectionScreen = lazy(() => import('@/screens/BatchInspectionScreen'));
+const TemplatesScreen = lazy(() => import('@/screens/TemplatesScreen'));
+const EnhancedInspectionScreen = lazy(() => import('@/screens/EnhancedInspectionScreen'));
+const SafetyEquipmentScreen = lazy(() => import('@/screens/SafetyEquipmentScreen'));
+const CleanroomInspectionResultsScreen = lazy(() => import('@/screens/CleanroomInspectionResultsScreen'));
+const KitMatchingScreen = lazy(() => import('@/screens/KitMatchingScreen'));
+const KitMatchingResultsScreen = lazy(() => import('@/screens/KitMatchingResultsScreen'));
+const OCRDetectionScreen = lazy(() => import('@/screens/OCRDetectionScreen'));
+const GuidedWeChatQRTestScreen = lazy(() => import('@/screens/GuidedWeChatQRTestScreen'));
+const OCRGuidedTestScreen = lazy(() => import('@/screens/OCRGuidedTestScreen'));
+const LiveInspectionResultsScreen = lazy(() => import('@/screens/LiveInspectionResultsScreen'));
+const BatchInspectionResultsScreen = lazy(() => import('@/screens/BatchInspectionResultsScreen'));
+const OCRInspectionResultsScreen = lazy(() => import('@/screens/OCRInspectionResultsScreen'));
+const AnomalyDashboardScreen = lazy(() => import('@/screens/AnomalyDashboardScreen'));
+const ResultsDebugScreen = lazy(() => import('@/screens/ResultsDebugScreen'));
+const ResultDetailScreen = lazy(() => import('@/screens/ResultDetailScreen'));
+const HelpScreen = lazy(() => import('@/screens/HelpScreen'));
+const ModelManagementScreen = lazy(() => import('@/screens/ModelManagementScreen'));
+const StreamSettingsScreen = lazy(() => import('@/screens/StreamSettingsScreen'));
 
 // 导航项定义
 const primaryNavItems = [
@@ -398,7 +401,8 @@ const AppMobile: React.FC = () => {
           : "pt-[4.5rem] pb-[5rem] px-4"
       )}>
         <div className="max-w-7xl mx-auto h-full">
-          <Routes>
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
             <Route path="/" element={<HomeScreen />} />
             <Route path="/models" element={<ModelManagementScreen />} />
             <Route path="/standards" element={<TemplatesScreen />} />
@@ -424,7 +428,8 @@ const AppMobile: React.FC = () => {
             <Route path="/model-management" element={<Navigate to="/models" replace />} />
             <Route path="/help" element={<HelpScreen />} />
             <Route path="/enhance/:resultId" element={<EnhancedInspectionScreen />} />
-          </Routes>
+            </Routes>
+          </Suspense>
         </div>
       </main>
 

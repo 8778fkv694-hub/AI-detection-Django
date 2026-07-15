@@ -1,41 +1,40 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Home, Camera, Layers, BarChart2, Shield, FileText, Eye, ExternalLink, HelpCircle, Video, Cpu, Settings, AlertTriangle } from 'lucide-react';
 import { useAppStore } from '@/state/appStore';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
+import RouteLoadingFallback from '@/components/RouteLoadingFallback';
 import { StreamSettingsPopover } from '@/components/StreamSettingsPopover';
 import { cn } from '@/lib/utils';
 import { initCsrfToken } from '@/lib/config';
 
 import HomeScreen from '@/screens/HomeScreen';
-import LiveInspectionScreen from '@/screens/LiveInspectionScreen';
-import BatchInspectionScreen from '@/screens/BatchInspectionScreen';
-import TemplatesScreen from '@/screens/TemplatesScreen';
-import LocalModelScreen from '@/screens/LocalModelScreen';
-import EnhancedInspectionScreen from '@/screens/EnhancedInspectionScreen';
-import SafetyEquipmentScreen from '@/screens/SafetyEquipmentScreen';
-import CleanroomInspectionResultsScreen from '@/screens/CleanroomInspectionResultsScreen';
-import KitMatchingScreen from '@/screens/KitMatchingScreen';
-// import KitMatchingScreenTest from '@/screens/KitMatchingScreenTest'; // 已隐藏，移至备份文件夹
-import KitMatchingResultsScreen from '@/screens/KitMatchingResultsScreen';
-import ModelManagementScreen from '@/screens/ModelManagementScreen';
-import OCRDetectionScreen from '@/screens/OCRDetectionScreen';
-// import OCRErrorPreventionScreen from '@/screens/OCRErrorPreventionScreen'; // 已隐藏，移至备份文件夹
-import GuidedWeChatQRTestScreen from '@/screens/GuidedWeChatQRTestScreen';
-import OCRGuidedTestScreen from '@/screens/OCRGuidedTestScreen';
-import LiveInspectionResultsScreen from '@/screens/LiveInspectionResultsScreen';
-import BatchInspectionResultsScreen from '@/screens/BatchInspectionResultsScreen';
-import OCRInspectionResultsScreen from '@/screens/OCRInspectionResultsScreen';
-import AnomalyDashboardScreen from '@/screens/AnomalyDashboardScreen';
-// import OCRErrorPreventionResultsScreen from '@/screens/OCRErrorPreventionResultsScreen'; // 已隐藏，移至备份文件夹
-import ResultsDebugScreen from '@/screens/ResultsDebugScreen';
-import ResultDetailScreen from '@/screens/ResultDetailScreen';
-import HelpScreen from '@/screens/HelpScreen';
-import StreamSettingsScreen from '@/screens/StreamSettingsScreen';
-// import OCRTestScreen from '@/screens/OCRTestScreen';
+
+// 路由级拆包：仅首页进入首屏包，其余页面在首次访问时加载。
+const LiveInspectionScreen = lazy(() => import('@/screens/LiveInspectionScreen'));
+const BatchInspectionScreen = lazy(() => import('@/screens/BatchInspectionScreen'));
+const TemplatesScreen = lazy(() => import('@/screens/TemplatesScreen'));
+const LocalModelScreen = lazy(() => import('@/screens/LocalModelScreen'));
+const EnhancedInspectionScreen = lazy(() => import('@/screens/EnhancedInspectionScreen'));
+const SafetyEquipmentScreen = lazy(() => import('@/screens/SafetyEquipmentScreen'));
+const CleanroomInspectionResultsScreen = lazy(() => import('@/screens/CleanroomInspectionResultsScreen'));
+const KitMatchingScreen = lazy(() => import('@/screens/KitMatchingScreen'));
+const KitMatchingResultsScreen = lazy(() => import('@/screens/KitMatchingResultsScreen'));
+const ModelManagementScreen = lazy(() => import('@/screens/ModelManagementScreen'));
+const OCRDetectionScreen = lazy(() => import('@/screens/OCRDetectionScreen'));
+const GuidedWeChatQRTestScreen = lazy(() => import('@/screens/GuidedWeChatQRTestScreen'));
+const OCRGuidedTestScreen = lazy(() => import('@/screens/OCRGuidedTestScreen'));
+const LiveInspectionResultsScreen = lazy(() => import('@/screens/LiveInspectionResultsScreen'));
+const BatchInspectionResultsScreen = lazy(() => import('@/screens/BatchInspectionResultsScreen'));
+const OCRInspectionResultsScreen = lazy(() => import('@/screens/OCRInspectionResultsScreen'));
+const AnomalyDashboardScreen = lazy(() => import('@/screens/AnomalyDashboardScreen'));
+const ResultsDebugScreen = lazy(() => import('@/screens/ResultsDebugScreen'));
+const ResultDetailScreen = lazy(() => import('@/screens/ResultDetailScreen'));
+const HelpScreen = lazy(() => import('@/screens/HelpScreen'));
+const StreamSettingsScreen = lazy(() => import('@/screens/StreamSettingsScreen'));
 
 const navGroups = [
   {
@@ -211,7 +210,8 @@ const App: React.FC = () => {
           "flex-1 overflow-y-auto transition-all duration-300 ease-in-out",
           sidebarVisible ? "p-8" : "p-4"
         )}>
-          <Routes>
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
             <Route path="/" element={<HomeScreen />} />
             <Route path="/standards" element={<TemplatesScreen />} />
             <Route path="/anomalies" element={<AnomalyDashboardScreen />} />
@@ -242,7 +242,8 @@ const App: React.FC = () => {
             <Route path="/config" element={<LocalModelScreen />} />
             <Route path="/models" element={<ModelManagementScreen />} />
             <Route path="/enhance/:resultId" element={<EnhancedInspectionScreen />} />
-          </Routes>
+            </Routes>
+          </Suspense>
         </main>
       </div>
       <Toaster

@@ -16,6 +16,7 @@ Python SPA Server for Jetson Nano Production
 import http.server
 import socketserver
 import os
+import re
 import sys
 import argparse
 from urllib.parse import urlparse, urljoin
@@ -24,6 +25,7 @@ import urllib.error
 
 # 全局后端 URL
 BACKEND_URL = "http://localhost:8000"
+HASHED_ASSET_RE = re.compile(r'^/assets/.+-[A-Za-z0-9_-]{8,}\.[^/]+$')
 
 class SPAHandler(http.server.SimpleHTTPRequestHandler):
     """
@@ -34,12 +36,63 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
     
     def __init__(self, *args, directory=None, **kwargs):
         self.spa_directory = directory or os.getcwd()
+        self._original_request_path = '/'
+        self._serving_gzip = False
         super().__init__(*args, directory=self.spa_directory, **kwargs)
+
+    def send_head(self):
+        """优先返回构建阶段生成的 gzip 资源，避免 Jetson 在线压缩。"""
+        requested_path = urlparse(self.path).path
+        self._original_request_path = requested_path
+        self._serving_gzip = False
+
+        accepts_gzip = 'gzip' in self.headers.get('Accept-Encoding', '').lower()
+        has_range = bool(self.headers.get('Range'))
+        source_path = self.translate_path(requested_path)
+        gzip_path = f'{source_path}.gz'
+
+        if accepts_gzip and not has_range and os.path.isfile(source_path) and os.path.isfile(gzip_path):
+            original_path = self.path
+            self.path = f'{requested_path}.gz'
+            self._serving_gzip = True
+            try:
+                return super().send_head()
+            finally:
+                self.path = original_path
+
+        return super().send_head()
+
+    def guess_type(self, path):
+        """预压缩文件仍使用原始资源的 Content-Type。"""
+        if self._serving_gzip and path.endswith('.gz'):
+            path = path[:-3]
+        return super().guess_type(path)
+
+    def end_headers(self):
+        """为哈希资产启用长期缓存，并保持 HTML 可及时更新。"""
+        path = self._original_request_path
+
+        if self._serving_gzip:
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Vary', 'Accept-Encoding')
+
+        if not (path.startswith('/api/') or path.startswith('/media/')):
+            _, extension = os.path.splitext(path)
+            if path in ('', '/') or extension in ('', '.html'):
+                self.send_header('Cache-Control', 'no-cache')
+            elif HASHED_ASSET_RE.match(path):
+                self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            else:
+                self.send_header('Cache-Control', 'public, max-age=3600')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+
+        super().end_headers()
     
     def do_GET(self):
         # 解析请求路径
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        self._original_request_path = path
         
         # API 和 media 请求代理到 Django 后端
         if path.startswith('/api/') or path.startswith('/media/'):

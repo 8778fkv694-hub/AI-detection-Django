@@ -35,16 +35,16 @@ class DataConsistencyMiddleware(MiddlewareMixin):
                 cache.set('needs_sync', True, 60)
                 logger.debug('标记需要数据同步')
 
-            # sqlite 连接对象没有 closed 属性，统一通过 Django 连接状态与 is_usable() 检查
-            connection_missing = connection.connection is None
+            # Django 会在首次 ORM 查询时惰性建立连接。连接不存在是正常状态，
+            # 不应让 OCR、二维码、模型状态等纯计算请求被迫访问数据库。
             connection_unusable = False
-            if not connection_missing:
+            if connection.connection is not None:
                 try:
                     connection_unusable = not connection.is_usable()
                 except Exception:
                     connection_unusable = True
 
-            if connection_missing or connection_unusable:
+            if connection_unusable:
                 current_time_sec = time.time()
                 DataConsistencyMiddleware._reconnect_count += 1
 
@@ -54,8 +54,8 @@ class DataConsistencyMiddleware(MiddlewareMixin):
                     DataConsistencyMiddleware._reconnect_count = 0
                     DataConsistencyMiddleware._last_reconnect_log = current_time_sec
 
+                # 关闭失效连接即可；下一次真实 ORM 查询会按 Django 机制重建。
                 connection.close()
-                connection.ensure_connection()
 
         except Exception as e:
             logger.error(f'数据一致性检查失败: {e}')
