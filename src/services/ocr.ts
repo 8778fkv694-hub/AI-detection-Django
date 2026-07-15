@@ -59,21 +59,33 @@ export async function getOcrStatus(): Promise<OcrServiceStatus> {
 
 export interface BatchDetectionPayload {
   roi_ids: string[];
+  selected_targets: string[];
+  ocr_model?: string;
+  use_angle_cls?: boolean;
   apply_rules?: boolean;
   enable_barcode?: boolean;
   target_configs?: Record<string, unknown>;
   keyword_configs?: unknown[];
+  keyword_match_mode?: 'contains' | 'exact';
   barcode_configs?: unknown[];
   non_grid_targets?: unknown[];
 }
 
 /** ROI 批处理检测（Django /ocr/batch-detection/） */
 export async function runBatchDetection<T = any>(payload: BatchDetectionPayload): Promise<T> {
-  const res = await apiFetch('/ocr/batch-detection/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 600000);
+  let res: Response;
+  try {
+    res = await apiFetch('/ocr/batch-detection/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({} as { error?: string }));
     throw new Error(errorData.error || `HTTP ${res.status}`);

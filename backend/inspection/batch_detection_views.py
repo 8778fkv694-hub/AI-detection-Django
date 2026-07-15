@@ -75,8 +75,12 @@ def batch_ocr_detection(request):
         enable_barcode = request.data.get('enable_barcode', True)
         target_configs = request.data.get('target_configs', {})
         keyword_configs = request.data.get('keyword_configs', [])  # 关键词配置
+        keyword_match_mode = request.data.get('keyword_match_mode', 'contains')
         barcode_configs = request.data.get('barcode_configs', [])  # 条码配置
         non_grid_targets = request.data.get('non_grid_targets', [])  # mini模式目标
+        selected_targets = request.data.get('selected_targets', [])
+        ocr_model = request.data.get('ocr_model') or 'auto'
+        use_angle_cls = bool(request.data.get('use_angle_cls', False))
         
         logger.info(f"批处理请求: {len(roi_ids)}个ROI, apply_rules={apply_rules}, keyword_configs={len(keyword_configs)}, barcode_configs={len(barcode_configs)}")
         
@@ -85,6 +89,16 @@ def batch_ocr_detection(request):
             return Response({
                 'success': False,
                 'error': '没有可处理的ROI，请先完成实时检测'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not selected_targets or not isinstance(selected_targets, list):
+            return Response({
+                'success': False,
+                'error': '缺少批处理必须的 selected_targets'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if keyword_match_mode not in ('contains', 'exact'):
+            return Response({
+                'success': False,
+                'error': 'keyword_match_mode 必须为 contains 或 exact'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # 3. 从缓存获取ROI数据
@@ -97,10 +111,20 @@ def batch_ocr_detection(request):
                 'error': 'ROI缓存已过期或不存在，请重新检测'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        if len(rois) < len(roi_ids):
+        found_labels = {roi.get('label') for roi in rois}
+        missing_labels = [label for label in selected_targets if label not in found_labels]
+        if len(rois) < len(roi_ids) or missing_labels:
             logger.warning(
-                f"部分ROI缺失: 请求{len(roi_ids)}个, 找到{len(rois)}个"
+                f"批处理ROI不完整: 请求{len(roi_ids)}个, 找到{len(rois)}个, "
+                f"缺少目标={missing_labels}"
             )
+            return Response({
+                'success': False,
+                'error': 'ROI不完整或已过期，请重新检测',
+                'missing_labels': missing_labels,
+                'requested_count': len(roi_ids),
+                'found_count': len(rois),
+            }, status=status.HTTP_409_CONFLICT)
         
         # 4. 执行批处理检测
         batch_service = get_batch_detection_service()
@@ -110,7 +134,11 @@ def batch_ocr_detection(request):
             enable_barcode=enable_barcode,
             target_configs=target_configs,
             keyword_configs=keyword_configs,
-            barcode_configs=barcode_configs
+            keyword_match_mode=keyword_match_mode,
+            barcode_configs=barcode_configs,
+            selected_targets=selected_targets,
+            ocr_model=ocr_model,
+            use_angle_cls=use_angle_cls,
         )
         
         # 5. 生成拼接图预览
@@ -131,7 +159,7 @@ def batch_ocr_detection(request):
             'barcode_count': result['barcode_count'],
             'roi_count': result['roi_count'],
             'processing_time': result.get('processing_time', 0),
-            'processing_mode': result.get('processing_mode', 'cpu_concurrent'),
+            'processing_mode': result.get('processing_mode', 'cpu_serial_safe'),
             'worker_count': result.get('worker_count', 0),
             'stitched_image': stitched_image,
             'details': result['details']
@@ -210,8 +238,8 @@ def cleanup_roi_cache(request):
         roi_cache = get_roi_cache()
         
         if mode == 'all':
-            roi_cache.clear()
             cleaned_count = roi_cache.get_stats()['total_count']
+            roi_cache.clear()
             remaining_count = 0
         else:
             cleaned_count = roi_cache.cleanup_expired()

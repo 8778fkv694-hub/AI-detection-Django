@@ -162,8 +162,11 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
                 if header.lower() not in ('host', 'content-length'):
                     req.add_header(header, value)
             
-            # 发送请求到后端
-            with urllib.request.urlopen(req, timeout=30) as response:
+            # OCR/LLM 可能需要加载边缘模型，为这些端点保留长超时。
+            # 其他 API 仍用 30s，避免无效请求长期占用代理线程。
+            long_request = self.path.startswith(('/api/ollama/chat/', '/api/ai/analyze'))
+            proxy_timeout = 600 if long_request else 30
+            with urllib.request.urlopen(req, timeout=proxy_timeout) as response:
                 # 发送响应状态
                 self.send_response(response.status)
                 

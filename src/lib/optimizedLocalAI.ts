@@ -31,7 +31,7 @@ interface OptimizedLocalConfig {
 }
 
 const DEFAULT_OPTIMIZED_CONFIG: OptimizedLocalConfig = {
-  modelName: 'gemma4:e2b-it-qat', // 默认使用 Gemma 4 模型
+  modelName: 'gemma4-e2b:latest', // 默认使用 Jetson 已安装的 Gemma 4 视觉模型
   ollamaHost: '', // 留空则使用默认配置
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
@@ -418,7 +418,7 @@ export const MOONDREAM3_QUALITY_CONFIG: Partial<OptimizedLocalConfig> = {
 
 // Gemma 4 专用配置预设（Google最新多模态模型，支持图像理解）
 export const GEMMA4_CONFIG: Partial<OptimizedLocalConfig> = {
-  modelName: 'gemma4:e2b-it-qat',
+  modelName: 'gemma4-e2b:latest',
   systemPrompt: '作为工业视觉质检助手，精确分析产品图像，识别缺陷和特征。请只返回符合格式要求的 JSON 结果。',
   userMessage: '请严格按照检测标准分析图片，只返回 JSON。',
   temperature: 0.1,     // 极低温度，稳定输出

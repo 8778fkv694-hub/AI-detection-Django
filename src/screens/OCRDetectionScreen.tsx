@@ -702,7 +702,6 @@ const OCRDetectionScreen: React.FC = () => {
 
   const {
     onBatchComplete,
-    useAutoSaveBatchResult,
     resetBatchSaveState,
   } = useBatchResultHandler({
     enableKeywordAnalysis,
@@ -711,6 +710,7 @@ const OCRDetectionScreen: React.FC = () => {
     keywordConfigs,
     keywordMatchMode,
     requireQualifiedConfirmation,
+    selectedTargets,
     fusionModeEnabled,
     performFusionAIAnalysis,
     batchManager: { reset: () => batchManagerRef.current?.reset() },
@@ -724,7 +724,6 @@ const OCRDetectionScreen: React.FC = () => {
     setAiAnalysisResult,
     setDetectedElements,
     setElementDetectionStartTime,
-    addDetectionHistory,
     saveDetectionResult,
     captureFrameData,
   });
@@ -733,15 +732,15 @@ const OCRDetectionScreen: React.FC = () => {
     selectedTargets,
     enableKeywordAnalysis,
     keywordConfigs,
+    keywordMatchMode,
     enableBarcodeDetection,
     barcodeConfigs,
     nonGridTargets,
+    ocrModel: selectedOcrModel || OCR_DETECTION_CONFIG.defaultModel,
     onBatchComplete,
   });
 
   batchManagerRef.current = batchManager;
-
-  useAutoSaveBatchResult(ocrResult, imagePreview, matchStatus);
 
   const { handleManualCapture } = useOCRWorkflow({
     videoRef, isCameraOn, workflowState, selectedTargets, requireQualifiedConfirmation,
@@ -1005,7 +1004,7 @@ const OCRDetectionScreen: React.FC = () => {
   const handleHardwareStopCapture = useCallback(() => {
     if (isRealtimeActive) {
       console.log('[硬件触发] 收到采集结束信号，开始批量评估缓存的目标和文字');
-      void batchManager.triggerBatchProcessing(true);
+      void batchManager.triggerBatchProcessing(false);
     } else if (selectedImage) {
       console.log('[硬件触发] 手动模式收到采集结束信号，对当前选中图触发 OCR 评估');
       toast('采集结束：开始评估当前图像', { id: 'hardware-stop-capture-manual', icon: '🧪' });

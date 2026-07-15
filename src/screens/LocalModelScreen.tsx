@@ -70,7 +70,7 @@ const LocalModelScreen: React.FC = () => {
 
   const [config, setConfig] = useState<LocalModelConfig>(() => {
     // 如果localModelConfig是默认配置，则应用高内存模式
-    const isDefaultConfig = (localModelConfig.modelName === 'moondream:latest' || localModelConfig.modelName === 'gemma4:e2b-it-qat') &&
+    const isDefaultConfig = (localModelConfig.modelName === 'moondream:latest' || localModelConfig.modelName === 'gemma4-e2b:latest') &&
                            localModelConfig.maxTokens <= 1024;
     
     if (isDefaultConfig) {
@@ -694,7 +694,7 @@ const LocalModelScreen: React.FC = () => {
                       </div>
                     </div>
                   </SelectItem>
-                  <SelectItem value="gemma4:e2b-it-qat">
+                  <SelectItem value="gemma4-e2b:latest">
                     <div className="flex items-center gap-2">
                       <Target className="h-4 w-4" />
                       <div>

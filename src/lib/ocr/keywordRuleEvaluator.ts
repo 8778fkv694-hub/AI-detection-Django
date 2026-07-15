@@ -4,6 +4,26 @@ type OCRDetailLike = {
   text?: string;
   confidence?: number;
   label?: string;
+  orientation_bucket?: number;
+  orientation_degrees?: number;
+};
+
+const normalizeDegrees = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return ((value % 360) + 360) % 360;
+};
+
+const orientationMatches = (
+  detail: OCRDetailLike,
+  expectedOrientation: number | undefined,
+  tolerance: number,
+) => {
+  if (expectedOrientation === undefined || expectedOrientation === null) return true;
+  const expected = normalizeDegrees(expectedOrientation);
+  const detected = normalizeDegrees(detail.orientation_degrees ?? detail.orientation_bucket);
+  if (expected === null || detected === null) return false;
+  const difference = Math.abs(detected - expected) % 360;
+  return Math.min(difference, 360 - difference) <= tolerance;
 };
 
 export const countKeywordMatches = (text: string, keyword: string, mode: 'contains' | 'exact') => {
@@ -52,18 +72,35 @@ export const buildKeywordAnalysis = ({
     const requiredCount = isNegative ? 0 : (config.requiredCount ?? 1);
     const minConfidence = config.confidence ?? 0;
 
-    const actualCount = relevantDetails.reduce((sum, detail) => {
+    let rawCount = 0;
+    let qualifiedCount = 0;
+    let confidenceMatched = false;
+    let orientationMatched = config.expectedOrientation === undefined || config.expectedOrientation === null;
+    let detectedOrientation: number | undefined;
+
+    relevantDetails.forEach((detail) => {
       const roiText = detail.text || '';
       const roiConfidence = detail.confidence ?? 1;
+      const occurrences = countKeywordMatches(roiText, config.text, keywordMatchMode);
+      rawCount += occurrences;
+      if (occurrences === 0 || isNegative) return;
 
-      if (!isNegative && roiConfidence < minConfidence) {
-        return sum;
+      const confidenceOk = roiConfidence >= minConfidence;
+      const orientationOk = orientationMatches(
+        detail,
+        config.expectedOrientation,
+        config.orientationTolerance ?? 30,
+      );
+      if (confidenceOk) confidenceMatched = true;
+      if (orientationOk) orientationMatched = true;
+      if (detectedOrientation === undefined) {
+        detectedOrientation = detail.orientation_degrees ?? detail.orientation_bucket;
       }
+      if (confidenceOk && orientationOk) qualifiedCount += occurrences;
+    });
 
-      return sum + countKeywordMatches(roiText, config.text, keywordMatchMode);
-    }, 0);
-
-    const textMatched = actualCount > 0;
+    const actualCount = isNegative ? rawCount : qualifiedCount;
+    const textMatched = rawCount > 0;
     const overallMatched = isNegative ? actualCount === 0 : actualCount >= requiredCount;
 
     return {
@@ -71,11 +108,13 @@ export const buildKeywordAnalysis = ({
       targetRoi: targetRoi || 'all',
       keywordType: config.type || 'positive',
       textMatched,
-      orientationMatched: true,
-      confidenceMatched: textMatched || isNegative,
+      orientationMatched: isNegative ? true : orientationMatched,
+      confidenceMatched: isNegative ? true : confidenceMatched,
       overallMatched,
       actualCount,
       requiredCount,
+      detectedOrientation,
+      expectedOrientation: config.expectedOrientation,
     };
   });
 
@@ -113,4 +152,3 @@ export const buildKeywordAnalysis = ({
     keyword_match_details: matchDetails,
   };
 };
-

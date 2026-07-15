@@ -105,6 +105,7 @@ export interface KeywordConfig {
   text: string;
   confidence: number;
   expectedOrientation?: 0 | 90 | 180 | 270;
+  orientationTolerance?: number;
   type?: 'positive' | 'negative';  // 关键词类型：positive=必须出现，negative=排除清单（出现就存疑）
   requiredCount?: number;          // 需要出现的次数（默认1，negative类型无效）
   targetRoi?: string;               // 关联的 ROI 目标（Label

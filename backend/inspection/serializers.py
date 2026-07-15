@@ -387,6 +387,7 @@ class InspectionResultSerializer(serializers.ModelSerializer):
             'fixture_qr_confidence',
             'business_code',
             'business_code_type',
+            'overall_quality',
             'trace_conclusion',
             'trace_conclusion_reason',
             'fixture_rule_passed',
@@ -436,6 +437,12 @@ class InspectionResultSerializer(serializers.ModelSerializer):
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        if 'overall_quality' in validated_data:
+            trace_context = dict(instance.trace_context or {})
+            trace_context.pop('traceQualityGateApplied', None)
+            trace_context.pop('inspectionQualityBeforeTrace', None)
+            instance.trace_context = trace_context
 
         instance = evaluate_trace_for_result(instance)
         instance.save()

@@ -60,23 +60,14 @@ export const API_BASE_URL = (() => {
   }
 })();
 
-// Ollama 长请求绕过静态服务器代理，直接命中 Django 8000 端口
+// Ollama 长请求使用同源 API 代理。生产页面是 HTTPS，Django 8000
+// 端口是纯 HTTP，浏览器直连会触发 TLS/混合内容错误。
 export const DIRECT_BACKEND_API_BASE_URL = (() => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('API_SERVER_URL');
     if (saved) {
       return saved.replace(/\/$/, '') + '/api';
     }
-  }
-
-  if (window.location.port === '8000') {
-    return `${window.location.origin}/api`;
-  }
-
-  if (!API_BASE_URL.startsWith('http')) {
-    const protocol = window.location.protocol;
-    const host = window.location.hostname;
-    return `${protocol}//${host}:8000/api`;
   }
 
   return API_BASE_URL;

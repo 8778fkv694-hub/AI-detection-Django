@@ -1001,6 +1001,9 @@ export function validateBarcode(
   expectedData: string,
   matchMode: 'contains' | 'exact'
 ): boolean {
+  if (!expectedData.trim()) {
+    return Boolean(detectedData.trim());
+  }
   if (matchMode === 'exact') {
     return detectedData === expectedData;
   } else {

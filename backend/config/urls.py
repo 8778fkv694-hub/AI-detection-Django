@@ -22,6 +22,7 @@ from inspection.roi_cache_api import cache_roi
 # 微信二维码检测功能
 from inspection.wechat_qr_api import wechat_qr_detect, wechat_qr_detect_with_retry, wechat_qr_status
 from inspection.barcode_api import barcode_detect
+from inspection.ai_api import ai_analyze
 # 追踪判定接口
 from inspection.product_trace_api import product_trace_evaluate
 # 异常管理
@@ -104,6 +105,9 @@ urlpatterns = [
     path('api/wechat-qr/status/', wechat_qr_status, name='wechat_qr_status'),
     # 条码/二维码融合检测API
     path('api/barcode/detect/', barcode_detect, name='barcode_detect'),
+    # 生产环境在线多模态分析（不依赖开发期 Node 辅助进程）
+    path('api/ai/analyze', ai_analyze, name='ai_analyze'),
+    path('api/ai/analyze/', ai_analyze, name='ai_analyze_slash'),
     # 工装追踪判定接口（预查，不保存结果）
     path('api/product-trace/evaluate/', product_trace_evaluate, name='product_trace_evaluate'),
     

@@ -26,6 +26,7 @@ export interface DetectionSaveOptions {
     processStageName?: string;
     pageInstanceId?: string;
     cameraId?: string;
+    fixtureEnabled?: boolean;
     fixtureQr?: string;
     fixtureQrDetected?: boolean;
     fixtureQrSource?: 'vision' | 'scanner' | 'nfc' | 'manual';
@@ -77,25 +78,41 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
 
     // 保存到检测结果页面
     try {
-      if (fusionModeEnabled && aiResult) {
+      if (fusionModeEnabled) {
+        const fusionAiResult = aiResult || {
+          id: `${newResult.id}-ai-recheck`,
+          timestamp: new Date().toISOString(),
+          image: '',
+          standardId: selectedStandardId,
+          overallQuality: '需复检' as const,
+          score: 0,
+          reason: 'AI融合分析未返回有效结果。',
+          reasonKeywords: '融合分析失败,需复检',
+          defects: [],
+        };
         // 融合模式：计算综合结果
         const ocrQualified = matchStatus === 'qualified';
-        const llmQualified = aiResult.overallQuality === '合格';
-        const finalQuality = (ocrQualified && llmQualified) ? '合格' : '存疑';
-        const finalScore = (ocrQualified && llmQualified) ? Math.max(aiResult.score, 95) : Math.min(aiResult.score, 30);
+        const llmQualified = fusionAiResult.overallQuality === '合格';
+        const finalQuality = (ocrQualified && llmQualified) ? '合格' : '需复检';
+        const rawAiScore = Number.isFinite(Number(fusionAiResult.score)) ? Number(fusionAiResult.score) : 0;
+        const finalScore = Math.max(0, Math.min(100, Math.round(
+          (ocrQualified && llmQualified) ? rawAiScore : Math.min(rawAiScore, 50),
+        )));
 
         console.log('🔧 保存检测结果时的selectedStandardId:', selectedStandardId);
 
         const inspectionResult = {
           id: newResult.id,
           timestamp: new Date().toISOString(),
-          image: imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : 'data:image/jpeg;base64,',
+          image: imageBase64
+            ? (imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`)
+            : 'data:image/jpeg;base64,',
           standardId: selectedStandardId || null,
           overallQuality: finalQuality as '合格' | '存疑' | '需复检',
           score: finalScore,
-          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '存疑'}\nLLM分析: ${aiResult.overallQuality}`,
-          reasonKeywords: `OCR:${matchStatus === 'qualified' ? '合格' : '存疑'},LLM:${aiResult.overallQuality}`,
-          defects: aiResult.defects || [],
+          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '需复检'}\nLLM分析: ${fusionAiResult.overallQuality}\n${fusionAiResult.reason}`,
+          reasonKeywords: `OCR:${matchStatus === 'qualified' ? '合格' : '需复检'},LLM:${fusionAiResult.overallQuality}`,
+          defects: fusionAiResult.defects || [],
           detectionType: 'ocr_fusion_inspection' as const,
           // 保存OCR详细结果
           ocrResult: {
@@ -112,22 +129,22 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
           barcodeResult: ocrResult?.barcode_analysis || null,
           // 保存LLM详细结果
           llmResult: {
-            overallQuality: aiResult.overallQuality,
-            score: aiResult.score,
-            reason: aiResult.reason,
-            reasonKeywords: aiResult.reasonKeywords,
-            defects: aiResult.defects || []
+            overallQuality: fusionAiResult.overallQuality,
+            score: fusionAiResult.score,
+            reason: fusionAiResult.reason,
+            reasonKeywords: fusionAiResult.reasonKeywords,
+            defects: fusionAiResult.defects || []
           },
-          llm_full_text: aiResult?.reason,
-          llm_full_detail: aiResult ? {
+          llm_full_text: fusionAiResult.reason,
+          llm_full_detail: {
             sections: [
-              { title: '总体结论', text: aiResult.overallQuality },
-              { title: '评分', text: String(aiResult.score) },
-              { title: '原因', text: aiResult.reason },
+              { title: '总体结论', text: fusionAiResult.overallQuality },
+              { title: '评分', text: String(fusionAiResult.score) },
+              { title: '原因', text: fusionAiResult.reason },
             ],
-            reasonKeywords: aiResult.reasonKeywords || '',
-            defects: aiResult.defects || []
-          } : undefined,
+            reasonKeywords: fusionAiResult.reasonKeywords || '',
+            defects: fusionAiResult.defects || []
+          },
           processStageCode: traceContext?.processStageCode || '',
           processStageName: traceContext?.processStageName || '',
           pageInstanceId: traceContext?.pageInstanceId || '',
@@ -155,7 +172,7 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
           overallQuality: finalQuality,
           score: finalScore,
           ocrResult: ocrResult,
-          aiResult: aiResult,
+          aiResult: fusionAiResult,
           barcodeAnalysis: ocrResult?.barcode_analysis,
         };
         clearOldDetectionHistory();
@@ -235,6 +252,7 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
     } catch (error) {
       console.error('❌ 保存检测结果失败:', error);
       toast.error('保存检测结果失败，请检查网络后重试');
+      throw error;
     }
   }, [fusionModeEnabled, selectedStandardId, addAppResult, clearOldDetectionHistory, addDetectionHistory, refreshHistory, onSaveComplete, traceContext]);
 

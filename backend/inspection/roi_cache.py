@@ -5,7 +5,7 @@ ROI缓存管理器
 import time
 import logging
 from typing import Dict, List, Optional, Any
-from threading import Lock
+from threading import RLock
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ class ROICacheManager:
         self.cache: Dict[str, Dict[str, Any]] = {}
         self.max_size = max_size
         self.ttl = ttl
-        self.lock = Lock()
+        # store -> _cleanup_if_needed -> cleanup_expired 会重入加锁。
+        self.lock = RLock()
         logger.info(f"ROI缓存管理器已初始化: max_size={max_size}, ttl={ttl}s")
     
     def store(

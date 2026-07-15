@@ -11,6 +11,28 @@ TRACE_RECHECK = '需复检'
 TRACE_PENDING = '存疑'
 
 
+def _apply_trace_quality_gate(record: InspectionResult) -> InspectionResult:
+    """将追踪结论并入放行质量，同时保留追踪前的原始质检结论。"""
+    context = dict(record.trace_context or {})
+    gate_applied = bool(context.get('traceQualityGateApplied'))
+    if not gate_applied:
+        context['inspectionQualityBeforeTrace'] = record.overall_quality
+
+    base_quality = context.get('inspectionQualityBeforeTrace') or record.overall_quality
+    fixture_enabled = context.get('fixtureEnabled', context.get('fixture_enabled', True)) is not False
+
+    if not fixture_enabled or record.trace_conclusion == TRACE_PASS:
+        record.overall_quality = base_quality
+    elif base_quality == '合格':
+        record.overall_quality = '需复检'
+    else:
+        record.overall_quality = base_quality
+
+    context['traceQualityGateApplied'] = True
+    record.trace_context = context
+    return record
+
+
 def _normalize_code(value: str | None) -> str:
     if not value:
         return ''
@@ -252,6 +274,24 @@ def collect_fixture_records_for_refresh(fixture_qr: str) -> list[InspectionResul
 
 
 def evaluate_trace_for_result(record: InspectionResult) -> InspectionResult:
+    trace_context = record.trace_context or {}
+    fixture_enabled = trace_context.get('fixtureEnabled', trace_context.get('fixture_enabled', True)) is not False
+    if not fixture_enabled:
+        record.fixture_rule_passed = None
+        record.fixture_rule_reason = '当前工序配方未启用工装追踪。'
+        record.trace_conclusion = TRACE_PASS
+        record.trace_conclusion_reason = '工装追踪未启用，不作为本次质检放行条件。'
+        record.trace_rule_summary = '工装追踪已跳过。'
+        record.trace_rule_details = []
+        record.related_stages = []
+        record.trace_context = {
+            **trace_context,
+            'relatedStageCount': 0,
+            'fixtureTrackingSkipped': True,
+            'fixtureQrFallbackRecommended': False,
+        }
+        return _apply_trace_quality_gate(record)
+
     fixture_qr, fixture_qr_detected, fixture_qr_source, fixture_qr_input_status, fixture_qr_confidence = _resolve_fixture_qr_from_candidates(record)
     record.fixture_qr = fixture_qr
     record.fixture_qr_detected = fixture_qr_detected
@@ -312,7 +352,7 @@ def evaluate_trace_for_result(record: InspectionResult) -> InspectionResult:
             'fixtureQrCandidates': fixture_qr_candidates,
             'fixtureQrFallbackRecommended': True,
         }
-        return record
+        return _apply_trace_quality_gate(record)
 
     record.fixture_rule_passed = True
     record.fixture_rule_reason = '工装二维码存在，可用于跨工序归并。'
@@ -420,7 +460,7 @@ def evaluate_trace_for_result(record: InspectionResult) -> InspectionResult:
         'fixtureQrCandidates': fixture_qr_candidates,
         'fixtureQrFallbackRecommended': False,
     }
-    return record
+    return _apply_trace_quality_gate(record)
 
 
 def refresh_fixture_trace_results(fixture_qr: str, exclude_result_id=None) -> list[InspectionResult]:
@@ -445,6 +485,7 @@ def refresh_fixture_trace_results(fixture_qr: str, exclude_result_id=None) -> li
                 'fixture_qr_confidence',
                 'business_code',
                 'business_code_type',
+                'overall_quality',
                 'trace_conclusion',
                 'trace_conclusion_reason',
                 'fixture_rule_passed',

@@ -5,8 +5,8 @@
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,11 @@ class BatchDetectionService:
         enable_barcode: bool = True,
         target_configs: Optional[Dict] = None,
         keyword_configs: Optional[List] = None,
-        barcode_configs: Optional[List] = None
+        keyword_match_mode: str = 'contains',
+        barcode_configs: Optional[List] = None,
+        selected_targets: Optional[List[str]] = None,
+        ocr_model: Optional[str] = None,
+        use_angle_cls: bool = False,
     ) -> Dict[str, Any]:
         """
         批处理多个ROI
@@ -79,7 +83,11 @@ class BatchDetectionService:
                 enable_barcode,
                 target_configs,
                 keyword_configs,
-                barcode_configs
+                keyword_match_mode,
+                barcode_configs,
+                selected_targets,
+                ocr_model,
+                use_angle_cls,
             )
         except Exception as e:
             logger.error(f"批处理失败: {e}", exc_info=True)
@@ -91,8 +99,8 @@ class BatchDetectionService:
         # 4. 添加性能指标
         processing_time = time.time() - start_time
         merged_result['processing_time'] = round(processing_time, 3)
-        merged_result['processing_mode'] = 'cpu_concurrent'
-        merged_result['worker_count'] = self.max_workers
+        merged_result['processing_mode'] = 'cpu_serial_safe'
+        merged_result['worker_count'] = 1
         
         logger.info(
             f"批处理完成: {len(rois)}个ROI, "
@@ -109,7 +117,11 @@ class BatchDetectionService:
         enable_barcode: bool,
         target_configs: Optional[Dict],
         keyword_configs: Optional[List] = None,
-        barcode_configs: Optional[List] = None
+        keyword_match_mode: str = 'contains',
+        barcode_configs: Optional[List] = None,
+        selected_targets: Optional[List[str]] = None,
+        ocr_model: Optional[str] = None,
+        use_angle_cls: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         处理多个ROI
@@ -132,7 +144,11 @@ class BatchDetectionService:
                     enable_barcode,
                     target_configs,
                     keyword_configs,
-                    barcode_configs
+                    keyword_match_mode,
+                    barcode_configs,
+                    selected_targets,
+                    ocr_model,
+                    use_angle_cls,
                 )
                 results.append(result)
                 
@@ -159,7 +175,11 @@ class BatchDetectionService:
         enable_barcode: bool,
         target_configs: Optional[Dict],
         keyword_configs: Optional[List] = None,
-        barcode_configs: Optional[List] = None
+        keyword_match_mode: str = 'contains',
+        barcode_configs: Optional[List] = None,
+        selected_targets: Optional[List[str]] = None,
+        ocr_model: Optional[str] = None,
+        use_angle_cls: bool = False,
     ) -> Dict[str, Any]:
         """
         处理单个ROI（OCR + 条码检测 + 规则验证）
@@ -206,7 +226,7 @@ class BatchDetectionService:
         has_keyword_config = False
         if keyword_configs:
             has_keyword_config = any(
-                cfg.get('targetRoi') == label 
+                cfg.get('targetRoi') in (None, '', 'all', label)
                 for cfg in keyword_configs
             )
         
@@ -214,17 +234,19 @@ class BatchDetectionService:
         has_barcode_config = False
         if barcode_configs:
             has_barcode_config = any(
-                cfg.get('targetRoi') == label 
+                cfg.get('enabled', True)
+                and cfg.get('targetRoi') in (None, '', 'all', label)
                 for cfg in barcode_configs
             )
         
         # 只要ROI在选中的目标列表中(target_configs)，或者有特定的关键词配置，就执行OCR
-        should_run_ocr = has_keyword_config
+        is_selected_target = label in (selected_targets or [])
+        should_run_ocr = is_selected_target or has_keyword_config
         if target_configs and label in target_configs:
             should_run_ocr = True
             
         # 只要ROI在选中的目标列表中(target_configs)，或者有特定的条码配置，就执行条码检测
-        should_run_barcode = has_barcode_config
+        should_run_barcode = is_selected_target or has_barcode_config
         if target_configs and label in target_configs:
             should_run_barcode = True
         logger.info(
@@ -237,9 +259,27 @@ class BatchDetectionService:
         try:
             # 1. OCR检测
             if should_run_ocr:
-                ocr_result = ocr_service.extract_text(image)
+                ocr_result = ocr_service.extract_text(
+                    image,
+                    model_name=ocr_model,
+                    use_angle_cls=use_angle_cls,
+                )
+                if not ocr_result.get('success', False):
+                    raise RuntimeError(ocr_result.get('error') or 'OCR识别失败')
+                detailed_results = ocr_result.get('detailed_results', [])
+                confidence = ocr_result.get('confidence')
+                if confidence is None and detailed_results:
+                    scores = [
+                        float(item.get('confidence', 0) or 0)
+                        for item in detailed_results
+                        if isinstance(item, dict)
+                    ]
+                    confidence = sum(scores) / len(scores) if scores else 0.0
                 result['ocr_text'] = ocr_result.get('full_text', '')
-                result['ocr_confidence'] = ocr_result.get('confidence', 0.0)
+                result['ocr_confidence'] = confidence or 0.0
+                result['ocr_detailed_results'] = detailed_results
+                result['detected_orientation'] = ocr_result.get('detected_orientation')
+                result['detected_orientation_degrees'] = ocr_result.get('detected_orientation_degrees')
             else:
                 result['skipped_ocr'] = True
                 logger.debug(f"[{label}] 跳过OCR检测（非选中目标且无规则）")
@@ -261,7 +301,9 @@ class BatchDetectionService:
                     label, 
                     result, 
                     target_configs.get(label, {}),
-                    barcode_configs
+                    barcode_configs,
+                    keyword_configs,
+                    keyword_match_mode,
                 )
                 result['qualified'] = validation['qualified']
                 result['reason'] = validation['reason']
@@ -280,7 +322,9 @@ class BatchDetectionService:
         label: str,
         result: Dict[str, Any],
         config: Dict[str, Any],
-        barcode_configs: Optional[List] = None
+        barcode_configs: Optional[List] = None,
+        keyword_configs: Optional[List] = None,
+        keyword_match_mode: str = 'contains',
     ) -> Dict[str, bool]:
         """
         验证ROI是否符合规则
@@ -294,6 +338,19 @@ class BatchDetectionService:
             {'qualified': bool, 'reason': str}
         """
         reasons = []
+
+        def count_matches(text: str, keyword: str) -> int:
+            if not text or not keyword:
+                return 0
+            if keyword_match_mode == 'exact':
+                normalized = text.strip()
+                if normalized == keyword:
+                    return 1
+                return sum(
+                    1 for segment in re.split(r'[\s,;，；。|]+', normalized)
+                    if segment == keyword
+                )
+            return text.count(keyword)
         
         # 1. 关键词验证
         if config.get('enable_keywords'):
@@ -312,6 +369,46 @@ class BatchDetectionService:
                 kw = kw.strip()
                 if kw and kw in ocr_text:
                     reasons.append(f'包含排除关键词: {kw}')
+
+        # 执行完整关键词规则：目标、正/负面、次数、置信度和方向。
+        for keyword_config in keyword_configs or []:
+            target = keyword_config.get('targetRoi')
+            if target not in (None, '', 'all', label):
+                continue
+            keyword = str(keyword_config.get('text') or '')
+            if not keyword:
+                reasons.append('关键词规则内容为空')
+                continue
+            raw_count = count_matches(result.get('ocr_text', ''), keyword)
+            if keyword_config.get('type', 'positive') == 'negative':
+                if raw_count > 0:
+                    reasons.append(f'包含排除关键词: {keyword}')
+                continue
+
+            required_count = max(1, int(keyword_config.get('requiredCount', 1) or 1))
+            min_confidence = float(keyword_config.get('confidence', 0) or 0)
+            if raw_count > 0 and float(result.get('ocr_confidence', 0) or 0) < min_confidence:
+                reasons.append(f'关键词置信度不足: {keyword}')
+                continue
+
+            expected_orientation = keyword_config.get('expectedOrientation')
+            if raw_count > 0 and expected_orientation is not None:
+                detected_orientation = result.get('detected_orientation_degrees')
+                if detected_orientation is None:
+                    detected_orientation = result.get('detected_orientation')
+                if detected_orientation is None:
+                    reasons.append(f'无法确认关键词方向: {keyword}')
+                    continue
+                expected = float(expected_orientation) % 360
+                detected = float(detected_orientation) % 360
+                difference = abs(expected - detected) % 360
+                tolerance = float(keyword_config.get('orientationTolerance', 30) or 30)
+                if min(difference, 360 - difference) > tolerance:
+                    reasons.append(f'关键词方向不匹配: {keyword}')
+                    continue
+
+            if raw_count < required_count:
+                reasons.append(f'关键词次数不足: {keyword} ({raw_count}/{required_count})')
         
         # 2. 条码验证
         if config.get('require_barcode'):
@@ -329,9 +426,9 @@ class BatchDetectionService:
                             continue
                         expected = (cfg.get('expectedText') or '').strip()
                         mode = cfg.get('matchMode', 'contains')
+                        # 期望内容留空表示“任意条码”，无实际条码时不能用OCR空条件放行。
                         if not expected:
-                            ocr_matched = True
-                            break
+                            continue
                         if mode == 'exact':
                             if ocr_text == expected:
                                 ocr_matched = True
@@ -418,6 +515,7 @@ class BatchDetectionService:
         merged['ocr_text'] = '\n'.join(all_ocr_texts)
         merged['barcode_count'] = len(all_barcodes)
         merged['success_count'] = success_count
+        merged['success'] = success_count == len(rois) and len(roi_results) == len(rois)
         
         # 生成最终原因
         if reasons:

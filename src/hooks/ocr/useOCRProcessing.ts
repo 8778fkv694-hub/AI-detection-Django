@@ -291,10 +291,9 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
           // 更新融合模式下的匹配状态
           setMatchStatus(finalMatchStatus as 'qualified' | 'unqualified' | 'none');
         } else {
-          console.log(`❌ ${source === 'manual' ? '手动抓拍' : '实时检测'}：融合模式AI分析失败，仅使用OCR结果`);
-          // AI分析失败时，仅使用OCR结果
+          console.log(`❌ ${source === 'manual' ? '手动抓拍' : '实时检测'}：融合模式AI分析失败，按需复检处理`);
           setAiAnalysisResult(null);
-          finalMatchStatus = currentMatchStatus;
+          finalMatchStatus = 'unqualified';
           // 更新匹配状态
           setMatchStatus(finalMatchStatus as 'qualified' | 'unqualified' | 'none');
         }
@@ -467,8 +466,8 @@ export const useOCRProcessing = (options: OCRProcessingOptions): UseOCRProcessin
           const llmQualified = aiResult.overallQuality === '合格';
           finalMatchStatus = ocrQualified && llmQualified ? 'qualified' : 'unqualified';
         } else {
-          console.log('❌ OCR测试：融合模式AI分析失败或未返回结果');
-          finalMatchStatus = currentMatchStatus;
+          console.log('❌ OCR测试：融合模式AI分析失败，按需复检处理');
+          finalMatchStatus = 'unqualified';
         }
       } else {
         console.log('⏭️ OCR测试：融合模式未启用，跳过AI分析');

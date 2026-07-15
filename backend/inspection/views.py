@@ -1353,6 +1353,34 @@ class ProductRecipeViewSet(viewsets.ModelViewSet):
         if not isinstance(stages_data, list):
             return Response({'error': 'stages must be a list'}, status=status.HTTP_400_BAD_REQUEST)
 
+        stage_ids = [str(item.get('stage_recipe_id') or '') for item in stages_data if isinstance(item, dict)]
+        if len(stage_ids) != len(stages_data) or any(not stage_id for stage_id in stage_ids):
+            return Response({'error': '每个工序都必须提供 stage_recipe_id'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(stage_ids) != len(set(stage_ids)):
+            return Response({'error': '产品配方不能重复关联同一工序'}, status=status.HTTP_400_BAD_REQUEST)
+
+        fqc_items = [item for item in stages_data if item.get('is_fqc', False)]
+        if len(fqc_items) > 1:
+            return Response({'error': '一个产品配方最多只能配置一个FQC工序'}, status=status.HTTP_400_BAD_REQUEST)
+
+        stage_templates = {
+            str(stage.id): stage
+            for stage in StageRecipeTemplate.objects.filter(id__in=stage_ids)
+        }
+        missing_stage_ids = [stage_id for stage_id in stage_ids if stage_id not in stage_templates]
+        if missing_stage_ids:
+            return Response({
+                'error': '存在不可用的工序配方',
+                'missing_stage_ids': missing_stage_ids,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if fqc_items:
+            fqc_template = stage_templates[str(fqc_items[0]['stage_recipe_id'])]
+            if not fqc_template.fixture_enabled:
+                return Response({
+                    'error': 'FQC工序必须启用工装追踪，否则无法对同一产品的多工序结果归并'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
             # Clear existing links
             ProductStage.objects.filter(product_recipe=product).delete()
@@ -1362,17 +1390,14 @@ class ProductRecipeViewSet(viewsets.ModelViewSet):
             for item in stages_data:
                 stage_id = item.get('stage_recipe_id')
                 order = item.get('order', 0)
-                try:
-                    stage_template = StageRecipeTemplate.objects.get(id=stage_id)
-                    link = ProductStage.objects.create(
-                        product_recipe=product,
-                        stage_recipe=stage_template,
-                        order=order,
-                        is_fqc=item.get('is_fqc', False),
-                    )
-                    created_links.append(link)
-                except StageRecipeTemplate.DoesNotExist:
-                    continue
+                stage_template = stage_templates[str(stage_id)]
+                link = ProductStage.objects.create(
+                    product_recipe=product,
+                    stage_recipe=stage_template,
+                    order=order,
+                    is_fqc=item.get('is_fqc', False),
+                )
+                created_links.append(link)
 
         serializer = ProductStageSerializer(created_links, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

@@ -473,6 +473,18 @@ def generate_fqc_record(result: InspectionResult) -> FQCRecord | None:
     trace_flow = _build_trace_flow(stage_records, product_recipe)
     overall_result, result_reason = _determine_overall_result(stage_records)
 
+    expected_stage_codes = {
+        code for code in ProductStage.objects.filter(product_recipe=product_recipe)
+        .values_list('stage_recipe__process_stage_code', flat=True)
+        if code
+    }
+    found_stage_codes = {record.process_stage_code for record in stage_records if record.process_stage_code}
+    missing_stage_codes = sorted(expected_stage_codes - found_stage_codes)
+    if missing_stage_codes:
+        if overall_result == '合格':
+            overall_result = '存疑'
+        result_reason += f'; 缺少配方工序: {", ".join(missing_stage_codes)}'
+
     # 追踪总结论
     trace_conclusions = [r.trace_conclusion for r in stage_records if r.trace_conclusion]
     if '需复检' in trace_conclusions:
@@ -483,6 +495,10 @@ def generate_fqc_record(result: InspectionResult) -> FQCRecord | None:
         trace_conclusion = '存疑'
     else:
         trace_conclusion = '存疑'
+
+    if trace_conclusion != '合格' and overall_result == '合格':
+        overall_result = '存疑'
+        result_reason += f'; 追踪结论为{trace_conclusion}'
 
     # 规则校验
     validation_passed, validation_details = _run_validation(product_recipe, stage_summary)

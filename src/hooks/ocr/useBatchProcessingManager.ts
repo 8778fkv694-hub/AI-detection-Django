@@ -19,9 +19,11 @@ interface UseBatchProcessingManagerProps {
     selectedTargets: string[];
     enableKeywordAnalysis: boolean;
     keywordConfigs: KeywordConfig[];
+    keywordMatchMode: 'contains' | 'exact';
     enableBarcodeDetection: boolean;
     barcodeConfigs: BarcodeConfig[];
     nonGridTargets?: string[];
+    ocrModel?: string;
     onBatchComplete?: (result: BatchProcessingResult) => void;
 }
 
@@ -29,9 +31,11 @@ export function useBatchProcessingManager({
     selectedTargets,
     enableKeywordAnalysis,
     keywordConfigs,
+    keywordMatchMode,
     enableBarcodeDetection,
     barcodeConfigs,
     nonGridTargets = [],
+    ocrModel,
     onBatchComplete,
 }: UseBatchProcessingManagerProps) {
 
@@ -178,14 +182,12 @@ export function useBatchProcessingManager({
 
             const requireBarcode = relatedBarcodes.length > 0;
 
-            if (relatedKeywords.length > 0 || requireBarcode) {
-                configs[target] = {
-                    enable_keywords: relatedKeywords.length > 0,
-                    required_keywords: requiredKws,
-                    excluded_keywords: excludedKws,
-                    require_barcode: requireBarcode,
-                };
-            }
+            configs[target] = {
+                enable_keywords: relatedKeywords.length > 0,
+                required_keywords: requiredKws,
+                excluded_keywords: excludedKws,
+                require_barcode: requireBarcode,
+            };
         });
 
         return configs;
@@ -205,21 +207,31 @@ export function useBatchProcessingManager({
      * 触发批处理检测
      * @param force 是否强制触发（即使目标不全）
      */
-    const triggerBatchProcessing = useCallback(async (force: boolean = false) => {
+    const triggerBatchProcessing = useCallback(async (force: boolean = false): Promise<boolean> => {
         // 关键修复：直接从Store获取最新状态，避免闭包陷阱（Stale Closure）
         // 在异步循环上传ROI后立即调用此函数时，react hook中的roiCacheIds可能尚未更新
-        const currentRoiCacheIds = useOCRDetectionStore.getState().roiCacheIds;
+        const currentBatchState = useOCRDetectionStore.getState();
+        const currentRoiCacheIds = currentBatchState.roiCacheIds;
+
+        if (currentBatchState.batchProcessingMode !== 'batch'
+            || currentBatchState.batchTriggered
+            || isProcessingRef.current
+            || processing) {
+            return false;
+        }
 
         // 双重检查
-        if (!force && !checkAllTargetsReady()) {
-            console.log('⚠️ 触发条件不满足，必须启用强制模式或补全目标');
-            return;
+        const missingTargets = selectedTargets.filter(target => !currentRoiCacheIds[target]);
+        if (missingTargets.length > 0) {
+            console.warn(`⚠️ 批处理拒绝执行，缺少目标: ${missingTargets.join(', ')}`);
+            toast.error(`批处理目标不完整: ${missingTargets.join(', ')}`);
+            return false;
         }
 
         const cachedCount = Object.keys(currentRoiCacheIds).length;
         if (cachedCount === 0) {
             console.error('❌ 无法触发批处理: ROI缓存为空');
-            return;
+            return false;
         }
 
         console.log(`🚀 触发批处理检测${force ? ' (强制)' : ''}, ROI数量: ${cachedCount}`);
@@ -240,8 +252,14 @@ export function useBatchProcessingManager({
                 enableBarcode: enableBarcodeDetection,
                 targetConfigs,
                 keywordConfigs: keywordConfigs,
+                keywordMatchMode,
                 barcodeConfigs: barcodeConfigs,
                 nonGridTargets,
+                selectedTargets,
+                ocrModel,
+                useAngleCls: keywordConfigs.some(config =>
+                    config.expectedOrientation !== undefined && config.expectedOrientation !== null
+                ),
             });
 
             if (batchResult) {
@@ -249,13 +267,19 @@ export function useBatchProcessingManager({
 
                 // 调用回调
                 if (onBatchComplete) {
-                    onBatchComplete(batchResult);
+                    await onBatchComplete(batchResult);
                 }
+                return true;
             }
+
+            setBatchTriggered(false);
+            return false;
 
         } catch (err) {
             console.error('❌ 批处理失败:', err);
             toast.error('批处理失败，请重试');
+            setBatchTriggered(false);
+            return false;
 
         } finally {
             isProcessingRef.current = false;
@@ -268,7 +292,13 @@ export function useBatchProcessingManager({
         // roiCacheIds, // 不再依赖 hook 中的 roiCacheIds
         batchApplyRules,
         enableBarcodeDetection,
-        onBatchComplete
+        onBatchComplete,
+        selectedTargets,
+        keywordConfigs,
+        keywordMatchMode,
+        barcodeConfigs,
+        nonGridTargets,
+        ocrModel,
     ]);
 
     /**

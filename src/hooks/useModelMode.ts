@@ -26,7 +26,7 @@ interface ModelModeConfig {
 }
 
 const DEFAULT_LOCAL_CONFIG = {
-  modelName: 'gemma4:e2b-it-qat',
+  modelName: 'gemma4-e2b:latest',
   ollamaHost: '', // 留空则默认使用后端 localhost
   systemPrompt: DEFAULT_LLM_TASK_PROMPT,
   userMessage: DEFAULT_LLM_USER_MESSAGE,
@@ -60,11 +60,11 @@ export const useModelMode = () => {
         const loadedLocalConfig = { ...DEFAULT_LOCAL_CONFIG, ...parsed.localModelConfig };
 
         // 自动升级旧的默认模型名称
-        if (loadedLocalConfig.modelName === 'gemma4:e4b') {
-          loadedLocalConfig.modelName = 'gemma4:e2b-it-qat';
+        if (loadedLocalConfig.modelName === 'gemma4:e4b' || loadedLocalConfig.modelName === 'gemma4:e2b-it-qat') {
+          loadedLocalConfig.modelName = 'gemma4-e2b:latest';
         }
         // 自动将默认的 0.2 温度纠正为更稳定的 0.1
-        if (loadedLocalConfig.modelName === 'gemma4:e2b-it-qat' && loadedLocalConfig.temperature === 0.2) {
+        if (loadedLocalConfig.modelName === 'gemma4-e2b:latest' && loadedLocalConfig.temperature === 0.2) {
           loadedLocalConfig.temperature = 0.1;
         }
 

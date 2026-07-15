@@ -244,7 +244,7 @@ def ollama_chat(request):
         response = requests.post(
             ollama_url,
             json=data,
-            timeout=300,  # 5分钟超时
+            timeout=600,  # 与前端/生产代理的10分钟上限保持一致
             headers={'Content-Type': 'application/json'},
             allow_redirects=False
         )

@@ -89,7 +89,7 @@ export interface UseRealtimeDetectionLoopOptions {
   // 来自 useBatchProcessingManager 的方法
   batchManager: {
     cacheROI: (label: string, imageDataUrl: string, bbox: any, detection: any) => Promise<any>;
-    triggerBatchProcessing: (force: boolean) => Promise<void>;
+    triggerBatchProcessing: (force: boolean) => Promise<boolean>;
   } | null;
 
   // 图像处理函数
@@ -854,7 +854,14 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             historyDetectionsRef.current.clear();
             elementDetectionStartTimeRef.current = null;
             debounceStartTimeRef.current = null;
-            await batchManager.triggerBatchProcessing(true);
+            const batchStarted = await batchManager.triggerBatchProcessing(false);
+            if (!batchStarted) {
+              setFinalResult('unqualified');
+              setMatchStatus('unqualified');
+              setWorkflowResult({ overallQuality: '需复检', reason: '批处理目标不完整或ROI处理失败' });
+              setIsWaitingForSpace(true);
+              setWorkflowState('waiting_for_approval');
+            }
             return;
           }
         } else {
@@ -983,7 +990,14 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
 
           if (successCount > 0) {
             setWorkflowState('processing');
-            await batchManager.triggerBatchProcessing(true);
+            const batchStarted = await batchManager.triggerBatchProcessing(false);
+            if (!batchStarted) {
+              setFinalResult('unqualified');
+              setMatchStatus('unqualified');
+              setWorkflowResult({ overallQuality: '需复检', reason: '批处理目标不完整或ROI处理失败' });
+              setIsWaitingForSpace(true);
+              setWorkflowState('waiting_for_approval');
+            }
             return;
           }
         } else {

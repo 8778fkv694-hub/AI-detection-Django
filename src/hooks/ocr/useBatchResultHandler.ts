@@ -6,8 +6,7 @@
  * 提取自：OCRDetectionScreen.tsx (原第 435-745 行的 onBatchComplete + 第 986-1029 行的自动保存 useEffect)
  */
 
-import { useCallback, useEffect, useRef } from 'react';
-import type { DetectionHistoryItem } from '@/state/ocrDetectionStore';
+import { useCallback, useRef } from 'react';
 import type { BatchProcessingResult } from '@/hooks/ocr/useBatchProcessing';
 import type { TestResult } from '@/types/ocr';
 import { buildBarcodeAnalysis } from '@/lib/ocr/barcodeRuleEvaluator';
@@ -21,6 +20,7 @@ export interface UseBatchResultHandlerOptions {
   keywordConfigs: any[];
   keywordMatchMode: 'contains' | 'exact';
   requireQualifiedConfirmation: boolean;
+  selectedTargets: string[];
 
   // 融合模式
   fusionModeEnabled: boolean;
@@ -40,7 +40,6 @@ export interface UseBatchResultHandlerOptions {
   setAiAnalysisResult: (value: any) => void;
   setDetectedElements: (value: string[]) => void;
   setElementDetectionStartTime: (value: number | null) => void;
-  addDetectionHistory: (item: DetectionHistoryItem) => void;
 
   // 保存函数
   saveDetectionResult: (ocrResult: any, aiResult: any, matchStatus: string, imageBase64: string) => Promise<void>;
@@ -56,7 +55,8 @@ const isConfigMatchedByRoi = (roi: any, config: any) => {
   const barcodes = roi.barcodes || [];
   const ocrText = roi.ocr_text || '';
 
-  if (!expectedText) return true;
+  // 期望内容留空表示“任意条码”，仍必须真实检出至少一个条码。
+  if (!expectedText) return barcodes.length > 0;
 
   const barcodeMatched = barcodes.some((b: any) => {
     const text = typeof b === 'string' ? b : (b.data || '');
@@ -79,7 +79,7 @@ const getMatchedBarcodeTextByRoi = (roi: any, config: any) => {
     const firstBarcode = barcodes[0];
     if (typeof firstBarcode === 'string') return firstBarcode;
     if (firstBarcode?.data) return firstBarcode.data;
-    return ocrText || '';
+    return '';
   }
 
   for (const barcode of barcodes) {
@@ -95,17 +95,17 @@ const getMatchedBarcodeTextByRoi = (roi: any, config: any) => {
 export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => {
   const {
     enableKeywordAnalysis, enableBarcodeDetection, barcodeConfigs, keywordConfigs, keywordMatchMode, requireQualifiedConfirmation,
+    selectedTargets,
     fusionModeEnabled, performFusionAIAnalysis,
     batchManager,
     setOcrResult, setImagePreview, setWorkflowState, setFinalResult,
     setMatchStatus, setIsWaitingForSpace, setWorkflowResult, setAiAnalysisResult,
-    setDetectedElements, setElementDetectionStartTime, addDetectionHistory,
+    setDetectedElements, setElementDetectionStartTime,
     saveDetectionResult, captureFrameData,
   } = options;
 
   const batchRunIdRef = useRef(0);
   const batchResultSavedRef = useRef<string | null>(null);
-  const batchSaveRetryRef = useRef<{ count: number; lastAttempt: number }>({ count: 0, lastAttempt: 0 });
 
   // 批处理完成回调
   const onBatchComplete = useCallback(async (result: BatchProcessingResult) => {
@@ -156,11 +156,25 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     const fullText = result.ocr_text || '';
     const keywordAnalysis = enableKeywordAnalysis
       ? buildKeywordAnalysis({
-          details: (result.details || []).map((detail: any) => ({
-            text: detail.ocr_text || '',
-            confidence: detail.ocr_confidence ?? 0,
-            label: detail.label || '',
-          })),
+          details: (result.details || []).flatMap((detail: any) => {
+            const items = Array.isArray(detail.ocr_detailed_results) ? detail.ocr_detailed_results : [];
+            if (items.length > 0) {
+              return items.map((item: any) => ({
+                text: item.text || '',
+                confidence: item.confidence ?? detail.ocr_confidence ?? 0,
+                label: detail.label || '',
+                orientation_bucket: item.orientation_bucket ?? detail.detected_orientation,
+                orientation_degrees: item.orientation_degrees ?? detail.detected_orientation_degrees,
+              }));
+            }
+            return [{
+              text: detail.ocr_text || '',
+              confidence: detail.ocr_confidence ?? 0,
+              label: detail.label || '',
+              orientation_bucket: detail.detected_orientation,
+              orientation_degrees: detail.detected_orientation_degrees,
+            }];
+          }),
           fullText,
           keywordConfigs,
           keywordMatchMode,
@@ -173,14 +187,17 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
 
     const isBarcodesQualified = !enableBarcodeDetection || barcodeConfigEvaluations.every(item => item.matched);
 
-    const isQualified = result.success && isKeywordsQualified && isBarcodesQualified;
-    const totalRuleChecks = (enableKeywordAnalysis ? matchDetails.length : 0) + (enableBarcodeDetection ? barcodeConfigEvaluations.length : 0);
-    const matchedRuleChecks = (enableKeywordAnalysis ? matchDetails.filter(m => m.overallMatched).length : 0)
-      + (enableBarcodeDetection ? barcodeConfigEvaluations.filter(item => item.matched).length : 0);
-    const inspectionScore = totalRuleChecks > 0
-      ? Math.round((matchedRuleChecks / totalRuleChecks) * 100)
-      : (isQualified ? 100 : 0);
-
+    const returnedLabels = new Set((result.details || []).map(detail => detail.label));
+    const allTargetsReturned = selectedTargets.length > 0
+      && selectedTargets.every(target => returnedLabels.has(target));
+    const allRoisSucceeded = (result.details || []).length > 0
+      && (result.details || []).every(detail => detail.success && detail.qualified);
+    const isQualified = result.success
+      && result.overall_quality === '合格'
+      && allTargetsReturned
+      && allRoisSucceeded
+      && isKeywordsQualified
+      && isBarcodesQualified;
     // 构造包含ROI详细信息的OCR结果对象
     const ocrResultData = {
       success: result.success,
@@ -190,7 +207,9 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
         confidence: d.ocr_confidence || 0,
         bbox: d.bbox || [],
         label: d.label || '',
-        roi_id: d.roi_id || ''
+        roi_id: d.roi_id || '',
+        orientation_bucket: d.detected_orientation,
+        orientation_degrees: d.detected_orientation_degrees,
       })),
       text_count: result.roi_count,
       batch_processing: {
@@ -254,6 +273,8 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
             ocr_text: roiText,
             bbox: d.bbox || [],
             barcodes: roiBarcodes,
+            detected_orientation: d.detected_orientation,
+            detected_orientation_degrees: d.detected_orientation_degrees,
             keyword_match: keywordMatch,
             barcode_match: barcodeMatch
           };
@@ -288,6 +309,7 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     // 融合模式：等 LLM 分析完再设最终结果
     let finalIsQualified = isQualified;
     let aiResult: any = undefined;
+    const imageForLLM = result.stitched_image || captureFrameData()?.base64 || '';
     if (fusionModeEnabled) {
       // 先显示"等待LLM"状态
       setFinalResult('none');
@@ -295,47 +317,46 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
       console.log('🔄 融合模式：OCR完成，等待LLM分析...');
 
       // 用拼接图或捕获帧给 LLM 分析
-      const imageForLLM = result.stitched_image || captureFrameData()?.base64 || '';
-      if (imageForLLM) {
-        try {
-          aiResult = await performFusionAIAnalysis(imageForLLM);
-          if (aiResult) {
-            console.log('✅ 融合模式LLM分析完成:', aiResult.overallQuality);
-            setAiAnalysisResult(aiResult);
-            const llmQualified = aiResult.overallQuality === '合格';
-            finalIsQualified = isQualified && llmQualified;
-          } else {
-            console.warn('⚠️ LLM分析返回null，仅使用OCR结果');
-          }
-        } catch (error) {
-          console.error('❌ 融合模式LLM分析失败:', error);
+      try {
+        aiResult = await performFusionAIAnalysis(imageForLLM);
+        if (aiResult) {
+          console.log('✅ 融合模式LLM分析完成:', aiResult.overallQuality);
+          setAiAnalysisResult(aiResult);
+          const llmQualified = aiResult.overallQuality === '合格';
+          finalIsQualified = isQualified && llmQualified;
+        } else {
+          console.warn('⚠️ LLM分析未返回结果，按需复检处理');
+          finalIsQualified = false;
         }
+      } catch (error) {
+        console.error('❌ 融合模式LLM分析失败:', error);
+        finalIsQualified = false;
       }
     }
 
     setFinalResult(finalIsQualified ? 'qualified' : 'unqualified');
     setMatchStatus(finalIsQualified ? 'qualified' : 'unqualified');
 
-    // 添加到历史记录
+    // OCR 和 LLM 结论确定后只保存一次，避免先写入纯 OCR 再被融合结果覆盖。
     try {
-      const historyItem: DetectionHistoryItem = {
-        id: Date.now().toString(),
-        timestamp: new Date(),
-        matchStatus: finalIsQualified ? 'qualified' : 'unqualified',
-        overallQuality: finalIsQualified ? '合格' : '存疑',
-        score: inspectionScore,
-        ocrResult: ocrResultData,
-        aiResult,
-        barcodeAnalysis: ocrResultData.barcode_analysis
-      };
-      addDetectionHistory(historyItem);
-      console.log('✅ 批处理结果已保存到历史记录');
+      const resultId = `${result.ocr_text || ''}_${(result.details || []).map(item => item.label).join('|')}`;
+      if (batchResultSavedRef.current !== resultId) {
+        const imageBase64 = imageForLLM.includes(',') ? imageForLLM.split(',', 2)[1] : imageForLLM;
+        await saveDetectionResult(
+          ocrResultData,
+          aiResult || null,
+          finalIsQualified ? 'qualified' : 'unqualified',
+          imageBase64,
+        );
+        batchResultSavedRef.current = resultId;
+        console.log('✅ 批处理融合结果已保存');
+      }
     } catch (error) {
-      console.error('❌ 保存历史记录失败:', error);
+      console.error('❌ 保存批处理融合结果失败:', error);
     }
 
     // 检查是否需要确认
-    const shouldWaitForConfirmation = !isQualified || requireQualifiedConfirmation;
+    const shouldWaitForConfirmation = !finalIsQualified || requireQualifiedConfirmation;
     if (shouldWaitForConfirmation) {
       console.log('⏳等待用户确认结果...');
       setIsWaitingForSpace(true);
@@ -355,49 +376,11 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
   }, [
     setOcrResult, setImagePreview, setWorkflowState, setFinalResult, setMatchStatus,
     enableKeywordAnalysis, enableBarcodeDetection, keywordConfigs, keywordMatchMode, requireQualifiedConfirmation,
+    selectedTargets,
     setIsWaitingForSpace, setWorkflowResult, setAiAnalysisResult,
     setDetectedElements, setElementDetectionStartTime, barcodeConfigs,
-    addDetectionHistory, captureFrameData, batchManager,
+    captureFrameData, batchManager, fusionModeEnabled, performFusionAIAnalysis, saveDetectionResult,
   ]);
-
-  // 自动保存批处理结果到后端数据库
-  const useAutoSaveBatchResult = (
-    ocrResult: TestResult | null,
-    imagePreview: string,
-    matchStatus: string,
-  ) => {
-    useEffect(() => {
-      if (ocrResult && (ocrResult as any).batch_processing && imagePreview) {
-        const resultId = `${batchRunIdRef.current}_${ocrResult.full_text}_${ocrResult.text_count}`;
-        if (batchResultSavedRef.current === resultId) return;
-
-        const now = Date.now();
-        if (batchSaveRetryRef.current.count >= 3 && now - batchSaveRetryRef.current.lastAttempt < 30000) return;
-
-        const saveBatchResult = async () => {
-          try {
-            const imageBase64 = imagePreview
-              ? (imagePreview.startsWith('data:')
-                ? imagePreview.split(',')[1]
-                : imagePreview)
-              : '';
-
-            console.log('💾 批处理结果检测到，开始自动保存到后端数据库...');
-            await saveDetectionResult(ocrResult, null, matchStatus, imageBase64);
-            batchResultSavedRef.current = resultId;
-            batchSaveRetryRef.current = { count: 0, lastAttempt: 0 };
-            console.log('✅ 批处理结果已自动保存到后端数据库');
-          } catch (error) {
-            console.error('❌ 批处理结果自动保存失败:', error);
-            batchSaveRetryRef.current = { count: batchSaveRetryRef.current.count + 1, lastAttempt: Date.now() };
-          }
-        };
-
-        saveBatchResult();
-      }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ocrResult, imagePreview, matchStatus]);
-  };
 
   // 重置批处理保存状态
   const resetBatchSaveState = useCallback(() => {
@@ -406,7 +389,6 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
 
   return {
     onBatchComplete,
-    useAutoSaveBatchResult,
     resetBatchSaveState,
     batchRunIdRef,
     batchResultSavedRef,

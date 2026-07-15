@@ -366,6 +366,8 @@ class WeChatQRService:
     
     def _validate_barcode(self, detected_data: str, expected_data: str, match_mode: str) -> bool:
         """验证检测到的二维码是否匹配期望值"""
+        if not (expected_data or '').strip():
+            return bool((detected_data or '').strip())
         if match_mode == 'exact':
             return detected_data == expected_data
         else:  # contains

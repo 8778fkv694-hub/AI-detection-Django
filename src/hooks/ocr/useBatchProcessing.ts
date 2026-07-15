@@ -19,8 +19,12 @@ export interface BatchProcessingConfig {
     enableBarcode: boolean;
     targetConfigs?: Record<string, TargetConfig>;
     keywordConfigs?: Array<{ text: string; type?: string; targetRoi?: string }>; // 关键词配置
+    keywordMatchMode?: 'contains' | 'exact';
     barcodeConfigs?: Array<{ expectedText?: string; targetRoi?: string; enabled?: boolean }>; // 条码配置
     nonGridTargets?: string[]; // mini模式目标
+    selectedTargets: string[];
+    ocrModel?: string;
+    useAngleCls?: boolean;
 }
 
 //目标配置
@@ -35,7 +39,7 @@ export interface TargetConfig {
 export interface BatchProcessingResult {
     success: boolean;
     mode: string;
-    overall_quality: '合格' | '存疑';
+    overall_quality: '合格' | '存疑' | '需复检' | '不合格';
     reason: string;
     ocr_text: string;
     barcode_count: number;
@@ -58,6 +62,9 @@ export interface ROIDetail {
     reason: string;
     bbox?: any;
     error?: string;
+    detected_orientation?: number;
+    detected_orientation_degrees?: number;
+    ocr_detailed_results?: any[];
 }
 
 // ROI缓存统计
@@ -101,10 +108,14 @@ export function useBatchProcessing() {
 
             const data = await runBatchDetection<BatchProcessingResult>({
                 roi_ids: roi_id_list,
+                selected_targets: config.selectedTargets,
+                ocr_model: config.ocrModel,
+                use_angle_cls: config.useAngleCls,
                 apply_rules: config.applyRules,
                 enable_barcode: config.enableBarcode,
                 target_configs: config.targetConfigs || {},
                 keyword_configs: config.keywordConfigs || [],
+                keyword_match_mode: config.keywordMatchMode || 'contains',
                 barcode_configs: config.barcodeConfigs || [],
                 non_grid_targets: config.nonGridTargets || []
             });
