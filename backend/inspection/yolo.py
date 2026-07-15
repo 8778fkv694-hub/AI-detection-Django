@@ -69,6 +69,31 @@ class _FairInferenceScheduler:
 
 _inference_scheduler = _FairInferenceScheduler()
 
+_resolved_device: Optional[str] = None
+
+
+def _resolve_inference_device() -> str:
+    """选择推理设备：CUDA（Jetson等）> MPS（Apple Silicon）> CPU。
+    结果缓存，避免每次推理都重复查询 torch 后端。
+    """
+    global _resolved_device
+    if _resolved_device is not None:
+        return _resolved_device
+
+    device = 'cpu'
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif getattr(torch.backends, 'mps', None) is not None and torch.backends.mps.is_available():
+            device = 'mps'
+    except Exception as exc:
+        logger.debug('推理设备检测失败，回退到CPU: %s', exc)
+
+    _resolved_device = device
+    logger.info(f"🖥️  YOLO推理设备: {device}")
+    return device
+
 
 def _collect_model_memory() -> None:
     """尽快归还TensorRT/PyTorch缓存，降低切换到第二套配方时的内存峰值。"""
@@ -405,7 +430,14 @@ def run_inference(image_bgr: np.ndarray, conf: float = 0.5, model_id: Optional[s
         with _inference_scheduler.slot() as wait_ms:
             model = load_model(model_id)
             # ultralytics 接受 numpy 数组 (BGR 或 RGB)。
-            results = model.predict(source=image_bgr, conf=conf, verbose=False)
+            # 显式指定推理设备：ultralytics 会自动探测 CUDA，但不会自动探测 MPS，
+            # 不传 device 时 Apple Silicon 会静默退化到 CPU。
+            results = model.predict(
+                source=image_bgr,
+                conf=conf,
+                verbose=False,
+                device=_resolve_inference_device(),
+            )
         if wait_ms >= 100:
             logger.debug('YOLO推理排队 %.1fms model=%s', wait_ms, model_id)
         if not results:
