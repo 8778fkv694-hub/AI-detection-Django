@@ -220,12 +220,14 @@ def cleanup_roi_cache(request):
     清理ROI缓存
     
     POST /api/ocr/cleanup-roi-cache/
-    
+
     Request Body:
     {
-        "mode": "expired"  // "expired" | "all"
+        "mode": "expired",  // "expired" | "all"
+        "owner_id": "ocr:169..."  // 可选；"all"模式下传入时只清理该owner的ROI，
+                                   // 不影响其他窗口；不传则保留旧行为（清空全部）
     }
-    
+
     Response:
     {
         "success": true,
@@ -235,12 +237,12 @@ def cleanup_roi_cache(request):
     """
     try:
         mode = request.data.get('mode', 'expired')
+        owner_id = request.data.get('owner_id')
         roi_cache = get_roi_cache()
-        
+
         if mode == 'all':
-            cleaned_count = roi_cache.get_stats()['total_count']
-            roi_cache.clear()
-            remaining_count = 0
+            cleaned_count = roi_cache.clear_scoped(owner_id=owner_id)
+            remaining_count = roi_cache.get_stats()['total_count']
         else:
             cleaned_count = roi_cache.cleanup_expired()
             remaining_count = roi_cache.get_stats()['total_count']

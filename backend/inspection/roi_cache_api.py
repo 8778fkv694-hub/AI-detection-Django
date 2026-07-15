@@ -44,6 +44,7 @@ def cache_roi(request):
         roi_image_base64 = request.data.get('roi_image')
         bbox = request.data.get('bbox', {})
         detection = request.data.get('detection', {})
+        owner_id = request.data.get('owner_id')
         
         if not label or not roi_image_base64:
             return Response({
@@ -86,7 +87,8 @@ def cache_roi(request):
             label=label,
             roi_image=roi_array,
             bbox=bbox,
-            detection=detection
+            detection=detection,
+            owner_id=owner_id
         )
         
         logger.info(f"ROI已缓存: {label} -> {roi_id}")

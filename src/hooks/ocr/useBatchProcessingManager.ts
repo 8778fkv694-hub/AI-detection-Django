@@ -56,6 +56,10 @@ export function useBatchProcessingManager({
     // 防止重复触发
     const isProcessingRef = useRef(false);
 
+    // 本窗口的 ROI 缓存归属标识（每个页面实例一份，随模块实例常驻内存，不落盘）。
+    // 供后端按 owner_id 精确清理，避免一个窗口清缓存时误删其他窗口尚未消费的 ROI。
+    const roiOwnerIdRef = useRef(`roi:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+
     /**
      * 缓存单个ROI到后端
      */
@@ -71,7 +75,8 @@ export function useBatchProcessingManager({
                 label,
                 roi_image: roiImageDataUrl,
                 bbox,
-                detection: detection || {}
+                detection: detection || {},
+                owner_id: roiOwnerIdRef.current
             });
 
             if (!response.ok) {

@@ -175,10 +175,11 @@ export function useBatchProcessing() {
      * @param mode 'expired' | 'all'
      */
     const cleanupCache = useCallback(async (
-        mode: 'expired' | 'all' = 'expired'
+        mode: 'expired' | 'all' = 'expired',
+        ownerId?: string
     ): Promise<boolean> => {
         try {
-            const data = await cleanupRoiCache<{ success: boolean; cleaned_count: number; remaining_count: number }>(mode);
+            const data = await cleanupRoiCache<{ success: boolean; cleaned_count: number; remaining_count: number }>(mode, ownerId);
 
             if (data.success) {
                 toast.success(`缓存清理完成: 已清理${data.cleaned_count}个ROI，剩余${data.remaining_count}个`);

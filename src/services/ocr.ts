@@ -102,12 +102,19 @@ export async function getRoiCacheStats<T = any>(): Promise<T> {
   return res.json();
 }
 
-/** 清理 ROI 缓存（Django /ocr/cleanup-roi-cache/） */
-export async function cleanupRoiCache<T = any>(mode: 'expired' | 'all' = 'expired'): Promise<T> {
+/**
+ * 清理 ROI 缓存（Django /ocr/cleanup-roi-cache/）
+ * ownerId 在 mode='all' 时会被传给后端做归属过滤，避免清掉其他窗口的 ROI；
+ * 不传则退化为旧行为（清空全部），调用方按需决定是否要精确清理。
+ */
+export async function cleanupRoiCache<T = any>(
+  mode: 'expired' | 'all' = 'expired',
+  ownerId?: string,
+): Promise<T> {
   const res = await apiFetch('/ocr/cleanup-roi-cache/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, owner_id: ownerId }),
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);

@@ -589,6 +589,7 @@ export async function cacheRoiToBackend(payload: {
     roi_image: string;
     bbox: any;
     detection?: any;
+    owner_id?: string;
 }): Promise<Response> {
     return apiFetch('/yolo/cache-roi/', {
         method: 'POST',

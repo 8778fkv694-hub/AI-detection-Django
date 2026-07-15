@@ -42,23 +42,25 @@ class ROICacheManager:
         logger.info(f"ROI缓存管理器已初始化: max_size={max_size}, ttl={ttl}s")
     
     def store(
-        self, 
-        label: str, 
-        roi_image, 
+        self,
+        label: str,
+        roi_image,
         bbox: Dict[str, int],
         detection: Optional[Dict] = None,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        owner_id: Optional[str] = None,
     ) -> str:
         """
         存储ROI到缓存
-        
+
         Args:
             label: 目标标签（如 'water_efficiency_label'）
             roi_image: ROI图像（numpy数组）
             bbox: 边界框 {'x1', 'y1', 'x2', 'y2'} 或 {'x', 'y', 'w', 'h'}
             detection: 完整的检测结果（可选）
             metadata: 额外的元数据（可选）
-        
+            owner_id: 归属窗口/调用方标识（可选），用于 clear_scoped 精确清理
+
         Returns:
             roi_id: 生成的ROI唯一ID
         """
@@ -67,7 +69,7 @@ class ROICacheManager:
             timestamp_ms = int(time.time() * 1000)
             # 两个窗口可能在同一毫秒缓存同名ROI；随机后缀防止互相覆盖。
             roi_id = f"{label}_{timestamp_ms}_{uuid.uuid4().hex[:10]}"
-            
+
             # 存储数据
             self.cache[roi_id] = {
                 'roi_id': roi_id,
@@ -76,7 +78,8 @@ class ROICacheManager:
                 'bbox': bbox,
                 'detection': detection or {},
                 'metadata': metadata or {},
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'owner_id': owner_id,
             }
             
             # 检查容量并清理
@@ -152,6 +155,36 @@ class ROICacheManager:
             count = len(self.cache)
             self.cache.clear()
             logger.info(f"缓存已清空: 删除了{count}个ROI")
+
+    def clear_scoped(self, owner_id: Optional[str] = None) -> int:
+        """
+        按 owner_id 精确清理缓存；不传 owner_id 时退化为清空所有（兼容旧调用方）。
+
+        双窗口场景下，一个窗口点"清理缓存"不应清掉另一个窗口尚未消费的 ROI；
+        旧版 clear() 对所有窗口一视同仁地全清，这里改为按 owner_id 归属过滤。
+
+        Args:
+            owner_id: 归属窗口/调用方标识；None 表示清空全部（保留原有语义）
+
+        Returns:
+            实际清理的数量
+        """
+        if owner_id is None:
+            with self.lock:
+                count = len(self.cache)
+            self.clear()
+            return count
+
+        with self.lock:
+            matched_ids = [
+                roi_id for roi_id, data in self.cache.items()
+                if data.get('owner_id') == owner_id
+            ]
+            for roi_id in matched_ids:
+                del self.cache[roi_id]
+            if matched_ids:
+                logger.info(f"缓存已按owner清理: owner_id={owner_id}, 删除了{len(matched_ids)}个ROI")
+            return len(matched_ids)
     
     def cleanup_expired(self) -> int:
         """
