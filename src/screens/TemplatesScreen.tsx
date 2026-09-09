@@ -254,7 +254,7 @@ function RecipeForm({
             onClick={() => setIsWorkflowMode(false)}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               !isWorkflowMode 
-                ? 'bg-slate-850 text-foreground shadow-sm' 
+                ? 'bg-slate-800 text-foreground shadow-sm' 
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -283,7 +283,7 @@ function RecipeForm({
               <input
                 value={form.name}
                 onChange={e => set('name', e.target.value)}
-                className="w-full rounded border border-border/50 bg-slate-850 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+                className="w-full rounded border border-border/50 bg-slate-800 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
               />
             </div>
             <div>
@@ -292,7 +292,7 @@ function RecipeForm({
                 value={form.description}
                 onChange={e => set('description', e.target.value)}
                 placeholder="添加描述..."
-                className="w-full rounded border border-border/50 bg-slate-850 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
+                className="w-full rounded border border-border/50 bg-slate-800 px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-accent"
               />
             </div>
             {renderCameraSelect(true)}

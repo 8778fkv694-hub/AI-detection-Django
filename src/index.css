@@ -5,6 +5,8 @@
 
     @layer base {
       :root {
+        color-scheme: dark; /* 原生控件（select弹层/滚动条/日期/number箭头）统一暗色渲染 */
+
         /* Dark Theme Color Palette */
         --background: 224 71% 4%;    /* Deep, dark blue */
         --foreground: 210 40% 98%;  /* Bright, off-white text */
@@ -32,6 +34,32 @@
         --ring: 260 100% 75%;       /* Focus ring color */
 
         --radius: 0.75rem;
+      }
+    }
+
+    /* 暗色主题表单控件兜底：未显式设置样式的 input/select/textarea 不再出现
+       浏览器默认白底白字（演示时不可读）。组件中显式的 utilities 类优先生效。 */
+    @layer base {
+      input:not([type='checkbox']):not([type='radio']):not([type='range']),
+      textarea,
+      select {
+        @apply bg-slate-800 text-foreground border-border;
+      }
+      input:not([type='checkbox']):not([type='radio']):not([type='range'])::placeholder,
+      textarea::placeholder {
+        @apply text-slate-500;
+      }
+      select option {
+        @apply bg-slate-800 text-slate-100;
+      }
+      input[type='checkbox'],
+      input[type='radio'] {
+        @apply accent-accent cursor-pointer;
+      }
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        @apply outline-none ring-1 ring-ring/60;
       }
     }
  
