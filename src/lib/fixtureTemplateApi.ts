@@ -8,6 +8,8 @@ export interface FixtureTemplate {
   pattern: string;
   created_at: string;
   updated_at: string;
+  // A12：引用影响提示 — 哪些工序配方以快照复制方式引用了本模板
+  used_by_recipes?: Array<{ id: string; name: string }>;
 }
 
 const API_BASE = '/fixture-templates';

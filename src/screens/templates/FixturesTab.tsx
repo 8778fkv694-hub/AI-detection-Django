@@ -28,19 +28,30 @@ function FixtureFormField({
 
 function FixtureTemplateForm({
   template,
+  usedByRecipes,
   onSave,
   onCancel,
 }: {
   template?: FixtureTemplate;
+  usedByRecipes?: Array<{ id: string; name: string }>;
   onSave: (data: Partial<FixtureTemplate>) => void;
   onCancel: () => void;
 }) {
   const [formData, setFormData] = useState<Partial<FixtureTemplate>>(
     template || { name: '', description: '', prefixes: '', pattern: '' }
   );
+  const referenced = usedByRecipes?.length || 0;
 
   return (
     <div className="space-y-4 rounded-lg border border-border/50 bg-slate-900/50 p-4">
+      {/* A12：改源模板前的引用影响提示 */}
+      {referenced > 0 && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+          ⚠️ 本模板被 {referenced} 个工序配方以快照复制方式引用：
+          {usedByRecipes!.map(r => r.name).join('、')}。
+          更新模板后这些配方不会自动同步，需要在配方编辑或配方选择弹窗中显式同步。
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <FixtureFormField
           label="模板名称"
@@ -159,6 +170,7 @@ export function FixturesTab() {
             <div key={template.id} className="col-span-1 md:col-span-2 lg:col-span-3">
               <FixtureTemplateForm
                 template={template}
+                usedByRecipes={template.used_by_recipes}
                 onSave={(data) => handleUpdate(template.id, data)}
                 onCancel={() => setEditingId(null)}
               />
@@ -190,6 +202,14 @@ export function FixturesTab() {
                   </button>
                 </div>
               </div>
+              {/* A12：引用徽标 — 模板被哪些配方引用一目了然 */}
+              {(template.used_by_recipes?.length || 0) > 0 && (
+                <div className="mb-2 rounded border border-slate-600/50 bg-slate-800/60 px-2 py-1 text-[10px] text-slate-300">
+                  被 {template.used_by_recipes!.length} 个工序配方引用：
+                  {template.used_by_recipes!.map(r => r.name).join('、')}
+                  （快照复制，改模板不自动同步）
+                </div>
+              )}
               <div className="mt-4 space-y-1">
                 <div className="flex justify-between text-[11px]">
                   <span className="text-muted-foreground">前缀:</span>

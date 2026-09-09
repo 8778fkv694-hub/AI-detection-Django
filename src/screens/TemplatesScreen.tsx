@@ -452,13 +452,40 @@ function RecipeForm({
                   <span className="text-[10px] text-muted-foreground italic">选择模板后将自动填充规则</span>
                 </div>
                 {/* A12：明确"独立副本"语义 — 引用只是快照复制，源模板后续更新不会自动同步到本配方 */}
-                {form.fixtureTemplateId && (
-                  <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-200">
-                    已引用「{fixtureTemplates.find(t => t.id === form.fixtureTemplateId)?.name || '工装模板'}」：
-                    当前值是导入时的快照副本；后续修改该工装模板不会自动同步到本配方。
-                    需要同步时请重新选择此模板或手动更新下方规则。
-                  </div>
-                )}
+                {form.fixtureTemplateId && (() => {
+                  const sourceTemplate = fixtureTemplates.find(t => t.id === form.fixtureTemplateId);
+                  const diverged = !!sourceTemplate && (
+                    sourceTemplate.prefixes !== form.fixtureQrPrefixes
+                    || sourceTemplate.pattern !== form.fixtureQrPattern
+                  );
+                  return (
+                    <div className={`rounded border px-2.5 py-1.5 text-[10px] ${diverged ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-slate-600/40 bg-slate-800/50 text-slate-400'}`}>
+                      <div>
+                        {diverged ? '⚠️ ' : ''}已引用「{sourceTemplate?.name || '工装模板'}」：
+                        当前值是导入时的快照副本；后续修改该工装模板不会自动同步到本配方。
+                      </div>
+                      {diverged && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <span>
+                            源模板当前前缀 <code className="text-foreground">{sourceTemplate.prefixes || '(空)'}</code>
+                            ，本配方快照 <code className="text-foreground">{form.fixtureQrPrefixes || '(空)'}</code>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              set('fixtureQrPrefixes', sourceTemplate.prefixes);
+                              set('fixtureQrPattern', sourceTemplate.pattern);
+                              toast.success('已同步源模板最新规则');
+                            }}
+                            className="rounded border border-amber-400/60 bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-500/25"
+                          >
+                            同步为模板最新规则
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <select
                   value={form.fixtureTemplateId || ''}
                   onChange={e => handleFixtureTemplateChange(e.target.value)}

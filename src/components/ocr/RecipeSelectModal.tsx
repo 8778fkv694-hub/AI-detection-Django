@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { fetchRecipes, type StageRecipe } from '@/lib/stageRecipeApi';
+import toast from 'react-hot-toast';
+import { fetchRecipes, updateRecipe, type StageRecipe } from '@/lib/stageRecipeApi';
 import { Button } from '@/components/ui/Button';
-import { X, CheckCircle, BookOpen, Tag, Hash, Code2 } from 'lucide-react';
+import { X, CheckCircle, BookOpen, Tag, Hash, Code2, RefreshCw } from 'lucide-react';
 
 interface RecipeSelectModalProps {
   onApply: (recipe: StageRecipe) => void;
@@ -12,6 +13,7 @@ const RecipeSelectModal: React.FC<RecipeSelectModalProps> = ({ onApply, onSkip }
   const [recipes, setRecipes] = useState<StageRecipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<StageRecipe | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchRecipes()
@@ -23,6 +25,30 @@ const RecipeSelectModal: React.FC<RecipeSelectModalProps> = ({ onApply, onSkip }
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  // A12：源工装模板与配方快照是否分歧
+  const isDiverged = !!selected?.fixtureTemplateId && (
+    selected.sourceFixturePrefixes !== selected.fixtureQrPrefixes
+    || selected.sourceFixturePattern !== selected.fixtureQrPattern
+  );
+
+  // A12：把配方快照同步为源模板当前规则后应用（显式操作，不静默联动）
+  const handleSyncAndApply = async () => {
+    if (!selected || !isDiverged) return;
+    setSyncing(true);
+    try {
+      const updated = await updateRecipe(selected.id, {
+        fixtureQrPrefixes: selected.sourceFixturePrefixes,
+        fixtureQrPattern: selected.sourceFixturePattern,
+      });
+      toast.success(`已同步源模板「${selected.fixtureTemplateName}」最新规则`);
+      onApply(updated);
+    } catch (e: any) {
+      toast.error(e.message || '同步失败，请稍后重试');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -110,12 +136,39 @@ const RecipeSelectModal: React.FC<RecipeSelectModalProps> = ({ onApply, onSkip }
                     <Tag className="h-3.5 w-3.5" />工序信息
                   </h4>
                   {/* A12：模板引用影响提示 — 配方以快照复制引用工装模板，源模板更新不会自动同步到产线 */}
-                  {selected.fixtureTemplateId
-                    && (selected.sourceFixturePrefixes !== selected.fixtureQrPrefixes
-                      || selected.sourceFixturePattern !== selected.fixtureQrPattern) && (
-                    <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-200">
-                      ⚠️ 源工装模板「{selected.fixtureTemplateName}」已更新，本配方使用的是旧版本快照；
-                      改动源模板不会自动同步到产线配方。请在"模板管理"中重新选择工装模板以同步最新规则。
+                  {isDiverged && (
+                    <div className="space-y-2 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-200">
+                      <p>
+                        ⚠️ 源工装模板「{selected.fixtureTemplateName}」已更新，本配方使用的是旧版本快照。
+                        改动源模板不会自动同步到产线配方。
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="rounded bg-slate-800/60 px-2 py-1">
+                          <span className="text-muted-foreground">源模板当前前缀: </span>
+                          <code className="break-all text-foreground">{selected.sourceFixturePrefixes || '(空)'}</code>
+                        </div>
+                        <div className="rounded bg-slate-800/60 px-2 py-1">
+                          <span className="text-muted-foreground">本配方快照前缀: </span>
+                          <code className="break-all text-foreground">{selected.fixtureQrPrefixes || '(空)'}</code>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSyncAndApply}
+                          disabled={syncing}
+                          className="flex items-center gap-1.5 rounded border border-amber-400/60 bg-amber-500/20 px-2.5 py-1 text-[11px] text-amber-100 hover:bg-amber-500/25 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${syncing ? 'animate-spin' : ''}`} />
+                          同步并应用
+                        </button>
+                        <button
+                          onClick={() => onApply(selected)}
+                          className="rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-500"
+                        >
+                          仍用旧快照
+                        </button>
+                      </div>
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2">
