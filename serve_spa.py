@@ -93,7 +93,10 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         self._original_request_path = path
-        
+        # 代理路径不经过 send_head，显式复位，防止 keep-alive 连接上
+        # 前一个 gzip 静态请求的状态泄漏到代理响应头。
+        self._serving_gzip = False
+
         # API 和 media 请求代理到 Django 后端
         if path.startswith('/api/') or path.startswith('/media/'):
             return self._proxy_request('GET')
@@ -176,10 +179,10 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_header(header, value)
                 self.end_headers()
 
-                # 分块转发响应体。MJPEG 是无限流，不能 response.read() 等完整响应，
-                # 否则浏览器只收到 200 头但永远拿不到画面帧。
+                # 分块转发响应体。MJPEG 是无限流，使用 read1 有数据即返回，
+                # 不等满缓冲区；64KB 上限保证大响应（快照/批处理结果）的吞吐。
                 while True:
-                    chunk = response.read(64 * 1024)
+                    chunk = response.read1(64 * 1024)
                     if not chunk:
                         break
                     self.wfile.write(chunk)

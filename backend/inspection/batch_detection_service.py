@@ -280,9 +280,8 @@ class BatchDetectionService:
                 result['ocr_detailed_results'] = detailed_results
                 result['detected_orientation'] = ocr_result.get('detected_orientation')
                 result['detected_orientation_degrees'] = ocr_result.get('detected_orientation_degrees')
-                if not result['ocr_text'].strip() or not detailed_results:
-                    result['qualified'] = False
-                    result['reason'] = 'OCR未识别到可复核文字'
+                # 是否要求OCR证据由 _validate_roi 的 requires_ocr_evidence 统一裁决：
+                # 纯视觉目标（无关键词规则）不应仅因无可读文字被判不合格。
             else:
                 result['skipped_ocr'] = True
                 logger.debug(f"[{label}] 跳过OCR检测（非选中目标且无规则）")

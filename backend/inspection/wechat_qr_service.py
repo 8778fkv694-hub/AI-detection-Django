@@ -59,26 +59,29 @@ class WeChatQRService:
             return True
         
         try:
-            # 检查模型文件是否存在
-            detect_prototxt = os.path.join(self.model_path, 'detect.prototxt')
-            detect_caffemodel = os.path.join(self.model_path, 'detect.caffemodel')
-            sr_prototxt = os.path.join(self.model_path, 'sr.prototxt')
-            sr_caffemodel = os.path.join(self.model_path, 'sr.caffemodel')
+            cv_major = int(cv2.__version__.split('.')[0])
             
-            if not all(os.path.exists(f) for f in [detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel]):
-                logger.error("微信二维码模型文件不完整，无法加载")
-                return False
-            
-            # 初始化WeChatQRCode检测器
-            self.detector = cv2.wechat_qrcode_WeChatQRCode(
-                detect_prototxt,
-                detect_caffemodel,
-                sr_prototxt,
-                sr_caffemodel
-            )
+            if cv_major >= 5:
+                self.detector = cv2.wechat_qrcode_WeChatQRCode()
+            else:
+                detect_prototxt = os.path.join(self.model_path, 'detect.prototxt')
+                detect_caffemodel = os.path.join(self.model_path, 'detect.caffemodel')
+                sr_prototxt = os.path.join(self.model_path, 'sr.prototxt')
+                sr_caffemodel = os.path.join(self.model_path, 'sr.caffemodel')
+                
+                if not all(os.path.exists(f) for f in [detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel]):
+                    logger.error("微信二维码模型文件不完整，无法加载")
+                    return False
+                
+                self.detector = cv2.wechat_qrcode_WeChatQRCode(
+                    detect_prototxt,
+                    detect_caffemodel,
+                    sr_prototxt,
+                    sr_caffemodel
+                )
             
             self.model_loaded = True
-            logger.info("微信二维码检测模型加载成功")
+            logger.info("微信二维码检测模型加载成功 (cv2 %s)", cv2.__version__)
             return True
             
         except Exception as e:
@@ -375,6 +378,8 @@ class WeChatQRService:
     
     def get_model_status(self) -> Dict[str, Any]:
         """获取模型状态"""
+        if not self.model_loaded:
+            self._load_model()
         return {
             'model_loaded': self.model_loaded,
             'model_path': self.model_path,

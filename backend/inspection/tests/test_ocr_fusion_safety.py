@@ -80,7 +80,9 @@ class BatchDetectionSafetyTests(SimpleTestCase):
         detect_barcode.assert_not_called()
 
     @patch('inspection.ocr_service.ocr_service.extract_text')
-    def test_empty_ocr_evidence_does_not_pass_a_selected_target(self, extract_text):
+    def test_rule_free_selected_target_passes_without_ocr_text(self, extract_text):
+        # 纯视觉目标（无关键词/条码规则）不要求 OCR 证据：YOLO 确认存在即可，
+        # 与 _validate_roi 的 requires_ocr_evidence 策略保持一致。
         extract_text.return_value = {
             'success': True,
             'full_text': '',
@@ -95,8 +97,31 @@ class BatchDetectionSafetyTests(SimpleTestCase):
         )
 
         self.assertTrue(result['success'])
+        self.assertEqual(result['overall_quality'], '合格')
+        self.assertTrue(result['details'][0]['qualified'])
+
+    @patch('inspection.ocr_service.ocr_service.extract_text')
+    def test_empty_ocr_fails_when_keyword_rules_require_evidence(self, extract_text):
+        extract_text.return_value = {
+            'success': True,
+            'full_text': '',
+            'detailed_results': [],
+        }
+        service = BatchDetectionService(max_workers=1)
+
+        result = service.process_batch(
+            rois=[{'label': 'serial_label', 'image': object(), 'bbox': {}}],
+            apply_rules=True,
+            enable_barcode=False,
+            target_configs={'serial_label': {}},
+            keyword_configs=[{'text': 'ABC', 'targetRoi': 'serial_label'}],
+            selected_targets=['serial_label'],
+        )
+
+        self.assertTrue(result['success'])
         self.assertEqual(result['overall_quality'], '不合格')
         self.assertFalse(result['details'][0]['qualified'])
+        self.assertIn('OCR未识别到可复核文字', result['details'][0]['reason'])
 
     def test_any_roi_failure_marks_batch_unsuccessful(self):
         service = BatchDetectionService(max_workers=1)

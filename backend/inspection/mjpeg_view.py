@@ -248,4 +248,5 @@ def mjpeg_stream(request, stream_id):
     )
     response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response['Access-Control-Allow-Origin'] = '*'
+    response['X-Accel-Buffering'] = 'no'  # 禁用 Nginx 等反向代理的响应缓冲，防止延迟积压
     return response

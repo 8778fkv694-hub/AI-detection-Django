@@ -429,7 +429,27 @@ export const usePPEDetection = ({
     }
 
     return stopLoop;
-  }, [captureThreshold, getMinThreshold, isCameraOn, isPpeActive, streamId]);
+    // captureThreshold/getMinThreshold 故意不放进 deps：阈值由下面的独立
+    // effect 原地同步，避免滑块每动一格就 stop→start 整环重启。
+  }, [isCameraOn, isPpeActive, streamId]);
+
+  // 阈值原地同步：后端对"已在运行"的循环走 update_config 分支，
+  // 同 owner 重复 start 是幂等 attach，不会触发重启。
+  const ppeLoopThreshold = Math.min(captureThreshold, getMinThreshold());
+  const lastSyncedThresholdRef = useRef(ppeLoopThreshold);
+  useEffect(() => {
+    if (lastSyncedThresholdRef.current === ppeLoopThreshold) return;
+    lastSyncedThresholdRef.current = ppeLoopThreshold;
+    if (isLocalOfflineMode() || !streamId) return;
+    if (!isCameraOn || !isPpeActive || !backendLoopStartedRef.current) return;
+    const ownerId = backendLoopOwnerRef.current;
+    if (!ownerId) return;
+    startStreamDetectionLoop(streamId, {
+      modelId: 'ppe_detection',
+      confThreshold: ppeLoopThreshold,
+      ownerId,
+    }).catch(error => console.error('更新PPE检测阈值失败:', error));
+  }, [ppeLoopThreshold, isCameraOn, isPpeActive, streamId]);
 
   // 实时PPE检测
   const runPpeDetection = useCallback(async (): Promise<string[] | null> => {

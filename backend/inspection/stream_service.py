@@ -548,7 +548,8 @@ class StreamManager:
         # Jetson 本地摄像头：尝试 V4L2 原始 MJPEG 采集（零 CPU 显示路径）
         if url.startswith('/dev/video') and os.path.exists('/etc/nv_tegra_release'):
             from .v4l2_raw_reader import V4L2RawReader
-            v4l2 = V4L2RawReader(url)
+            # 使用 1280x720 分辨率以降低 USB 传输带宽与 CPU 积压开销，同时保持高画质
+            v4l2 = V4L2RawReader(url, width=1280, height=720)
             if v4l2.start():
                 reader._v4l2_source = v4l2
                 reader.is_connected = True

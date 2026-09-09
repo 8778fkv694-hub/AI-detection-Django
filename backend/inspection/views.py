@@ -904,47 +904,56 @@ class InspectionResultViewSet(viewsets.ModelViewSet):
     def data_stats(self, request):
         """
         获取数据统计信息
-        包括齐套化结果和OCR结果的数量和存储大小
+        支持 ?today=true 参数过滤今日数据
         """
         try:
+            today_only = request.query_params.get('today', '').lower() == 'true'
+            queryset = InspectionResult.objects.all()
+            
+            if today_only:
+                today = timezone.now().date()
+                queryset = queryset.filter(timestamp__date=today)
+            
+            # 整体统计
+            total_count = queryset.count()
+            qual_count = queryset.filter(overall_quality='合格').count()
+            unqual_count = queryset.filter(
+                Q(overall_quality='不合格') | Q(overall_quality='存疑') | Q(overall_quality='需复检')
+            ).count()
+            
             # 齐套化结果统计
-            kit_results = InspectionResult.objects.filter(detection_type='kit_matching')
-            kit_count = kit_results.count()
-            kit_size_bytes = 0 # 暂时跳过耗时的文件大小计算
-
-            # OCR结果统计（包括ocr_inspection和ocr_fusion_inspection）
-            ocr_results = InspectionResult.objects.filter(
+            kit_count = queryset.filter(detection_type='kit_matching').count()
+            
+            # OCR结果统计
+            ocr_count = queryset.filter(
                 Q(detection_type='ocr_inspection') | Q(detection_type='ocr_fusion_inspection')
-            )
-            ocr_count = ocr_results.count()
-            ocr_size_bytes = 0 # 暂时跳过耗时的文件大小计算
-
-            # 转换为MB
-            kit_size_mb = round(kit_size_bytes / (1024 * 1024), 2)
-            ocr_size_mb = round(ocr_size_bytes / (1024 * 1024), 2)
-
+            ).count()
+            
+            # PPE检测统计
+            ppe_count = queryset.filter(detection_type='cleanroom_ppe').count()
+            
             return Response({
+                'total': {
+                    'count': total_count,
+                },
+                'qualified': {
+                    'count': qual_count,
+                },
+                'unqualified': {
+                    'count': unqual_count,
+                },
                 'kit_matching': {
                     'count': kit_count,
-                    'size_bytes': kit_size_bytes,
-                    'size_mb': kit_size_mb,
-                    'size_display': f'{kit_size_mb} MB'
                 },
                 'ocr_results': {
                     'count': ocr_count,
-                    'size_bytes': ocr_size_bytes,
-                    'size_mb': ocr_size_mb,
-                    'size_display': f'{ocr_size_mb} MB'
                 },
-                'total': {
-                    'count': kit_count + ocr_count,
-                    'size_bytes': kit_size_bytes + ocr_size_bytes,
-                    'size_mb': round((kit_size_bytes + ocr_size_bytes) / (1024 * 1024), 2),
-                    'size_display': f'{round((kit_size_bytes + ocr_size_bytes) / (1024 * 1024), 2)} MB'
+                'ppe': {
+                    'count': ppe_count,
                 },
                 'timestamp': timezone.now().isoformat()
             }, status=status.HTTP_200_OK)
-
+            
         except Exception as e:
             return Response({
                 'error': f'获取数据统计失败: {str(e)}'

@@ -524,30 +524,31 @@ export async function importModelConfig(file: File): Promise<{ message: string }
 
 // 数据统计接口类型
 export interface DataStats {
+    total: {
+        count: number;
+    };
+    qualified: {
+        count: number;
+    };
+    unqualified: {
+        count: number;
+    };
     kit_matching: {
         count: number;
-        size_bytes: number;
-        size_mb: number;
-        size_display: string;
     };
     ocr_results: {
         count: number;
-        size_bytes: number;
-        size_mb: number;
-        size_display: string;
     };
-    total: {
+    ppe: {
         count: number;
-        size_bytes: number;
-        size_mb: number;
-        size_display: string;
     };
     timestamp: string;
 }
 
-// 获取数据统计信息
-export async function getDataStats(): Promise<DataStats> {
-    return await apiRequest('/results/data-stats/');
+// 获取数据统计信息（默认查询今日数据）
+export async function getDataStats(today: boolean = true): Promise<DataStats> {
+    const params = today ? '?today=true' : '';
+    return await apiRequest(`/results/data-stats/${params}`);
 }
 
 // ---- 洁净用品检测结果 / 健康系统对接（行动文档 W5，从 CleanroomInspectionResultsScreen 收口） ----

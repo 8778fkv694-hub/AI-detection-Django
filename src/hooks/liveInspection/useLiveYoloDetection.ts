@@ -498,7 +498,26 @@ export const useLiveYoloDetection = ({
           .catch(e => console.error('卸载时停止后端Live YOLO检测循环失败:', e));
       }
     };
-  }, [isCameraOn, isYoloActive, streamId, detectionConfidence, modelId]);
+    // detectionConfidence 故意不放进 deps：由下面的独立 effect 原地同步，
+    // 避免滑块每动一格就 stop→start 整环重启。
+  }, [isCameraOn, isYoloActive, streamId, modelId]);
+
+  // 置信度原地同步：后端对"已在运行"的循环走 update_config 分支，
+  // 同 owner 重复 start 是幂等 attach，不会触发重启。
+  const lastSyncedConfidenceRef = useRef(detectionConfidence);
+  useEffect(() => {
+    if (lastSyncedConfidenceRef.current === detectionConfidence) return;
+    lastSyncedConfidenceRef.current = detectionConfidence;
+    if (isOfflineEngineActive() || !streamId) return;
+    if (!isCameraOn || !isYoloActive) return;
+    const ownerId = backendLoopOwnerRef.current;
+    if (!ownerId) return;
+    startStreamDetectionLoop(streamId, {
+      confThreshold: detectionConfidence,
+      modelId,
+      ownerId,
+    }).catch(e => console.error('更新Live YOLO检测置信度失败:', e));
+  }, [detectionConfidence, isCameraOn, isYoloActive, streamId, modelId]);
 
   // YOLO检测循环 (使用自适应递归循环取代硬编码的 500ms 轮询，解除帧率上限)
   useEffect(() => {

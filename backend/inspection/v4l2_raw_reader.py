@@ -204,7 +204,7 @@ class V4L2RawReader:
         """V4L2 mmap 读取主循环，从 v4l2-ctl stdout 拆分完整 MJPEG 帧。"""
         buf = bytearray()
         READ_SIZE = 256 * 1024         # stdout 分块读取；JPEG 帧可跨块拼接
-        MAX_BUF = 4 * 1024 * 1024      # 积压上限，超过后强制对齐防止 OOM
+        MAX_BUF = 2 * 1024 * 1024      # 积压上限，超过后强制对齐防止 OOM
 
         while self.is_running:
             try:
@@ -224,12 +224,14 @@ class V4L2RawReader:
                     continue
                 buf.extend(chunk)
 
-                # 缓冲区积压防护：丢弃最旧的碎片，从最新 SOI 开始
+                # 缓冲区积压防护：丢弃最旧的碎片，从最新 SOI 开始。
+                # soi == 0 时说明正在拼装一个超大帧，保留缓冲继续等 EOI，
+                # 否则大帧永远拼不完整，流会持续丢帧。
                 if len(buf) > MAX_BUF:
                     soi = buf.find(b'\xff\xd8')
                     if soi > 0:
                         buf = buf[soi:]
-                    if len(buf) > MAX_BUF:
+                    elif soi == -1:
                         buf = bytearray()
 
                 # 一次尽可能多地提取完整帧（追帧，不积压）

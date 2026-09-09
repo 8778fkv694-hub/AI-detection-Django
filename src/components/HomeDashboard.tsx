@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAIConfigStore } from '@/state/aiConfigStore';
-import { useAppStore } from '@/state/appStore';
 import { apiRequest, apiFetch, isLocalOfflineMode } from '@/lib/config';
 import { getLocalEngineInfo } from '@/services/detect';
 import { extractText, getOcrStatus } from '@/services/ocr';
@@ -12,6 +11,7 @@ import {
   Activity,
   CheckCircle2,
   XCircle,
+  MinusCircle,
   RefreshCw,
   Eye,
   Shield,
@@ -24,6 +24,7 @@ import {
 interface ServiceStatus {
   name: string;
   ok: boolean;
+  neutral?: boolean;
   detail?: string;
   loading: boolean;
   testAction?: () => Promise<{ ok: boolean; detail?: string }>;
@@ -35,6 +36,7 @@ interface StatsData {
   unqualified: number;
   kitCount: number;
   ocrCount: number;
+  ppeCount: number;
   timestamp: string | null;
 }
 
@@ -114,7 +116,6 @@ async function triggerOCRModelLoad(): Promise<{ ok: boolean; detail?: string }> 
 
 const HomeDashboard: React.FC = () => {
   const { config } = useAIConfigStore();
-  const { results } = useAppStore();
 
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [modelPoolInfo, setModelPoolInfo] = useState<{
@@ -128,6 +129,7 @@ const HomeDashboard: React.FC = () => {
     unqualified: 0,
     kitCount: 0,
     ocrCount: 0,
+    ppeCount: 0,
     timestamp: null,
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -163,12 +165,12 @@ const HomeDashboard: React.FC = () => {
     })();
 
     const aiPromise = (async () => {
-      if (isOffline) return { ok: false, detail: '未配置' };
-      if (!config.apiKey && !config.apiBaseUrl) return { ok: false, detail: '未配置' };
+      if (isOffline) return { ok: false, neutral: true, detail: '未配置' };
+      if (!config.apiKey && !config.apiBaseUrl) return { ok: false, neutral: true, detail: '未配置' };
       try {
         await testAIConnection(config);
         return { ok: true, detail: config.modelName };
-      } catch { return { ok: false, detail: config.modelName }; }
+      } catch { return { ok: false, neutral: true, detail: '不可用' }; }
     })();
 
     const ollamaPromise = (async () => {
@@ -237,7 +239,7 @@ const HomeDashboard: React.FC = () => {
     const [backendOk, yoloResult, aiResult, ollamaResult, ocrResult, qrResult, streamResult, preprocessResult, statsData] = await Promise.all([
       withTimeout(backendPromise, false, 5000),
       withTimeout(yoloPromise, { ok: false, detail: '检查超时' }, 10000),
-      withTimeout(aiPromise, { ok: false, detail: '检查超时' }, 2000),
+      withTimeout(aiPromise, { ok: false, neutral: true, detail: '检查超时' }, 2000),
       withTimeout(ollamaPromise, { ok: false, detail: '检查超时' }, 2000),
       withTimeout(ocrPromise, { ok: false, detail: '检查超时' }, 2000),
       withTimeout(qrPromise, { ok: false, detail: '检查超时' }, 2000),
@@ -272,7 +274,7 @@ const HomeDashboard: React.FC = () => {
       serviceList = [
         { name: '后端服务', ok: backendOk as boolean, loading: false, detail: window.location.port ? `:${window.location.port}` : undefined },
         { name: 'YOLO 检测', ok: yoloResult.ok, loading: false, detail: yoloResult.detail, testAction: async () => { const s = await getYoloStatus(); const p = await getModelPoolStatus(); setModelPoolInfo({ loaded_models: p.loaded_models, pool_size: p.pool_size, current_model: p.current_model }); return { ok: s.loaded, detail: `当前: ${p.current_model || '未加载'}` }; } },
-        { name: '云端 AI', ok: aiResult.ok, loading: false, detail: aiResult.detail, testAction: async () => { if (!config.apiKey && !config.apiBaseUrl) return { ok: false, detail: '未配置' }; try { await testAIConnection(config); return { ok: true, detail: config.modelName }; } catch { return { ok: false, detail: config.modelName }; } } },
+        { name: '云端 AI', ok: aiResult.ok, neutral: aiResult.neutral, loading: false, detail: aiResult.detail, testAction: async () => { if (!config.apiKey && !config.apiBaseUrl) return { ok: false, neutral: true, detail: '未配置' }; try { await testAIConnection(config); return { ok: true, detail: config.modelName }; } catch { return { ok: false, neutral: true, detail: '不可用' }; } } },
         { name: 'Ollama 本地', ok: ollamaResult.ok, loading: false, detail: ollamaResult.detail, testAction: async () => { const res = await apiFetch('/ollama/status/'); const data = await res.json(); if (data.success && data.status === 'running') { return { ok: true, detail: (data.models || []).map((m: any) => m.name || m).join(', ') || '运行中' }; } return { ok: false, detail: data.status || '未运行' }; } },
         { name: 'OCR 引擎', ok: ocrResult.ok, loading: false, detail: ocrResult.detail, testAction: triggerOCRModelLoad },
         { name: '二维码检测', ok: qrResult.ok, loading: false, detail: qrResult.detail, testAction: triggerQRModelLoad },
@@ -283,29 +285,23 @@ const HomeDashboard: React.FC = () => {
     setServices(serviceList);
 
     if (statsData) {
-      const computedQual = results.filter(r => r.overallQuality === '合格').length;
-      const computedUnqual = results.filter(r => r.overallQuality === '存疑' || r.overallQuality === '需复检').length;
       setStats({
-        total: statsData.total?.count ?? results.length,
-        qualified: computedQual,
-        unqualified: computedUnqual,
+        total: statsData.total?.count ?? 0,
+        qualified: statsData.qualified?.count ?? 0,
+        unqualified: statsData.unqualified?.count ?? 0,
         kitCount: statsData.kit_matching?.count ?? 0,
         ocrCount: statsData.ocr_results?.count ?? 0,
+        ppeCount: statsData.ppe?.count ?? 0,
         timestamp: statsData.timestamp,
       });
     } else {
-      const computedQual = results.filter(r => r.overallQuality === '合格').length;
-      const computedUnqual = results.filter(r => r.overallQuality === '存疑' || r.overallQuality === '需复检').length;
       setStats(prev => ({
         ...prev,
-        total: results.length,
-        qualified: computedQual,
-        unqualified: computedUnqual,
-        timestamp: prev.timestamp,
+        timestamp: null,
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.apiKey, config.apiBaseUrl, config.modelName, results]);
+  }, [config.apiKey, config.apiBaseUrl, config.modelName]);
 
   useEffect(() => {
     const isOffline = isLocalOfflineMode();
@@ -336,6 +332,7 @@ const HomeDashboard: React.FC = () => {
 
   const statusIcon = (s: ServiceStatus) => {
     if (s.loading || testingService === s.name) return <RefreshCw className="h-3.5 w-3.5 text-yellow-500 animate-spin" />;
+    if (s.neutral) return <MinusCircle className="h-3.5 w-3.5 text-slate-500 shrink-0" />;
     return s.ok
       ? <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
       : <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />;
@@ -350,7 +347,7 @@ const HomeDashboard: React.FC = () => {
     try {
       const result = await s.testAction();
       setServices(prev => prev.map(sv =>
-        sv.name === s.name ? { ...sv, ok: result.ok, detail: result.detail || sv.detail, loading: false } : sv
+        sv.name === s.name ? { ...sv, ok: result.ok, neutral: (result as any).neutral || false, detail: result.detail || sv.detail, loading: false } : sv
       ));
       if (result.ok) {
         toast.success(`${s.name}: 测试通过${result.detail ? ` (${result.detail})` : ''}`, { duration: 3000 });
@@ -407,9 +404,11 @@ const HomeDashboard: React.FC = () => {
               className={`rounded-lg border px-2.5 py-2 transition-all duration-300 ${
                 s.loading || testingService === s.name
                   ? 'border-yellow-500/20 bg-yellow-500/5'
-                  : s.ok
-                    ? 'border-green-500/15 bg-green-500/5 hover:bg-green-500/10'
-                    : 'border-red-500/15 bg-red-500/5 hover:bg-red-500/10'
+                  : s.neutral
+                    ? 'border-slate-500/15 bg-slate-500/5 hover:bg-slate-500/10'
+                    : s.ok
+                      ? 'border-green-500/15 bg-green-500/5 hover:bg-green-500/10'
+                      : 'border-red-500/15 bg-red-500/5 hover:bg-red-500/10'
               }`}
             >
               <div className="flex items-center justify-between gap-1">
@@ -489,7 +488,7 @@ const HomeDashboard: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
           <MiniStat icon={<Layers className="h-3.5 w-3.5" />} label="齐套化" value={stats.kitCount} />
           <MiniStat icon={<FileText className="h-3.5 w-3.5" />} label="OCR" value={stats.ocrCount} />
-          <MiniStat icon={<Shield className="h-3.5 w-3.5" />} label="PPE" value={stats.total - stats.kitCount - stats.ocrCount} />
+          <MiniStat icon={<Shield className="h-3.5 w-3.5" />} label="PPE" value={stats.ppeCount} />
           <MiniStat icon={<Activity className="h-3.5 w-3.5" />} label="最近同步" value={stats.timestamp ? new Date(stats.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '--'} />
         </div>
       </div>
