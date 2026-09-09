@@ -6,11 +6,13 @@ import re
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 from .models import (
     FQCRecord,
+    FixtureLoadSession,
     InspectionResult,
     ProductRecipe,
     ProductStage,
@@ -35,17 +37,30 @@ def _find_fqc_product_recipe(process_stage_code: str) -> tuple[ProductRecipe | N
     return None, None
 
 
-def _collect_fixture_inspections(fixture_qr: str, product_recipe: ProductRecipe) -> list[InspectionResult]:
-    """收集同一工装板上、属于该产品配方工序的所有最新检验记录（每工序取最新一条）。"""
+def _collect_fixture_inspections(
+    fixture_qr: str,
+    product_recipe: ProductRecipe,
+    fixture_session: FixtureLoadSession | None = None,
+) -> list[InspectionResult]:
+    """收集同一工装板上、属于该产品配方工序的最新检验记录（每工序取最新一条）。
+
+    A07：当触发记录带有装载会话时，只收集同一会话内的记录；旧件（其它
+    装载轮次）的工序结果不能补齐本次缺检工序。触发记录未携带会话（旧
+    客户端/历史数据）时保持旧行为以兼容。
+    """
     stage_codes = set(
         ProductStage.objects.filter(product_recipe=product_recipe)
         .values_list('stage_recipe__process_stage_code', flat=True)
     )
 
-    records = InspectionResult.objects.filter(
+    queryset = InspectionResult.objects.filter(
         fixture_qr=fixture_qr,
         process_stage_code__in=stage_codes,
-    ).order_by('process_stage_code', '-timestamp')
+    )
+    if fixture_session is not None:
+        queryset = queryset.filter(fixture_session_id=fixture_session.id)
+
+    records = queryset.order_by('process_stage_code', '-timestamp')
 
     # 每个工序只取最新一条
     latest_by_stage: dict[str, InspectionResult] = {}
@@ -465,8 +480,10 @@ def generate_fqc_record(result: InspectionResult) -> FQCRecord | None:
     if not product_recipe or not fqc_link:
         return None
 
-    # 收集该工装板上所有工序的最新检验记录
-    stage_records = _collect_fixture_inspections(fixture_qr, product_recipe)
+    fixture_session = result.fixture_session
+
+    # 收集该工装板上所有工序的最新检验记录（限定当前装载会话，A07）
+    stage_records = _collect_fixture_inspections(fixture_qr, product_recipe, fixture_session)
 
     # 构建摘要
     stage_summary = _build_stage_summary(stage_records, product_recipe)
@@ -509,11 +526,12 @@ def generate_fqc_record(result: InspectionResult) -> FQCRecord | None:
         failed_names = [d['ruleName'] for d in validation_details if not d['passed']]
         result_reason += f'; 规则校验未通过: {", ".join(failed_names)}'
 
-    # 创建或更新FQC记录（同一 fixture_qr + product_recipe 只保留最新一条）
+    # 创建或更新FQC记录（同一 fixture_qr + product_recipe + 装载会话 保留最新一条）
     with transaction.atomic():
         fqc_record, created = FQCRecord.objects.update_or_create(
             fixture_qr=fixture_qr,
             product_recipe=product_recipe,
+            fixture_session=fixture_session,
             defaults={
                 'product_recipe_name': product_recipe.name,
                 'fqc_stage_code': process_stage_code,
@@ -529,6 +547,10 @@ def generate_fqc_record(result: InspectionResult) -> FQCRecord | None:
             },
         )
         fqc_record.related_inspections.set(stage_records)
+
+        # 终检完成即本轮装载结束：关闭会话，保证下一装载从新会话开始（A07）
+        from .product_trace_service import close_fixture_session
+        close_fixture_session(fixture_session)
 
     logger.info('FQC记录%s fixture_qr=%s recipe=%s result=%s',
                 '创建' if created else '更新', fixture_qr, product_recipe.name, overall_result)

@@ -3,12 +3,63 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .models import InspectionResult
+from django.utils import timezone
+
+from .models import FixtureLoadSession, InspectionResult
 
 
 TRACE_PASS = '合格'
 TRACE_RECHECK = '需复检'
 TRACE_PENDING = '存疑'
+
+
+def resolve_fixture_session(
+    fixture_qr: str,
+    incoming_stage_code: str,
+    claim_new_round: bool,
+) -> FixtureLoadSession | None:
+    """为即将保存的检验记录解析当前工装装载会话（A07）。
+
+    规则：
+    - 无打开的会话 → 创建新会话。
+    - 有打开的会话：
+      * 声明了新轮次（fixtureNewRound，例如产品循环进入下一件、强制复位）：
+        仅当会话为空，或会话中已记录过同一工序（说明板子重新进入已完成
+        工序 = 新件）时轮换；否则视为同一件的工序推进，继续沿用当前会话，
+        避免把同一件的上游记录隔离出去。
+    - 未声明新轮次 → 一律沿用打开的会话（跨站点工序推进不拆分轮次）。
+    """
+    fixture_qr = (fixture_qr or '').strip()
+    if not fixture_qr:
+        return None
+
+    active = FixtureLoadSession.objects.filter(
+        fixture_qr=fixture_qr,
+        closed_at__isnull=True,
+    ).order_by('-started_at').first()
+
+    if claim_new_round and active is not None:
+        session_results = InspectionResult.objects.filter(fixture_session=active)
+        session_empty = not session_results.exists()
+        same_stage_recorded = bool((incoming_stage_code or '').strip()) and (
+            session_results.filter(process_stage_code=(incoming_stage_code or '').strip()).exists()
+        )
+        if session_empty or same_stage_recorded:
+            active.closed_at = timezone.now()
+            active.save(update_fields=['closed_at'])
+            active = None
+
+    if active is None:
+        active = FixtureLoadSession.objects.create(fixture_qr=fixture_qr)
+    return active
+
+
+def close_fixture_session(session: FixtureLoadSession | None) -> None:
+    """轮次结束（FQC 完成时调用，保证下一装载从新会话开始）。"""
+    if session is None or session.closed_at is not None:
+        return
+    session.closed_at = timezone.now()
+    session.save(update_fields=['closed_at'])
 
 
 def _is_fixture_tracking_enabled(record: InspectionResult) -> bool:
@@ -90,9 +141,50 @@ def _extract_barcode_candidates(barcode_result: Any) -> list[dict[str, Any]]:
     return candidates
 
 
+def _load_fixture_rules(trace_context: dict[str, Any]) -> tuple[list[str], re.Pattern | None, bool]:
+    """从 trace_context 解析工装码前缀与正则规则。返回 (prefixes, regex, rules_configured)。"""
+    prefixes = trace_context.get('fixtureQrPrefixes') or trace_context.get('fixture_qr_prefixes') or []
+    if isinstance(prefixes, str):
+        prefixes = [item.strip() for item in prefixes.split(',') if item.strip()]
+    prefixes = [str(item).strip().upper() for item in prefixes if str(item).strip()]
+
+    pattern = trace_context.get('fixtureQrPattern') or trace_context.get('fixture_qr_pattern') or ''
+    pattern = str(pattern).strip()
+    regex = None
+    if pattern:
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            regex = None
+
+    return prefixes, regex, bool(prefixes or regex)
+
+
+def _text_matches_rules(text: str, prefixes: list[str], regex: re.Pattern | None) -> bool:
+    upper_text = text.upper()
+    if prefixes and not any(upper_text.startswith(prefix) for prefix in prefixes):
+        return False
+    if regex and not regex.search(text):
+        return False
+    return True
+
+
 def _resolve_fixture_qr_from_candidates(record: InspectionResult) -> tuple[str, bool, str, str, float | None]:
     fixture_qr = (record.fixture_qr or '').strip()
-    if fixture_qr:
+    trace_context = record.trace_context or {}
+    prefixes, regex, rules_configured = _load_fixture_rules(trace_context)
+    candidates = _extract_barcode_candidates(record.barcode_result)
+
+    def _match(candidate: dict[str, Any]) -> bool:
+        text = str(candidate.get('text') or '').strip()
+        if not text:
+            return False
+        return _text_matches_rules(text, prefixes, regex)
+
+    matched_candidates = [candidate for candidate in candidates if _match(candidate)]
+
+    # 手工/扫码/NFC 是操作员显式绑定，直接采用。
+    if fixture_qr and record.fixture_qr_source != 'vision':
         return (
             fixture_qr,
             True,
@@ -101,69 +193,69 @@ def _resolve_fixture_qr_from_candidates(record: InspectionResult) -> tuple[str, 
             record.fixture_qr_confidence,
         )
 
-    trace_context = record.trace_context or {}
-    prefixes = trace_context.get('fixtureQrPrefixes') or trace_context.get('fixture_qr_prefixes') or []
-    if isinstance(prefixes, str):
-        prefixes = [item.strip() for item in prefixes.split(',') if item.strip()]
-    prefixes = [str(item).strip().upper() for item in prefixes if str(item).strip()]
-
-    pattern = trace_context.get('fixtureQrPattern') or trace_context.get('fixture_qr_pattern') or ''
-    pattern = str(pattern).strip()
-    regex = None
-    if pattern:
-        try:
-            regex = re.compile(pattern)
-        except re.error:
-            regex = None
-
-    candidates = _extract_barcode_candidates(record.barcode_result)
-    if not candidates:
-        return '', False, '', 'pending', None
-
-    def _match_candidate(candidate: dict[str, Any]) -> bool:
-        text = str(candidate.get('text') or '').strip()
-        upper_text = text.upper()
-        if prefixes and not any(upper_text.startswith(prefix) for prefix in prefixes):
-            return False
-        if regex and not regex.search(text):
-            return False
-        return True
-
-    matched_candidates = [candidate for candidate in candidates if _match_candidate(candidate)]
-    if prefixes or regex:
+    if fixture_qr:
+        # 视觉来源必须与当前图像候选交叉校验：防止上一件的视觉工装码
+        # 在换板/下一件时被沿用（A06）。当前图像存在唯一规则命中时以
+        # 命中结果为准；旧码与新码冲突说明绑定已过期。
         if len(matched_candidates) == 1:
-            matched = matched_candidates[0]
+            resolved_text = str(matched_candidates[0].get('text') or '').strip()
+            if _normalize_code(resolved_text) == _normalize_code(fixture_qr):
+                return (
+                    fixture_qr,
+                    True,
+                    'vision',
+                    record.fixture_qr_input_status or 'success',
+                    record.fixture_qr_confidence,
+                )
             return (
-                matched['text'],
+                resolved_text,
                 True,
                 'vision',
                 'success',
-                matched.get('confidence'),
+                matched_candidates[0].get('confidence'),
             )
-        if len(matched_candidates) > 1:
+        if rules_configured:
+            # 规则存在但当前图像未能唯一命中：若旧码已不符合规则，说明绑定可疑。
+            if not _text_matches_rules(fixture_qr, prefixes, regex):
+                return '', False, 'vision', 'failed', None
+            # 旧码仍符合规则且图像未读到码：保守沿用，等待下一次识别确认。
+            return (
+                fixture_qr,
+                True,
+                'vision',
+                record.fixture_qr_input_status or 'success',
+                record.fixture_qr_confidence,
+            )
+        # 未配置工装码规则时无法校验绑定，保守沿用非空码。
+        return (
+            fixture_qr,
+            True,
+            'vision',
+            record.fixture_qr_input_status or 'success',
+            record.fixture_qr_confidence,
+        )
+
+    if candidates:
+        if rules_configured:
+            if len(matched_candidates) == 1:
+                matched = matched_candidates[0]
+                return (
+                    matched['text'],
+                    True,
+                    'vision',
+                    'success',
+                    matched.get('confidence'),
+                )
             return '', False, 'vision', 'failed', None
-        return '', False, 'vision', 'failed', None
 
     # 未配置工装码规则时，不自动从整图二维码里盲选工装码。
     # 这样可以避免把业务码或包装码误判成工装码。
-    return '', False, 'vision', 'pending', None
+    return '', False, '', 'pending', None
 
 
 def _collect_fixture_qr_candidates_for_context(record: InspectionResult) -> list[dict[str, Any]]:
     trace_context = record.trace_context or {}
-    prefixes = trace_context.get('fixtureQrPrefixes') or trace_context.get('fixture_qr_prefixes') or []
-    if isinstance(prefixes, str):
-        prefixes = [item.strip() for item in prefixes.split(',') if item.strip()]
-    prefixes = [str(item).strip().upper() for item in prefixes if str(item).strip()]
-
-    pattern = trace_context.get('fixtureQrPattern') or trace_context.get('fixture_qr_pattern') or ''
-    pattern = str(pattern).strip()
-    regex = None
-    if pattern:
-        try:
-            regex = re.compile(pattern)
-        except re.error:
-            regex = None
+    prefixes, regex, _rules_configured = _load_fixture_rules(trace_context)
 
     candidates = _extract_barcode_candidates(record.barcode_result)
     if not candidates:
@@ -171,12 +263,9 @@ def _collect_fixture_qr_candidates_for_context(record: InspectionResult) -> list
 
     def _match_candidate(candidate: dict[str, Any]) -> bool:
         text = str(candidate.get('text') or '').strip()
-        upper_text = text.upper()
-        if prefixes and not any(upper_text.startswith(prefix) for prefix in prefixes):
+        if not text:
             return False
-        if regex and not regex.search(text):
-            return False
-        return True
+        return _text_matches_rules(text, prefixes, regex)
 
     rules_configured = bool(prefixes or regex)
     filtered_candidates = [candidate for candidate in candidates if _match_candidate(candidate)] if rules_configured else candidates

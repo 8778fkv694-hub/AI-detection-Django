@@ -1,0 +1,25 @@
+Found 2 test(s).
+Creating test database for alias 'default'...
+✅ 已将CUSTOM类型更新为WATER_PURIFIER
+[2026-09-09 08:20:50,763] [INFO    ] inspection.ocr_service:19 - PaddleOCR已安装，OCR功能可用
+[2026-09-09 08:20:50,821] [INFO    ] inspection.ocr_service:28 - RapidOCR已安装，Jetson 优化 OCR 功能可用
+[2026-09-09 08:20:50,821] [INFO    ] inspection.ocr_service:80 - 默认使用 RapidOCR 引擎
+[2026-09-09 08:20:50,821] [INFO    ] inspection.ocr_service:88 - OCR服务初始化完成，当前引擎: rapidocr
+[2026-09-09 08:20:50,821] [INFO    ] inspection.ocr_service:212 - 正在加载 RapidOCR 模型...
+[2026-09-09 08:20:50,878] [INFO    ] inspection.wechat_qr_service:54 - 微信二维码模型文件检查完成
+[2026-09-09 08:20:50,878] [INFO    ] inspection.wechat_qr_service:26 - 微信二维码检测服务初始化完成
+[2026-09-09 08:20:50,879] [INFO    ] inspection.barcode_service:50 - 条码检测服务已初始化
+[2026-09-09 08:20:50,943] [INFO    ] inspection.ocr_service:238 - RapidOCR 模型加载成功 (本地模型: False)
+[2026-09-09 08:20:50,943] [INFO    ] inspection.ocr_service:309 - RapidOCR 执行识别: use_cls=False
+[2026-09-09 08:20:50,945] [INFO    ] inspection.stream_service:537 - StreamManager initialized
+[2026-09-09 08:20:50,946] [INFO    ] inspection.stream_hls:336 - HLSStreamManager initialized with output dir: media/hls
+System check identified no issues (0 silenced).
+A06 CONFIRMED: supplied OLD vision fixture overrides fresh candidates and new prefix.
+.[2026-09-09 08:20:51,042] [INFO    ] inspection.fqc_service:533 - FQC记录创建 fixture_qr=REUSED recipe=audit-product result=合格
+A07 CONFIRMED: FQC accepts an earlier piece S1 to complete a reused fixture.
+.
+----------------------------------------------------------------------
+Ran 2 tests in 0.012s
+
+OK
+Destroying test database for alias 'default'...

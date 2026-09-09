@@ -1,0 +1,25 @@
+{
+  "method": "Current-source hook probes; React lifecycle and browser hardware are not simulated",
+  "observations": [
+    {
+      "id": "A04",
+      "observed": "Two identical successive pieces produce only one save."
+    },
+    {
+      "id": "A05",
+      "observed": "Save rejection still schedules automatic return to idle."
+    },
+    {
+      "id": "A03",
+      "observed": "Delayed AI completion writes a qualified result after reset."
+    },
+    {
+      "id": "A01",
+      "observed": "Save payload omits nonGridTargets and targetConfidences while local snapshot accepts both."
+    },
+    {
+      "id": "A10",
+      "observed": "Saved OCR payload discards ai_analysis and batch_processing evidence."
+    }
+  ]
+}

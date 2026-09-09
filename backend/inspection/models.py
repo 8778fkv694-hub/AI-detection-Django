@@ -417,6 +417,15 @@ class InspectionResult(models.Model):
     business_code = models.CharField(max_length=255, blank=True, default='', help_text='当前工序业务编码')
     business_code_type = models.CharField(max_length=100, blank=True, default='', help_text='业务编码类型')
 
+    fixture_session = models.ForeignKey(
+        'FixtureLoadSession',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='inspection_results',
+        help_text='工装装载会话（同一装载轮次共享，FQC只汇总本轮记录）',
+    )
+
     trace_conclusion = models.CharField(max_length=20, blank=True, default='', help_text='追踪结论')
     trace_conclusion_reason = models.TextField(blank=True, default='', help_text='追踪结论说明')
     fixture_rule_passed = models.BooleanField(null=True, blank=True, help_text='工装规则是否通过')
@@ -432,6 +441,7 @@ class InspectionResult(models.Model):
         indexes = [
             models.Index(fields=['fixture_qr']),
             models.Index(fields=['fixture_qr', 'process_stage_code']),
+            models.Index(fields=['fixture_session', 'process_stage_code']),
         ]
 
     def __str__(self):
@@ -794,6 +804,30 @@ class ProductStage(models.Model):
         return f"{self.product_recipe.name} - {self.stage_recipe.name} ({self.order})"
 
 
+class FixtureLoadSession(models.Model):
+    """工装装载会话：标识一次“装载轮次”（板子从上线到终检/复位的一个生命周期）。
+
+    同一工装板可能被不同产品反复装载；每次新装载由前端（产品循环进入下一件、
+    强制复位等）声明 fixtureNewRound，后端据此轮换会话。FQC 终检只汇总
+    本轮会话内的工序记录，防止旧件结果补齐新件缺检工序。
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    fixture_qr = models.CharField(max_length=255, help_text='工装板二维码')
+    started_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True, help_text='轮次结束时间（FQC完成或被新轮次替换）')
+
+    class Meta:
+        ordering = ['-started_at']
+        verbose_name = '工装装载会话'
+        verbose_name_plural = '工装装载会话'
+        indexes = [
+            models.Index(fields=['fixture_qr', 'closed_at']),
+        ]
+
+    def __str__(self):
+        return f'Session {self.fixture_qr} @ {self.started_at:%Y-%m-%d %H:%M}'
+
+
 class FQCRecord(models.Model):
     """FQC终检记录 — 汇总同一工装板上所有工序的检验结果"""
     FQC_RESULT_CHOICES = [
@@ -804,6 +838,14 @@ class FQCRecord(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     fixture_qr = models.CharField(max_length=255, help_text='工装板二维码')
+    fixture_session = models.ForeignKey(
+        FixtureLoadSession,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='fqc_records',
+        help_text='装载会话（每轮独立终检记录，A07）',
+    )
     product_recipe = models.ForeignKey(ProductRecipe, null=True, blank=True, on_delete=models.SET_NULL, related_name='fqc_records')
     product_recipe_name = models.CharField(max_length=255, blank=True, default='', help_text='产品配方名称快照')
 

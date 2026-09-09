@@ -1,0 +1,68 @@
+[2026-09-09 08:39:22,965] [INFO    ] inspection.wechat_qr_service:54 - 微信二维码模型文件检查完成
+[2026-09-09 08:39:22,966] [INFO    ] inspection.wechat_qr_service:26 - 微信二维码检测服务初始化完成
+[2026-09-09 08:39:22,966] [INFO    ] inspection.barcode_service:50 - 条码检测服务已初始化
+[2026-09-09 08:39:29,047] [INFO    ] inspection.ocr_service:19 - PaddleOCR已安装，OCR功能可用
+[2026-09-09 08:39:29,107] [INFO    ] inspection.ocr_service:28 - RapidOCR已安装，Jetson 优化 OCR 功能可用
+[2026-09-09 08:39:29,107] [INFO    ] inspection.ocr_service:80 - 默认使用 RapidOCR 引擎
+[2026-09-09 08:39:29,107] [INFO    ] inspection.ocr_service:88 - OCR服务初始化完成，当前引擎: rapidocr
+[2026-09-09 08:39:29,115] [INFO    ] inspection.stream_service:537 - StreamManager initialized
+Found 38 test(s).
+Creating test database for alias 'default'...
+✅ 已将CUSTOM类型更新为WATER_PURIFIER
+[2026-09-09 08:39:29,707] [INFO    ] inspection.stream_hls:336 - HLSStreamManager initialized with output dir: media/hls
+System check identified no issues (0 silenced).
+.[2026-09-09 08:39:29,811] [INFO    ] inspection.barcode_service:50 - 条码检测服务已初始化
+.[2026-09-09 08:39:29,825] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=4, cpu_count=8
+[2026-09-09 08:39:29,826] [INFO    ] inspection.batch_detection_service:511 - [barcode_label] 一维条码解码失败，OCR数字兜底匹配: 5901234123457
+.[2026-09-09 08:39:29,826] [INFO    ] inspection.barcode_service:50 - 条码检测服务已初始化
+.[2026-09-09 08:39:29,828] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=4, cpu_count=8
+.[2026-09-09 08:39:29,828] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=4, cpu_count=8
+.[2026-09-09 08:39:29,828] [INFO    ] inspection.roi_cache:42 - ROI缓存管理器已初始化: max_size=200, ttl=300s
+[2026-09-09 08:39:29,828] [INFO    ] inspection.roi_cache:157 - 缓存已清空: 删除了0个ROI
+[2026-09-09 08:39:29,836] [INFO    ] inspection.batch_detection_views:85 - 批处理请求: 1个ROI, apply_rules=False, keyword_configs=0, barcode_configs=0
+[2026-09-09 08:39:29,836] [INFO    ] inspection.roi_cache:132 - 批量获取ROI: 请求1个, 成功1个
+[2026-09-09 08:39:29,836] [WARNING ] inspection.batch_detection_views:117 - 批处理ROI不完整: 请求1个, 找到1个, 缺少目标=['target-b']
+[2026-09-09 08:39:29,837] [WARNING ] django.request:246 - Conflict: /api/ocr/batch-detection/
+[2026-09-09 08:39:29,837] [INFO    ] inspection.roi_cache:157 - 缓存已清空: 删除了1个ROI
+.[2026-09-09 08:39:29,847] [WARNING ] django.request:246 - Bad Request: /api/product-recipes/aee54ae5-6ddb-4541-83ca-cce4fc6839dc/assign-stages/
+.[2026-09-09 08:39:29,857] [INFO    ] inspection.fqc_service:533 - FQC记录创建 fixture_qr=FIXTURE-FQC recipe=product-one result=存疑
+..[2026-09-09 08:39:29,987] [WARNING ] django.request:246 - Bad Request: /api/ai/analyze
+......[2026-09-09 08:39:30,060] [WARNING ] django.request:246 - Bad Request: /api/ollama/chat/
+...[2026-09-09 08:39:30,073] [WARNING ] django.request:246 - Bad Request: /api/ollama/status/
+.....[2026-09-09 08:39:30,101] [INFO    ] inspection.yolo:94 - 🖥️  YOLO推理设备: mps
+.[2026-09-09 08:39:30,170] [INFO    ] inspection.ocr_service:80 - 默认使用 RapidOCR 引擎
+[2026-09-09 08:39:30,170] [INFO    ] inspection.ocr_service:88 - OCR服务初始化完成，当前引擎: rapidocr
+[2026-09-09 08:39:30,170] [INFO    ] inspection.ocr_service:309 - RapidOCR 执行识别: use_cls=False
+[2026-09-09 08:39:30,170] [INFO    ] inspection.ocr_service:309 - RapidOCR 执行识别: use_cls=False
+.[2026-09-09 08:39:30,236] [INFO    ] inspection.roi_cache:42 - ROI缓存管理器已初始化: max_size=200, ttl=300s
+..[2026-09-09 08:39:30,237] [WARNING ] inspection.middleware:53 - 数据库连接重建 (最近60秒重连次数: 1)
+.[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+.[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+.[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:75 - 开始批处理: 1个ROI, 并发数=1
+[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:76 - 批处理条码配置: enable_barcode=False, barcode_configs=None
+[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:139 - 正在处理ROI [1/1]: serial_label
+[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:252 - [serial_label] 条码检测触发判断: enable_barcode=False, has_barcode_config=False, target_in_configs=True, should_run_barcode=True
+[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:105 - 批处理完成: 1个ROI, 耗时0.000s, 状态=不合格
+.[2026-09-09 08:39:30,238] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+.[2026-09-09 08:39:30,238] [INFO    ] inspection.roi_cache:42 - ROI缓存管理器已初始化: max_size=1, ttl=300s
+[2026-09-09 08:39:30,239] [WARNING ] inspection.roi_cache:258 - 缓存容量超限，已删除1个最旧的ROI
+.[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:75 - 开始批处理: 1个ROI, 并发数=1
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:76 - 批处理条码配置: enable_barcode=False, barcode_configs=None
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:139 - 正在处理ROI [1/1]: serial_label
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:252 - [serial_label] 条码检测触发判断: enable_barcode=False, has_barcode_config=False, target_in_configs=False, should_run_barcode=True
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:105 - 批处理完成: 1个ROI, 耗时0.000s, 状态=合格
+.[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:40 - 批处理服务已初始化: max_workers=1, cpu_count=8
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:75 - 开始批处理: 1个ROI, 并发数=1
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:76 - 批处理条码配置: enable_barcode=False, barcode_configs=None
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:139 - 正在处理ROI [1/1]: serial_label
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:252 - [serial_label] 条码检测触发判断: enable_barcode=False, has_barcode_config=False, target_in_configs=False, should_run_barcode=True
+[2026-09-09 08:39:30,239] [INFO    ] inspection.batch_detection_service:105 - 批处理完成: 1个ROI, 耗时0.000s, 状态=合格
+..[2026-09-09 08:39:30,445] [ERROR   ] inspection.stream_service:105 - Timed out after 0.1s while starting stream missing
+.
+----------------------------------------------------------------------
+Ran 38 tests in 0.664s
+
+OK
+Destroying test database for alias 'default'...

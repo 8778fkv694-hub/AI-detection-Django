@@ -24,7 +24,7 @@ interface UseBatchProcessingManagerProps {
     barcodeConfigs: BarcodeConfig[];
     nonGridTargets?: string[];
     ocrModel?: string;
-    onBatchComplete?: (result: BatchProcessingResult) => void;
+    onBatchComplete?: (result: BatchProcessingResult, runId?: number) => void;
 }
 
 export function useBatchProcessingManager({
@@ -55,6 +55,9 @@ export function useBatchProcessingManager({
 
     // 防止重复触发
     const isProcessingRef = useRef(false);
+
+    // 每次触发的运行身份（A03/A04）：结果回调据此作废旧轮次并做保存幂等
+    const batchRunCounterRef = useRef(0);
 
     // 本窗口的 ROI 缓存归属标识（每个页面实例一份，随模块实例常驻内存，不落盘）。
     // 供后端按 owner_id 精确清理，避免一个窗口清缓存时误删其他窗口尚未消费的 ROI。
@@ -244,6 +247,8 @@ export function useBatchProcessingManager({
         // 设置标志，防止重复触发
         setBatchTriggered(true);
         isProcessingRef.current = true;
+        // 本轮运行的唯一身份
+        const runId = ++batchRunCounterRef.current;
 
         try {
             // 构建目标配置
@@ -270,9 +275,9 @@ export function useBatchProcessingManager({
             if (batchResult) {
                 console.log('✅ 批处理完成:', batchResult);
 
-                // 调用回调
+                // 调用回调（携带运行身份）
                 if (onBatchComplete) {
-                    await onBatchComplete(batchResult);
+                    await onBatchComplete(batchResult, runId);
                 }
                 return true;
             }

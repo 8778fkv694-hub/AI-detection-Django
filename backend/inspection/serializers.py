@@ -369,6 +369,20 @@ class InspectionResultSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         _inject_target_values_snapshot(validated_data)
+        # A07：为带工装码的记录解析当前装载会话（决定FQC汇总边界）
+        try:
+            from .product_trace_service import resolve_fixture_session
+            fixture_session = resolve_fixture_session(
+                str(validated_data.get('fixture_qr') or ''),
+                str(validated_data.get('process_stage_code') or ''),
+                bool((validated_data.get('trace_context') or {}).get('fixtureNewRound')),
+            )
+            if fixture_session is not None:
+                validated_data['fixture_session'] = fixture_session
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('解析工装装载会话失败')
+            fixture_session = None
         defects_data = validated_data.pop('defects', [])
         std_id = validated_data.pop('standard_id', None)
         standard = None

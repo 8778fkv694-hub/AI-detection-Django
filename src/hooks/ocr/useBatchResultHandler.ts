@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useRef } from 'react';
+import toast from 'react-hot-toast';
 import type { BatchProcessingResult } from '@/hooks/ocr/useBatchProcessing';
 import type { TestResult } from '@/types/ocr';
 import { buildBarcodeAnalysis } from '@/lib/ocr/barcodeRuleEvaluator';
@@ -41,11 +42,17 @@ export interface UseBatchResultHandlerOptions {
   setDetectedElements: (value: string[]) => void;
   setElementDetectionStartTime: (value: number | null) => void;
 
-  // 保存函数
-  saveDetectionResult: (ocrResult: any, aiResult: any, matchStatus: string, imageBase64: string) => Promise<void>;
+  // 保存函数（返回 {saved, savedData} 供最终结论闭环使用）
+  saveDetectionResult: (ocrResult: any, aiResult: any, matchStatus: string, imageBase64: string) => Promise<any>;
 
   // 捕获帧数据
   captureFrameData: () => { dataUrl: string; base64: string } | null;
+
+  // 进入下一件前的清理（A06：清除视觉工装绑定与追踪预览）
+  onNextPiece?: () => void;
+
+  // 融合AI本地状态复位（A03：复位后丢弃迟到的AI结果）
+  resetFusionState?: () => void;
 }
 
 const normalizeBarcodeFormat = (value: any) => {
@@ -130,15 +137,31 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     setMatchStatus, setIsWaitingForSpace, setWorkflowResult, setAiAnalysisResult,
     setDetectedElements, setElementDetectionStartTime,
     saveDetectionResult, captureFrameData,
+    onNextPiece, resetFusionState,
   } = options;
 
+  // A03：每轮检测运行具有唯一身份；activeRunIdRef 只指向当前有效轮次，
+  // 复位/换图/换模板时置空，使所有在途 await 结果被判定为过期而丢弃。
   const batchRunIdRef = useRef(0);
+  const activeRunIdRef = useRef<number | null>(null);
+  // A04：按“运行身份”记录已保存轮次（运行ID幂等），不再用识别文本内容去重
   const batchResultSavedRef = useRef<string | null>(null);
+  const autoNextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutoNextTimer = useCallback(() => {
+    if (autoNextTimerRef.current !== null) {
+      clearTimeout(autoNextTimerRef.current);
+      autoNextTimerRef.current = null;
+    }
+  }, []);
 
   // 批处理完成回调
-  const onBatchComplete = useCallback(async (result: BatchProcessingResult) => {
+  const onBatchComplete = useCallback(async (result: BatchProcessingResult, runId?: number) => {
     console.log('✅ 批处理完成，更新UI:', result);
-    batchRunIdRef.current += 1;
+    // A03：以本轮唯一 runId 作为有效运行检查；await 之后、UI 写入/保存前校验
+    const currentRunId = Number.isFinite(runId as number) ? (runId as number) : ++batchRunIdRef.current;
+    batchRunIdRef.current = currentRunId;
+    activeRunIdRef.current = currentRunId;
 
     const allDetectedBarcodeTexts = (result.details || []).flatMap((detail: any) =>
       (detail.barcodes || []).map((item: any) => typeof item === 'string' ? item : (item.data || ''))
@@ -377,17 +400,26 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
       // 用拼接图或捕获帧给 LLM 分析
       try {
         aiResult = await performFusionAIAnalysis(imageForLLM);
-        if (aiResult) {
-          console.log('✅ 融合模式LLM分析完成:', aiResult.overallQuality);
-          setAiAnalysisResult(aiResult);
-          const llmQualified = aiResult.overallQuality === '合格';
-          finalIsQualified = isQualified && llmQualified;
-        } else {
-          console.warn('⚠️ LLM分析未返回结果，按需复检处理');
-          finalIsQualified = false;
-        }
       } catch (error) {
         console.error('❌ 融合模式LLM分析失败:', error);
+        aiResult = null;
+      }
+
+      // A03：轮次已被复位/取代时，迟到的AI结果不得写回新轮UI，也不得保存
+      if (activeRunIdRef.current !== currentRunId) {
+        resetFusionState?.();
+        setAiAnalysisResult(null);
+        console.warn('⏹️ 检测轮次已复位，丢弃迟到的AI分析结果');
+        return;
+      }
+
+      if (aiResult) {
+        console.log('✅ 融合模式LLM分析完成:', aiResult.overallQuality);
+        setAiAnalysisResult(aiResult);
+        const llmQualified = aiResult.overallQuality === '合格';
+        finalIsQualified = isQualified && llmQualified;
+      } else {
+        console.warn('⚠️ LLM分析未返回结果，按需复检处理');
         finalIsQualified = false;
       }
     }
@@ -396,30 +428,68 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     setMatchStatus(finalIsQualified ? 'qualified' : 'unqualified');
 
     // OCR 和 LLM 结论确定后只保存一次，避免先写入纯 OCR 再被融合结果覆盖。
+    // A04：以本轮 runId 幂等保存；A05：保存失败不得自动放行；A11：以后端最终结论为准。
+    let saveOutcome: any = null;
+    let saveFailed = false;
     try {
-      const resultId = `${result.ocr_text || ''}_${(result.details || []).map(item => item.label).join('|')}`;
-      if (batchResultSavedRef.current !== resultId) {
+      const dedupKey = `run:${currentRunId}`;
+      if (batchResultSavedRef.current !== dedupKey) {
         const imageBase64 = imageForLLM.includes(',') ? imageForLLM.split(',', 2)[1] : imageForLLM;
-        await saveDetectionResult(
+        saveOutcome = await saveDetectionResult(
           ocrResultData,
           aiResult || null,
           finalIsQualified ? 'qualified' : 'unqualified',
           imageBase64,
         );
-        batchResultSavedRef.current = resultId;
+        batchResultSavedRef.current = dedupKey;
         console.log('✅ 批处理融合结果已保存');
       }
     } catch (error) {
       console.error('❌ 保存批处理融合结果失败:', error);
+      saveFailed = true;
+    }
+
+    // A03：等待保存期间轮次被复位 → 已提交记录归属旧轮次，不得驱动UI/继续逻辑
+    if (activeRunIdRef.current !== currentRunId) {
+      console.warn('⏹️ 检测轮次已复位，丢弃保存回调');
+      return;
+    }
+
+    const savedData = saveOutcome?.savedData ?? null;
+    const savedOk = !saveFailed && (!saveOutcome || saveOutcome.saved !== false);
+
+    // A11：后端追踪/终检结论为权威结论；保存失败或后端复核非合格时不得当作最终合格
+    const backendTraceConclusion = String(savedData?.trace_conclusion || '');
+    const backendOverallQuality = String(
+      savedData?.fqc_overall_result || savedData?.overall_quality || ''
+    );
+    const backendRejected = (!!backendOverallQuality && backendOverallQuality !== '合格')
+      || (!backendOverallQuality && !!backendTraceConclusion && backendTraceConclusion !== '合格');
+    if (backendRejected) {
+      setFinalResult('unqualified');
+      setMatchStatus('unqualified');
+      toast.error(`后端复核结论：${backendOverallQuality || backendTraceConclusion}，请人工确认`, { duration: 6000 });
+    }
+
+    // A05：保存失败时不自动进入下一轮，保留证据等待人工处理
+    if (!savedOk) {
+      toast.error('保存失败：检测结果未入库，请检查网络后重试', { duration: 6000 });
+      setIsWaitingForSpace(true);
+      return;
     }
 
     // 检查是否需要确认
-    const shouldWaitForConfirmation = !finalIsQualified || requireQualifiedConfirmation;
+    const canAutoContinue = finalIsQualified && !backendRejected;
+    const shouldWaitForConfirmation = !canAutoContinue || requireQualifiedConfirmation;
     if (shouldWaitForConfirmation) {
       console.log('⏳等待用户确认结果...');
       setIsWaitingForSpace(true);
     } else {
-      setTimeout(() => {
+      // 注册延时器并在回调中校验运行身份：复位后旧计时器不得把新流程设回 idle
+      clearAutoNextTimer();
+      autoNextTimerRef.current = setTimeout(() => {
+        autoNextTimerRef.current = null;
+        if (activeRunIdRef.current !== currentRunId) return;
         setIsWaitingForSpace(false);
         setDetectedElements([]);
         setElementDetectionStartTime(null);
@@ -429,6 +499,8 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
         setAiAnalysisResult(null);
         setFinalResult('none');
         if (batchManager) batchManager.reset();
+        // A06：进入下一件前清除视觉工装绑定与追踪预览
+        onNextPiece?.();
       }, 2000);
     }
   }, [
@@ -438,12 +510,15 @@ export const useBatchResultHandler = (options: UseBatchResultHandlerOptions) => 
     setIsWaitingForSpace, setWorkflowResult, setAiAnalysisResult,
     setDetectedElements, setElementDetectionStartTime, barcodeConfigs,
     captureFrameData, batchManager, fusionModeEnabled, performFusionAIAnalysis, saveDetectionResult,
+    onNextPiece, resetFusionState, clearAutoNextTimer,
   ]);
 
-  // 重置批处理保存状态
+  // 重置批处理保存状态（A03：同时作废在途轮次与未登记的自动继续计时器）
   const resetBatchSaveState = useCallback(() => {
+    activeRunIdRef.current = null;
     batchResultSavedRef.current = null;
-  }, []);
+    clearAutoNextTimer();
+  }, [clearAutoNextTimer]);
 
   return {
     onBatchComplete,

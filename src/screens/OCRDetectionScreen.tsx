@@ -223,6 +223,12 @@ const OCRDetectionScreen: React.FC = () => {
 
   const [fixtureQrInput, setFixtureQrInput] = useState(fixtureQr);
   const [fixtureQrInputSource, setFixtureQrInputSource] = useState<'vision' | 'scanner' | 'nfc' | 'manual'>(fixtureQrSource || 'vision');
+  // A07：工装装载会话标识（同一装载轮次共享；绑定清除后重新识别即开启新轮次）
+  const [fixtureSessionId, setFixtureSessionId] = useState<string>(() =>
+    fixtureQr ? `fxs_${Date.now()}_${Math.random().toString(36).slice(2, 10)}` : ''
+  );
+  // A07：产品循环进入下一件/强制复位时声明“新装载轮次”，由后端轮换会话
+  const [fixtureNewRoundPending, setFixtureNewRoundPending] = useState(true);
   // 保存后端返回的增量 trace_context 字段（如 candidateCount / fallbackRecommended）
   const [lastSavedTraceContext, setLastSavedTraceContext] = useState<Record<string, any> | null>(null);
   const [lastSavedTracePreview, setLastSavedTracePreview] = useState<{
@@ -276,6 +282,11 @@ const OCRDetectionScreen: React.FC = () => {
   // 用于在 handleSaveComplete 内读取最新 fixtureQrInput，避免闭包捕获过期值
   const fixtureQrInputRef = useRef(fixtureQrInput);
   useEffect(() => { fixtureQrInputRef.current = fixtureQrInput; }, [fixtureQrInput]);
+  // 用于在回调/计时器内读取最新工装输入来源（A06）
+  const fixtureQrInputSourceRef = useRef(fixtureQrInputSource);
+  useEffect(() => { fixtureQrInputSourceRef.current = fixtureQrInputSource; }, [fixtureQrInputSource]);
+  // A03：检测轮次身份，复位/确认/下一件时递增，使旧延时器失效
+  const inspectionRoundRef = useRef(0);
 
   // 6. 核心功能 Hooks
   const {
@@ -286,7 +297,7 @@ const OCRDetectionScreen: React.FC = () => {
   } = useImagePreprocessing();
 
   const {
-    aiAnalysisResult, isAnalyzing, setAiAnalysisResult, setIsAnalyzing, performFusionAIAnalysis,
+    aiAnalysisResult, isAnalyzing, setAiAnalysisResult, setIsAnalyzing, performFusionAIAnalysis, resetFusionAIState,
   } = useFusionAI({
     fusionModeEnabled,
     selectedStandardId: selectedStandardId || null,
@@ -315,6 +326,8 @@ const OCRDetectionScreen: React.FC = () => {
     fixtureQrInputStatus: (fixtureQrInput
       ? 'success'
       : (fixtureQrInputSource === 'vision' ? 'pending' : 'failed')) as 'success' | 'pending' | 'failed',
+    fixtureSessionId:   fixtureSessionId,
+    fixtureNewRound:    fixtureNewRoundPending && !!fixtureSessionId,
     businessCode:       businessCodeParam,
     businessCodeType:   businessCodeTypeParam,
     fixtureQrPrefixes:  effectiveFixturePrefixes,
@@ -323,9 +336,17 @@ const OCRDetectionScreen: React.FC = () => {
     effectiveStageCode, effectiveStageName, effectivePageId, effectiveCameraId,
     stageBindingConfig.fixtureEnabled,
     fixtureQrInput, fixtureQrInputSource,
+    fixtureSessionId, fixtureNewRoundPending,
     businessCodeParam, businessCodeTypeParam,
     effectiveFixturePrefixes, effectiveFixturePattern,
   ]);
+
+  // 工装绑定出现时开启新的装载会话（A07：绑定清除→重新识别 = 新一轮）
+  useEffect(() => {
+    if (fixtureQrInput && !fixtureSessionId) {
+      setFixtureSessionId(`fxs_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
+    }
+  }, [fixtureQrInput, fixtureSessionId]);
 
   // 报警灯控制
   const { sendAlarmSignal } = useAlarmControl({
@@ -342,6 +363,8 @@ const OCRDetectionScreen: React.FC = () => {
       traceRuleSummary: savedData?.trace_rule_summary,
       relatedStages: Array.isArray(savedData?.related_stages) ? savedData.related_stages : [],
     });
+    // 新装载轮次声明已被本次保存消费（A07）
+    setFixtureNewRoundPending(false);
     if (effectiveStageCode) {
       fetchAlerts(effectiveStageCode);
     }
@@ -373,7 +396,23 @@ const OCRDetectionScreen: React.FC = () => {
     } else if (quality === '存疑' || quality === '需复检' || quality === '不合格') {
       sendAlarmSignal('unqualified');
     }
-  }, [effectiveStageCode, fetchAlerts, setFixtureQrInput, setFixtureQrInputSource, sendAlarmSignal]);
+  }, [effectiveStageCode, fetchAlerts, setFixtureQrInput, setFixtureQrInputSource, sendAlarmSignal, setFixtureNewRoundPending]);
+
+  // A06：清除视觉自动识别的工装绑定与上一件追踪预览（下一件/复位时调用）
+  const clearFixtureVisionBinding = useCallback(() => {
+    if (fixtureQrInputSourceRef.current === 'vision') {
+      setFixtureQrInput('');
+    }
+    setLastSavedTraceContext(null);
+    setLastSavedTracePreview(null);
+  }, [setFixtureQrInput]);
+
+  // A06/A07：进入下一件（自动继续/确认继续）前的清理与新轮次声明
+  const prepareNextPiece = useCallback(() => {
+    inspectionRoundRef.current += 1;
+    setFixtureNewRoundPending(true);
+    clearFixtureVisionBinding();
+  }, [clearFixtureVisionBinding]);
 
   const fixtureQrCandidates = useMemo(() => {
     const candidates = lastSavedTraceContext?.fixtureQrCandidates;
@@ -720,6 +759,8 @@ const OCRDetectionScreen: React.FC = () => {
     setElementDetectionStartTime,
     saveDetectionResult,
     captureFrameData,
+    onNextPiece: prepareNextPiece,
+    resetFusionState: resetFusionAIState,
   });
 
   const batchManager = useBatchProcessingManager({
@@ -747,6 +788,11 @@ const OCRDetectionScreen: React.FC = () => {
   });
 
   const handleConfirmUnqualified = useCallback(() => {
+    // A03：确认继续 = 本件结束；新轮次身份使旧延时器失效
+    inspectionRoundRef.current += 1;
+    // A06/A07：确认继续 = 下一件，清除视觉绑定并声明新装载轮次
+    setFixtureNewRoundPending(true);
+    clearFixtureVisionBinding();
     setIsWaitingForSpace(false);
     setDetectedElements([]);
     detectedElementsRef.current = [];
@@ -757,7 +803,10 @@ const OCRDetectionScreen: React.FC = () => {
     setWorkflowState('completed');
     // 关闭报警灯
     sendAlarmSignal('idle');
+    const scheduledRound = inspectionRoundRef.current;
     setTimeout(() => {
+      // A03：若确认后已开始新一轮（复位/触发），旧清理不得把新流程设回 idle
+      if (inspectionRoundRef.current !== scheduledRound) return;
       setWorkflowState('idle');
       setMatchStatus('none');
       setWorkflowResult(null);
@@ -765,8 +814,10 @@ const OCRDetectionScreen: React.FC = () => {
     }, 1000);
   }, [
     batchManager,
+    clearFixtureVisionBinding,
     detectedElementsRef,
     elementDetectionStartTimeRef,
+    inspectionRoundRef,
     sendAlarmSignal,
     setAiAnalysisResult,
     setDetectedElements,
@@ -899,10 +950,15 @@ const OCRDetectionScreen: React.FC = () => {
   ]);
 
   const handleForceReset = useCallback(() => {
+    // A03：新轮次身份，使旧延时器与在途回调全部失效
+    inspectionRoundRef.current += 1;
     batchManager.reset();
     clearOldDetectionHistory();
     resetDetectionState();
     resetBatchSaveState();
+    // A07：强制复位 = 结束本件，声明新装载轮次并清除视觉工装绑定
+    setFixtureNewRoundPending(true);
+    clearFixtureVisionBinding();
     setIsProcessing(false);
     setOcrResult(null);
     setTestHistory([]);
@@ -931,6 +987,7 @@ const OCRDetectionScreen: React.FC = () => {
     toast.success('已强制重置检测状态');
   }, [
     batchManager,
+    clearFixtureVisionBinding,
     clearOldDetectionHistory,
     resetDetectionState,
     resetBatchSaveState,

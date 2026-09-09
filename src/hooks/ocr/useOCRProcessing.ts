@@ -49,7 +49,7 @@ export interface OCRProcessingOptions {
     retrySummary?: any;
   }>;
   performFusionAIAnalysis: (imageBase64: string) => Promise<InspectionResult | null>;
-  saveDetectionResult: (result: TestResult, aiResult: InspectionResult | null, matchStatus: string, imageBase64: string) => Promise<void>;
+  saveDetectionResult: (result: TestResult, aiResult: InspectionResult | null, matchStatus: string, imageBase64: string) => Promise<unknown>;
 
   // 状态更新函数
   setOcrResult: (result: TestResult | null) => void;

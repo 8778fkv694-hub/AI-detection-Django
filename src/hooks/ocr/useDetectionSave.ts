@@ -39,13 +39,19 @@ export interface DetectionSaveOptions {
   };
 }
 
+export interface DetectionSaveOutcome {
+  saved: boolean;
+  savedData?: any;
+  reason?: string;
+}
+
 export interface UseDetectionSaveReturn {
   saveDetectionResult: (
     ocrResult: any,
     aiResult: InspectionResult | null,
     matchStatus: string,
     imageBase64?: string
-  ) => Promise<void>;
+  ) => Promise<DetectionSaveOutcome>;
 }
 
 export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSaveReturn => {
@@ -66,7 +72,7 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
     aiResult: InspectionResult | null,
     matchStatus: string,
     imageBase64?: string
-  ) => {
+  ): Promise<DetectionSaveOutcome> => {
     const newResult = {
       id: Date.now().toString(),
       timestamp: new Date(),
@@ -75,6 +81,21 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
       matchStatus,
       imageBase64
     };
+
+    // 一维码OCR数字兜底通过时，在记录的可读原因里留下标注：
+    // 判定仍显示合格，但记录能看出该条不是条码直读，便于事后复核打印质量。
+    const ocrFallbackResults = (ocrResult?.barcode_analysis?.results || []).filter(
+      (r: any) => r?.matched && r?.source === 'ocr_fallback'
+    );
+    const ocrFallbackNote = ocrFallbackResults.length > 0
+      ? `\n⚠️ 一维码OCR数字兜底通过（条码未直读）: ${
+          ocrFallbackResults
+            .map((r: any) => r.detectedText || r.qrCodeData || '')
+            .filter(Boolean)
+            .join('、') || '开放检测'
+        }`
+      : '';
+    const ocrFallbackKeyword = ocrFallbackResults.length > 0 ? ',OCR兜底' : '';
 
     // 保存到检测结果页面
     try {
@@ -110,8 +131,8 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
           standardId: selectedStandardId || null,
           overallQuality: finalQuality as '合格' | '存疑' | '需复检',
           score: finalScore,
-          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '需复检'}\nLLM分析: ${fusionAiResult.overallQuality}\n${fusionAiResult.reason}`,
-          reasonKeywords: `OCR:${matchStatus === 'qualified' ? '合格' : '需复检'},LLM:${fusionAiResult.overallQuality}`,
+          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '需复检'}\nLLM分析: ${fusionAiResult.overallQuality}\n${fusionAiResult.reason}${ocrFallbackNote}`,
+          reasonKeywords: `OCR:${matchStatus === 'qualified' ? '合格' : '需复检'},LLM:${fusionAiResult.overallQuality}${ocrFallbackKeyword}`,
           defects: fusionAiResult.defects || [],
           detectionType: 'ocr_fusion_inspection' as const,
           // 保存OCR详细结果
@@ -179,6 +200,8 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
         addDetectionHistory(newHistoryRecord);
         await refreshHistory?.();
 
+        return { saved: true, savedData };
+
       } else if (ocrResult && ocrResult.success) {
         // 单独OCR模式
         console.log('🔧 单独OCR模式保存检测结果，标准字段设置为空');
@@ -190,8 +213,8 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
           standardId: null,
           overallQuality: (matchStatus === 'qualified' ? '合格' : matchStatus === 'unqualified' ? '存疑' : '需复检') as '合格' | '存疑' | '需复检',
           score: matchStatus === 'qualified' ? 95 : matchStatus === 'unqualified' ? 30 : 60,
-          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '存疑'}`,
-          reasonKeywords: 'OCR检测',
+          reason: `OCR检测: ${matchStatus === 'qualified' ? '合格' : '存疑'}${ocrFallbackNote}`,
+          reasonKeywords: `OCR检测${ocrFallbackKeyword}`,
           defects: [],
           detectionType: 'ocr_inspection' as const,
           ocrResult: {
@@ -248,7 +271,74 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
         clearOldDetectionHistory();
         addDetectionHistory(newHistoryRecord);
         await refreshHistory?.();
+
+        return { saved: true, savedData };
+
+      } else if (ocrResult) {
+        // A05：非融合模式下 OCR 失败也必须留下失败记录（有证据、可追溯），
+        // 不能“调用方视为保存完成”却没有任何记录。
+        console.log('🔧 单独OCR模式：OCR失败，保存需复检记录');
+
+        const failureQuality = '需复检' as const;
+        const inspectionResult = {
+          id: newResult.id,
+          timestamp: new Date().toISOString(),
+          image: imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : 'data:image/jpeg;base64,',
+          standardId: null,
+          overallQuality: failureQuality,
+          score: 0,
+          reason: `OCR检测失败: ${ocrResult.error || '未返回有效识别结果'}${ocrFallbackNote}`,
+          reasonKeywords: `OCR检测失败${ocrFallbackKeyword}`,
+          defects: [],
+          detectionType: 'ocr_inspection' as const,
+          ocrResult: {
+            success: false,
+            full_text: ocrResult.full_text || '',
+            detailed_results: ocrResult.detailed_results || [],
+            text_count: ocrResult.text_count || 0,
+            matchStatus: matchStatus as 'qualified' | 'unqualified' | 'none',
+            model_used: ocrResult.model_used,
+            error: ocrResult.error,
+            validationWarnings: ocrResult.validationWarnings || [],
+            barcode_analysis: ocrResult?.barcode_analysis
+          },
+          barcodeResult: ocrResult?.barcode_analysis || null,
+          llm_full_text: aiResult?.reason,
+          processStageCode: traceContext?.processStageCode || '',
+          processStageName: traceContext?.processStageName || '',
+          pageInstanceId: traceContext?.pageInstanceId || '',
+          cameraId: traceContext?.cameraId || '',
+          fixtureQr: traceContext?.fixtureQr || '',
+          fixtureQrDetected: !!traceContext?.fixtureQrDetected,
+          fixtureQrSource: traceContext?.fixtureQrSource,
+          fixtureQrInputStatus: traceContext?.fixtureQrInputStatus || (traceContext?.fixtureQrDetected ? 'success' : 'pending'),
+          fixtureQrConfidence: traceContext?.fixtureQrConfidence,
+          businessCode: traceContext?.businessCode || '',
+          businessCodeType: traceContext?.businessCodeType || '',
+          traceContext: traceContext || {},
+        };
+
+        const savedData = await addAppResult(inspectionResult);
+        console.log('✅ OCR失败记录已保存到后端');
+        if (savedData) onSaveComplete?.(savedData);
+
+        clearOldDetectionHistory();
+        addDetectionHistory({
+          id: newResult.id,
+          timestamp: new Date(),
+          matchStatus: matchStatus,
+          overallQuality: failureQuality,
+          score: 0,
+          ocrResult: ocrResult,
+          barcodeAnalysis: ocrResult?.barcode_analysis,
+        });
+        await refreshHistory?.();
+
+        return { saved: true, savedData };
       }
+
+      // 没有可保存的检测结果（调用方不应视为已保存）
+      return { saved: false, reason: 'no_ocr_result' };
     } catch (error) {
       console.error('❌ 保存检测结果失败:', error);
       toast.error('保存检测结果失败，请检查网络后重试');
