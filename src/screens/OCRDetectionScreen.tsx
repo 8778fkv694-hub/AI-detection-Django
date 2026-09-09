@@ -326,6 +326,9 @@ const OCRDetectionScreen: React.FC = () => {
       : (fixtureQrInputSource === 'vision' ? 'pending' : 'failed')) as 'success' | 'pending' | 'failed',
     fixtureSessionId:   fixtureSessionId,
     fixtureNewRound:    fixtureNewRoundPending && !!fixtureSessionId,
+    appliedRecipeId:    appliedRecipeId || '',
+    appliedRecipeName:  appliedRecipeName || '',
+    appliedRecipeUpdatedAt: appliedRecipeSnapshot?.updatedAt || '',
     businessCode:       businessCodeParam,
     businessCodeType:   businessCodeTypeParam,
     fixtureQrPrefixes:  effectiveFixturePrefixes,
@@ -335,6 +338,7 @@ const OCRDetectionScreen: React.FC = () => {
     stageBindingConfig.fixtureEnabled,
     fixtureQrInput, fixtureQrInputSource,
     fixtureSessionId, fixtureNewRoundPending,
+    appliedRecipeId, appliedRecipeName, appliedRecipeSnapshot,
     businessCodeParam, businessCodeTypeParam,
     effectiveFixturePrefixes, effectiveFixturePattern,
   ]);

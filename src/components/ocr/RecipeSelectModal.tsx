@@ -109,6 +109,15 @@ const RecipeSelectModal: React.FC<RecipeSelectModalProps> = ({ onApply, onSkip }
                   <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <Tag className="h-3.5 w-3.5" />工序信息
                   </h4>
+                  {/* A12：模板引用影响提示 — 配方以快照复制引用工装模板，源模板更新不会自动同步到产线 */}
+                  {selected.fixtureTemplateId
+                    && (selected.sourceFixturePrefixes !== selected.fixtureQrPrefixes
+                      || selected.sourceFixturePattern !== selected.fixtureQrPattern) && (
+                    <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-200">
+                      ⚠️ 源工装模板「{selected.fixtureTemplateName}」已更新，本配方使用的是旧版本快照；
+                      改动源模板不会自动同步到产线配方。请在"模板管理"中重新选择工装模板以同步最新规则。
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       { label: '工序标识', value: selected.processStageCode },

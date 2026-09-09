@@ -46,6 +46,11 @@ const EMPTY_RECIPE: Omit<StageRecipe, 'id' | 'createdAt' | 'updatedAt'> = {
   fixtureQrPrefixes: '',
   fixtureQrPattern: '',
   fixtureTemplateId: null,
+  // A12：源工装模板版本信息（只读展示字段，提交时由 mapToApi 忽略）
+  fixtureTemplateName: '',
+  fixtureTemplateUpdatedAt: '',
+  sourceFixturePrefixes: '',
+  sourceFixturePattern: '',
   cameraId: '',
   currentModelId: '',
   selectedTargets: [],
@@ -446,6 +451,14 @@ function RecipeForm({
                   <label className="text-[11px] font-medium text-emerald-400">工装模板引用 (可选)</label>
                   <span className="text-[10px] text-muted-foreground italic">选择模板后将自动填充规则</span>
                 </div>
+                {/* A12：明确"独立副本"语义 — 引用只是快照复制，源模板后续更新不会自动同步到本配方 */}
+                {form.fixtureTemplateId && (
+                  <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-200">
+                    已引用「{fixtureTemplates.find(t => t.id === form.fixtureTemplateId)?.name || '工装模板'}」：
+                    当前值是导入时的快照副本；后续修改该工装模板不会自动同步到本配方。
+                    需要同步时请重新选择此模板或手动更新下方规则。
+                  </div>
+                )}
                 <select
                   value={form.fixtureTemplateId || ''}
                   onChange={e => handleFixtureTemplateChange(e.target.value)}

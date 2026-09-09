@@ -13,6 +13,11 @@ export interface StageRecipe {
   fixtureQrPrefixes: string;
   fixtureQrPattern: string;
   fixtureTemplateId: string | null;
+  // A12：源工装模板当前版本信息（只读，用于检测配方快照是否落后于源模板）
+  fixtureTemplateName: string;
+  fixtureTemplateUpdatedAt: string;
+  sourceFixturePrefixes: string;
+  sourceFixturePattern: string;
   cameraId: string;
   currentModelId: string | null;
   selectedTargets: string[];
@@ -71,6 +76,10 @@ function mapFromApi(data: any): StageRecipe {
     fixtureQrPrefixes: data.fixture_qr_prefixes ?? '',
     fixtureQrPattern: data.fixture_qr_pattern ?? '',
     fixtureTemplateId: data.fixture_template ?? null,
+    fixtureTemplateName: data.fixture_template_name ?? '',
+    fixtureTemplateUpdatedAt: data.fixture_template_updated_at ?? '',
+    sourceFixturePrefixes: data.fixture_template_prefixes ?? '',
+    sourceFixturePattern: data.fixture_template_pattern ?? '',
     cameraId: data.camera_id ?? '',
     currentModelId: data.current_model_id ?? '',
     selectedTargets: data.selected_targets ?? [],

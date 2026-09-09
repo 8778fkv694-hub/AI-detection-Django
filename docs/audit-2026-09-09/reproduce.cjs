@@ -181,6 +181,16 @@ const result = () => ({ success: true, overall_quality: '合格', ocr_text: 'SAM
   assert(screen.includes('appliedRecipeId, appliedRecipeName, appliedRecipeSnapshot, setAppliedRecipe'));
   observations.push({ id: 'A09', status: 'FIXED', observed: 'roiCacheIds/batchTriggered are no longer persisted; controlled recipe identity persists for restart recovery.' });
 
+  // A12（第三批已修复，影响提示）：模板复制语义显式化 —
+  // 运行页选中配方时提示"源工装模板已更新、本配方为旧版本快照"；
+  // 模板管理页标注"快照副本不自动同步"；证据携带配方身份（appliedRecipeId）。
+  const modalSrc = fs.readFileSync('src/components/ocr/RecipeSelectModal.tsx', 'utf8');
+  const templatesSrc = fs.readFileSync('src/screens/TemplatesScreen.tsx', 'utf8');
+  assert(modalSrc.includes('旧版本快照'));
+  assert(templatesSrc.includes('已引用') && templatesSrc.includes('快照副本'));
+  assert(screen.includes('appliedRecipeId:    appliedRecipeId'));
+  observations.push({ id: 'A12', status: 'FIXED', observed: 'Copy semantics are explicit: divergence between source fixture template and recipe snapshot is surfaced before apply; evidence records carry recipe identity.' });
+
   let submitted;
   const saveHook = loadHook('src/hooks/ocr/useDetectionSave.ts', { 'react-hot-toast': { default: { error() {} } } });
   const saver = saveHook.useDetectionSave({ fusionModeEnabled: false, selectedStandardId: null,

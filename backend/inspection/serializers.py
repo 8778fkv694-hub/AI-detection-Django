@@ -569,10 +569,19 @@ class OCRBarcodeTemplateSerializer(serializers.ModelSerializer):
 
 
 class FixtureTemplateSerializer(serializers.ModelSerializer):
+    # A12：引用影响提示 — 展示哪些工序配方以快照复制方式引用了本工装模板
+    used_by_recipes = serializers.SerializerMethodField()
+
     class Meta:
         model = FixtureTemplate
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_used_by_recipes(self, obj):
+        return [
+            {'id': str(item.id), 'name': item.name}
+            for item in obj.recipes.all().order_by('name')[:50]
+        ]
 
 
 class StageRecipeTemplateSerializer(serializers.ModelSerializer):
@@ -582,6 +591,22 @@ class StageRecipeTemplateSerializer(serializers.ModelSerializer):
         model = StageRecipeTemplate
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # A12：拍平源工装模板的当前版本信息，供前端检测"配方快照是否落后于源模板"
+        detail = data.pop('fixture_template_detail', None)
+        if isinstance(detail, dict):
+            data['fixture_template_name'] = detail.get('name', '')
+            data['fixture_template_prefixes'] = detail.get('prefixes', '')
+            data['fixture_template_pattern'] = detail.get('pattern', '')
+            data['fixture_template_updated_at'] = detail.get('updated_at', '')
+        else:
+            data['fixture_template_name'] = ''
+            data['fixture_template_prefixes'] = ''
+            data['fixture_template_pattern'] = ''
+            data['fixture_template_updated_at'] = ''
+        return data
 
 
 class AnomalyResolutionSerializer(serializers.ModelSerializer):
