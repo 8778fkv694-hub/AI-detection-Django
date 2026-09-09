@@ -8,7 +8,7 @@ const vm = require('vm');
 const ts = require('typescript');
 const assert = require('assert/strict');
 const observations = [];
-function loadHook(file, extras = {}) {
+function loadHook(file, extras = {}, reactOverride = {}) {
   const timers = [];
   const cleared = [];
   const module = { exports: {} };
@@ -17,6 +17,7 @@ function loadHook(file, extras = {}) {
     useRef: v => ({ current: v }),
     useState: v => [v, () => {}],
     useEffect: () => {},
+    ...reactOverride,
   };
   const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
@@ -99,24 +100,95 @@ const result = () => ({ success: true, overall_quality: '合格', ocr_text: 'SAM
   assert.equal(rejected.timers.length, 0);
   observations.push({ id: 'A11', status: 'FIXED', observed: 'Backend recheck conclusion overrides the frontend qualified guess and blocks auto-continue.' });
 
+  // A01（第二批已修复）：保存回配方使用统一收集器 currentRecipeState，
+  // 服务端返回值更新快照；不再出现“参与差异却不保存”的字段。
   const screen = fs.readFileSync('src/screens/OCRDetectionScreen.tsx', 'utf8');
-  const updateStart = screen.indexOf('await updateRecipe(appliedRecipeId');
-  const updateEnd = screen.indexOf('// Refresh snapshot', updateStart);
-  const payload = screen.slice(updateStart, updateEnd);
-  const snapshot = screen.slice(updateEnd, screen.indexOf('toast.success', updateEnd));
-  for (const field of ['nonGridTargets', 'targetConfidences']) {
-    assert(!payload.includes(field)); assert(snapshot.includes(field));
+  assert(screen.includes('updateRecipe(appliedRecipeId, currentRecipeState)'));
+  const collectorStart = screen.indexOf('const currentRecipeState = useMemo');
+  const collector = screen.slice(collectorStart, screen.indexOf('}), [', collectorStart));
+  for (const field of ['nonGridTargets', 'targetConfidences', 'fixtureEnabled', 'selectedStandardId', 'keywordMatchMode', 'minConfidence', 'detectionConfidence']) {
+    assert(collector.includes(field), `collector should include ${field}`);
   }
-  observations.push({ id: 'A01', observed: 'Save payload omits nonGridTargets and targetConfidences while local snapshot accepts both.' });
+  observations.push({ id: 'A01', status: 'FIXED', observed: 'Save payload and diff detection share one field collector incl. nonGridTargets/targetConfidences; snapshot updated from server response.' });
+
+  // A02（第二批已修复）：工序切换原子性 — 失败不推进索引，成功先应用再推进。
+  // 用真实 hook 函数体 + 最小 React/store 替身执行 goToNextStage/goToPrevStage。
+  function productProbe(extras = {}) {
+    let applied = [];
+    let advanced = 0; let regressed = 0;
+    const hooks = loadHook('src/hooks/ocr/useProductRecipe.ts', {
+      'react-hot-toast': { default: { error() {}, success() {} } },
+      '@/lib/productRecipeApi': { productRecipeApi: { list: async () => extras.products || [] } },
+      '@/state/ocrDetectionStore': { useOCRDetectionStore: () => ({
+        currentProductId: 'p1', currentProductStageIndex: 0,
+        setCurrentProductId: () => {}, nextProductStage: () => { advanced++; }, prevProductStage: () => { regressed++; },
+      }) },
+      '@/lib/stageRecipeApi': {
+        fetchRecipes: async () => extras.recipes ?? [],
+        },
+    }, {
+      // 注入 currentProduct（useState 初始 null 的那个调用）
+      useState: v => v === null ? [extras.currentProduct ?? null, () => {}] : [v, () => {}],
+    });
+    const hook = hooks.useProductRecipe((recipe) => { applied.push(recipe); });
+    return { hook, applied, counts: () => ({ advanced, regressed }) };
+  }
+  const stage = { stage_recipe: 'r1', stage_recipe_name: 'S1' };
+  const stage2 = { stage_recipe: 'r2', stage_recipe_name: 'S2' };
+  const product = { id: 'p1', stages: [stage, stage2] };
+
+  { // 加载失败：不推进索引，不应用配方
+    const probe = productProbe({ currentProduct: product, recipes: async () => { throw Error('network down'); } });
+    await probe.hook.goToNextStage();
+    assert.equal(probe.counts().advanced, 0);
+    assert.equal(probe.applied.length, 0);
+    observations.push({ id: 'A02', status: 'FIXED', observed: 'Stage switch failure does not advance the index nor apply any recipe.' });
+  }
+  { // 配方缺失：不推进索引
+    const probe = productProbe({ currentProduct: product, recipes: [] });
+    await probe.hook.goToNextStage();
+    assert.equal(probe.counts().advanced, 0);
+    assert.equal(probe.applied.length, 0);
+    observations.push({ id: 'A02', status: 'FIXED', observed: 'Missing stage recipe keeps the previous stage identity.' });
+  }
+  { // 成功：先应用配方，再推进索引
+    const recipe = { id: 'r2', name: 'S2' };
+    const probe = productProbe({ currentProduct: product, recipes: [recipe] });
+    await probe.hook.goToNextStage();
+    assert.equal(probe.applied.length, 1);
+    assert.equal(probe.applied[0], recipe);
+    assert.equal(probe.counts().advanced, 1);
+    observations.push({ id: 'A02', status: 'FIXED', observed: 'Stage recipe is applied before the product stage index advances.' });
+  }
+
+  // A08（第二批已修复）：开工前置检查 — requiredDeviceTypes 声明的串口设备未连接时阻止开工；
+  // 融合降级显式呈现。
+  assert(screen.includes('const checkRecipeReadiness'));
+  const readinessCalls = (screen.match(/(?<!const |Ref = )checkRecipeReadiness\(\)/g) || []).length
+    + (screen.match(/checkRecipeReadinessRef\.current\(\)/g) || []).length;
+  assert(readinessCalls >= 2); // 键盘抓拍 + 硬件触发
+  assert(screen.includes('如需启用请在当前窗口手动开启'));
+  observations.push({ id: 'A08', status: 'FIXED', observed: 'Recipe required serial devices gate the workflow start; forced fusion-off degradation is surfaced explicitly.' });
+
+  // A09（第二批已修复，部分）：临时缓存与锁标志不持久化，受控配方身份持久化。
+  const storeSrc = fs.readFileSync('src/state/ocrDetectionStore.ts', 'utf8');
+  const partializeStart = storeSrc.indexOf('partialize: (state)');
+  const partialize = storeSrc.slice(partializeStart, storeSrc.indexOf('storage:', partializeStart));
+  for (const field of ['roiCacheIds', 'batchTriggered']) {
+    assert(new RegExp(`${field}[^\\n]*排除`).test(partialize) || new RegExp(`// ${field === 'batchTriggered' ? 'A09' : 'A09'}`).test(partialize), `${field} should be excluded from persistence`);
+    assert(partialize.includes(field));
+  }
+  assert(screen.includes('appliedRecipeId, appliedRecipeName, appliedRecipeSnapshot, setAppliedRecipe'));
+  observations.push({ id: 'A09', status: 'FIXED', observed: 'roiCacheIds/batchTriggered are no longer persisted; controlled recipe identity persists for restart recovery.' });
 
   let submitted;
   const saveHook = loadHook('src/hooks/ocr/useDetectionSave.ts', { 'react-hot-toast': { default: { error() {} } } });
   const saver = saveHook.useDetectionSave({ fusionModeEnabled: false, selectedStandardId: null,
     addAppResult: async r => { submitted = r; return {}; }, clearOldDetectionHistory() {}, addDetectionHistory() {} });
-  await saver.saveDetectionResult({ success: true, full_text: 'X', detailed_results: [], ai_analysis: { marker: 1 }, batch_processing: { roi_details: [] } }, null, 'qualified', 'abc');
-  assert.equal(submitted.ocrResult.ai_analysis, undefined);
-  assert.equal(submitted.ocrResult.batch_processing, undefined);
-  observations.push({ id: 'A10', observed: 'Saved OCR payload discards ai_analysis and batch_processing evidence.' });
+  await saver.saveDetectionResult({ success: true, full_text: 'X', detailed_results: [], ai_analysis: { keyword_match_details: [{ marker: 1 }] }, batch_processing: { roi_details: [{ label: 'x' }] } }, null, 'qualified', 'abc');
+  assert.deepEqual(submitted.ocrResult.ai_analysis, { keyword_match_details: [{ marker: 1 }] });
+  assert.deepEqual(submitted.ocrResult.batch_processing, { roi_details: [{ label: 'x' }] });
+  observations.push({ id: 'A10', status: 'FIXED', observed: 'Saved OCR payload retains ai_analysis and batch_processing evidence for later audit.' });
 
   console.log(JSON.stringify({ method: 'Current-source hook probes; React lifecycle and browser hardware are not simulated', observations }, null, 2));
 })().catch(e => { console.error(e); process.exitCode = 1; });

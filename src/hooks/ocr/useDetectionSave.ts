@@ -145,7 +145,10 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
             model_used: ocrResult?.model_used,
             error: ocrResult?.error,
             validationWarnings: ocrResult?.validationWarnings || [],
-            barcode_analysis: ocrResult?.barcode_analysis
+            barcode_analysis: ocrResult?.barcode_analysis,
+            // A10：保留规则评估与 ROI 逐项证据，历史可复核原判定
+            ai_analysis: ocrResult?.ai_analysis,
+            batch_processing: ocrResult?.batch_processing,
           },
           barcodeResult: ocrResult?.barcode_analysis || null,
           // 保存LLM详细结果
@@ -226,7 +229,10 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
             model_used: ocrResult.model_used,
             error: ocrResult.error,
             validationWarnings: ocrResult.validationWarnings || [],
-            barcode_analysis: ocrResult?.barcode_analysis
+            barcode_analysis: ocrResult?.barcode_analysis,
+            // A10：保留规则评估与 ROI 逐项证据，历史可复核原判定
+            ai_analysis: ocrResult.ai_analysis,
+            batch_processing: ocrResult.batch_processing,
           },
           barcodeResult: ocrResult?.barcode_analysis || null,
           llm_full_text: aiResult?.reason,
@@ -300,7 +306,10 @@ export const useDetectionSave = (options: DetectionSaveOptions): UseDetectionSav
             model_used: ocrResult.model_used,
             error: ocrResult.error,
             validationWarnings: ocrResult.validationWarnings || [],
-            barcode_analysis: ocrResult?.barcode_analysis
+            barcode_analysis: ocrResult?.barcode_analysis,
+            // A10：失败记录同样保留证据
+            ai_analysis: ocrResult.ai_analysis,
+            batch_processing: ocrResult.batch_processing,
           },
           barcodeResult: ocrResult?.barcode_analysis || null,
           llm_full_text: aiResult?.reason,

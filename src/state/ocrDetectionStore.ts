@@ -162,6 +162,11 @@ interface OCRDetectionState {
   currentProductId: string | null;
   currentProductStageIndex: number;
 
+  // A09：受控配方身份（跨刷新保留；快照供差异对比与设备动作恢复）
+  appliedRecipeId: string | null;
+  appliedRecipeName: string | null;
+  appliedRecipeSnapshot: any;
+
   // 工作流状态
   workflowState: 'idle' | 'capturing' | 'searching_best_frame' | 'processing' | 'waiting_for_approval' | 'completed';
   isWaitingForSpace: boolean;
@@ -254,6 +259,9 @@ interface OCRDetectionState {
   setCurrentProductStageIndex: (index: number) => void;
   nextProductStage: () => void;
   prevProductStage: () => void;
+
+  // A09：受控配方身份 Actions
+  setAppliedRecipe: (applied: { id: string | null; name: string | null; snapshot: any } | null) => void;
 
   // 工作流 Actions
   setWorkflowState: (state: 'idle' | 'capturing' | 'searching_best_frame' | 'processing' | 'waiting_for_approval' | 'completed') => void;
@@ -377,6 +385,11 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
       currentProductId: null,
       currentProductStageIndex: 0,
 
+      // A09：受控配方身份默认值
+      appliedRecipeId: null,
+      appliedRecipeName: null,
+      appliedRecipeSnapshot: null,
+
       // 工作流默认值
       workflowState: 'idle',
       isWaitingForSpace: false,
@@ -491,6 +504,13 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
       nextProductStage: () => set((state) => ({ currentProductStageIndex: state.currentProductStageIndex + 1 })),
       prevProductStage: () => set((state) => ({ currentProductStageIndex: Math.max(0, state.currentProductStageIndex - 1) })),
 
+      // A09：受控配方身份
+      setAppliedRecipe: (applied) => set({
+        appliedRecipeId: applied?.id ?? null,
+        appliedRecipeName: applied?.name ?? null,
+        appliedRecipeSnapshot: applied?.snapshot ?? null,
+      }),
+
       // 工作流 Actions
       setWorkflowState: (state) => set({ workflowState: state }),
       setIsWaitingForSpace: (value) => set({ isWaitingForSpace: value }),
@@ -592,6 +612,8 @@ export const useOCRDetectionStore = create<OCRDetectionState>()(
           workflowResult,           // 排除：工作流结果，不应持久化
           isPaused,                 // 排除：暂停状态，每次都应重新开始
           detectionHistory,         // 排除：检测历史数据量大，不持久化
+          roiCacheIds,              // A09：服务端 ROI 缓存 ID 属于临时资源，刷新后必须重新采集上传
+          batchTriggered,           // A09：批处理触发锁属于运行时标志，刷新后必须重新开始
           ...rest
         } = state;
         return {

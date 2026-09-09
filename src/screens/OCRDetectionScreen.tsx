@@ -131,6 +131,7 @@ const OCRDetectionScreen: React.FC = () => {
     isFullscreen, showShortcutModal,
     isBindingInfoCollapsed, isQrRulesCollapsed, isQrSupplementCollapsed,
     batchProcessingMode, batchApplyRules, qrDetectIntervalSeconds,
+    appliedRecipeId, appliedRecipeName, appliedRecipeSnapshot, setAppliedRecipe,
     setEnableKeywordAnalysis, setKeywords, setKeywordMatchMode, setMinConfidence, setKeywordConfigs,
     setEnableBarcodeDetection, setBarcodeConfigs, setIsBarcodeSettingsExpanded, setBarcodeTemplateName, setShowBarcodeSaveTemplate,
     addBarcodeConfig, updateBarcodeConfig, removeBarcodeConfig,
@@ -248,11 +249,8 @@ const OCRDetectionScreen: React.FC = () => {
   } | null>(null);
 
   // 配方选择状态
+  // A09：受控配方身份持久化在 store 中（appliedRecipeId/Name/Snapshot），刷新后可恢复
   const [showRecipeSelect, setShowRecipeSelect] = useState(false);
-  const [appliedRecipeId, setAppliedRecipeId] = useState<string | null>(null);
-  const [appliedRecipeName, setAppliedRecipeName] = useState<string | null>(null);
-  // 应用配方时保存快照，用于差异对比
-  const [appliedRecipeSnapshot, setAppliedRecipeSnapshot] = useState<StageRecipe | null>(null);
 
   // 3. 模型配置 Hook
   const suppressAutoSelectRef = useRef(false);
@@ -523,6 +521,10 @@ const OCRDetectionScreen: React.FC = () => {
     // LLM融合绝不随配方自动开启：Jetson双YOLO + OCR并行时必须保持零驻留。
     // 标准可以预选，但用户若确实需要LLM，必须在当前窗口手动开启。
     setFusionModeEnabled(false);
+    // A08：执行方式降级需显式呈现——配方要求融合时，明确告知已按算力策略关闭
+    if (recipe.fusionModeEnabled) {
+      toast('该配方要求 LLM 融合检测；本页按 Jetson 算力策略已关闭融合，如需启用请在当前窗口手动开启', { duration: 6000, icon: '⚠️' });
+    }
     setSelectedStandardId(recipe.selectedStandardId ?? undefined);
     // 检测流程参数
     setAutoCapture(recipe.autoCapture);
@@ -538,9 +540,7 @@ const OCRDetectionScreen: React.FC = () => {
     setCompressionEnabled(recipe.compressionEnabled);
     setCompressionConfig(recipe.compressionConfig);
     setRoiWeightRatio(recipe.roiWeightRatio);
-    setAppliedRecipeId(recipe.id);
-    setAppliedRecipeName(recipe.name);
-    setAppliedRecipeSnapshot(recipe);
+    setAppliedRecipe({ id: recipe.id, name: recipe.name, snapshot: recipe });
     toast.success(`已应用配方：${recipe.name}`);
   }, [
     stageBindingConfig.pageInstanceId,
@@ -559,110 +559,115 @@ const OCRDetectionScreen: React.FC = () => {
     selectProduct, goToNextStage, goToPrevStage
   } = useProductRecipe(applyRecipe);
 
-  // 差异检测：对比当前设置与应用配方的快照（keywords 字符串不做比对，以 keywordConfigs 为准）
-  const recipeHasDiff = useMemo(() => {
-    if (!appliedRecipeSnapshot) return false;
-    const snap = appliedRecipeSnapshot;
-    if (stageBindingConfig.processStageCode !== snap.processStageCode) return true;
-    if (stageBindingConfig.fixtureQrPrefixes !== snap.fixtureQrPrefixes) return true;
-    if (stageBindingConfig.fixtureQrPattern !== snap.fixtureQrPattern) return true;
-    if (enableKeywordAnalysis !== snap.enableKeywordAnalysis) return true;
-    if (JSON.stringify(keywordConfigs) !== JSON.stringify(snap.keywordConfigs)) return true;
-    if (enableBarcodeDetection !== snap.enableBarcodeDetection) return true;
-    if (JSON.stringify(barcodeConfigs) !== JSON.stringify(snap.barcodeConfigs)) return true;
-    if (ocrEngineModel !== snap.ocrEngineModel) return true;
-    if (currentModelId !== snap.currentModelId) return true;
-    if (JSON.stringify(selectedTargets) !== JSON.stringify(snap.selectedTargets)) return true;
-    if (JSON.stringify(nonGridTargets) !== JSON.stringify(snap.nonGridTargets)) return true;
-    if (JSON.stringify(targetConfidences) !== JSON.stringify(snap.targetConfidences)) return true;
-    if (autoCapture !== snap.autoCapture) return true;
-    if (captureDelaySeconds !== snap.captureDelaySeconds) return true;
-    if (detectionInterval !== snap.detectionInterval) return true;
-    if (yoloTimeoutSeconds !== snap.yoloTimeoutSeconds) return true;
-    if (yoloDetectionMode !== snap.yoloDetectionMode) return true;
-    if (qrDetectIntervalSeconds !== snap.qrDetectIntervalSeconds) return true;
-    if (imageSaveMode !== snap.imageSaveMode) return true;
-    if (batchProcessingMode !== snap.batchProcessingMode) return true;
-    if (batchApplyRules !== snap.batchApplyRules) return true;
-    if (compressionEnabled !== snap.compressionEnabled) return true;
-    if (JSON.stringify(compressionConfig) !== JSON.stringify(snap.compressionConfig)) return true;
-    if (JSON.stringify(roiWeightRatio) !== JSON.stringify(snap.roiWeightRatio)) return true;
-    return false;
-  }, [
-    appliedRecipeSnapshot, stageBindingConfig,
-    enableKeywordAnalysis, keywordConfigs,
-    enableBarcodeDetection, barcodeConfigs, ocrEngineModel,
+  // A01：统一配方字段收集器 — 差异检测、保存回配方使用同一组字段与同一份数据，
+  // 避免出现“参与差异检测却不保存”或“保存了却不参与差异检测”的字段。
+  const currentRecipeState = useMemo(() => ({
+    processStageCode: stageBindingConfig.processStageCode,
+    processStageName: stageBindingConfig.processStageName,
+    fixtureQrPrefixes: stageBindingConfig.fixtureQrPrefixes,
+    fixtureQrPattern: stageBindingConfig.fixtureQrPattern,
+    cameraId: stageBindingConfig.cameraId,
+    fixtureEnabled: stageBindingConfig.fixtureEnabled,
+    enableKeywordAnalysis,
+    keywords, // keywords 字符串参与保存（与原保存行为一致），但不参与差异比对
+    keywordConfigs,
+    keywordMatchMode,
+    minConfidence,
+    enableBarcodeDetection,
+    barcodeConfigs,
+    ocrEngineModel,
+    detectionConfidence,
+    currentModelId,
+    selectedTargets,
+    nonGridTargets,
+    targetConfidences,
+    selectedStandardId,
+    autoCapture, captureDelaySeconds, detectionInterval, yoloTimeoutSeconds,
+    yoloDetectionMode, qrDetectIntervalSeconds,
+    imageSaveMode, batchProcessingMode, batchApplyRules,
+    compressionEnabled, compressionConfig, roiWeightRatio,
+  }), [
+    stageBindingConfig,
+    enableKeywordAnalysis, keywordConfigs, keywordMatchMode, minConfidence,
+    enableBarcodeDetection, barcodeConfigs, ocrEngineModel, detectionConfidence,
     currentModelId, selectedTargets, nonGridTargets, targetConfidences,
+    selectedStandardId,
     autoCapture, captureDelaySeconds, detectionInterval, yoloTimeoutSeconds,
     yoloDetectionMode, qrDetectIntervalSeconds, imageSaveMode, batchProcessingMode,
     batchApplyRules, compressionEnabled, compressionConfig, roiWeightRatio,
   ]);
 
+  // A01：归一化比较 — 忽略随机 UI id 与键序，数组按 JSON 序列化比较
+  const normalizeRecipeForCompare = (value: any): any => {
+    if (Array.isArray(value)) return value.map(normalizeRecipeForCompare);
+    if (value && typeof value === 'object') {
+      const sorted: Record<string, any> = {};
+      for (const key of Object.keys(value).sort()) {
+        if (key === 'id') continue; // 忽略随机 UI id，避免制造假差异
+        sorted[key] = normalizeRecipeForCompare(value[key]);
+      }
+      return sorted;
+    }
+    return value;
+  };
+
+  // 差异检测：对比当前设置与应用配方的快照（keywords 字符串不做比对，以 keywordConfigs 为准）
+  const recipeHasDiff = useMemo(() => {
+    if (!appliedRecipeSnapshot) return false;
+    // A01：keywords 字符串不参与比较；快照侧挑选与收集器同名字段，服务端元数据不参与比较
+    const stripKeywords = (state: any) => {
+      const { keywords: _ignored, ...rest } = state || {};
+      return rest;
+    };
+    // A01：从快照中挑选与收集器同名的字段，服务端元数据（name/updatedAt 等）不参与比较
+    const pickComparable = (recipe: any) => ({
+      processStageCode: recipe.processStageCode,
+      processStageName: recipe.processStageName,
+      fixtureQrPrefixes: recipe.fixtureQrPrefixes,
+      fixtureQrPattern: recipe.fixtureQrPattern,
+      cameraId: recipe.cameraId,
+      fixtureEnabled: recipe.fixtureEnabled,
+      enableKeywordAnalysis: recipe.enableKeywordAnalysis,
+      keywordConfigs: recipe.keywordConfigs,
+      keywordMatchMode: recipe.keywordMatchMode,
+      minConfidence: recipe.minConfidence,
+      enableBarcodeDetection: recipe.enableBarcodeDetection,
+      barcodeConfigs: recipe.barcodeConfigs,
+      ocrEngineModel: recipe.ocrEngineModel,
+      detectionConfidence: recipe.detectionConfidence,
+      currentModelId: recipe.currentModelId,
+      selectedTargets: recipe.selectedTargets,
+      nonGridTargets: recipe.nonGridTargets,
+      targetConfidences: recipe.targetConfidences,
+      selectedStandardId: recipe.selectedStandardId,
+      autoCapture: recipe.autoCapture,
+      captureDelaySeconds: recipe.captureDelaySeconds,
+      detectionInterval: recipe.detectionInterval,
+      yoloTimeoutSeconds: recipe.yoloTimeoutSeconds,
+      yoloDetectionMode: recipe.yoloDetectionMode,
+      qrDetectIntervalSeconds: recipe.qrDetectIntervalSeconds,
+      imageSaveMode: recipe.imageSaveMode,
+      batchProcessingMode: recipe.batchProcessingMode,
+      batchApplyRules: recipe.batchApplyRules,
+      compressionEnabled: recipe.compressionEnabled,
+      compressionConfig: recipe.compressionConfig,
+      roiWeightRatio: recipe.roiWeightRatio,
+    });
+    return JSON.stringify(normalizeRecipeForCompare(stripKeywords(currentRecipeState)))
+      !== JSON.stringify(normalizeRecipeForCompare(pickComparable(appliedRecipeSnapshot)));
+  }, [currentRecipeState, appliedRecipeSnapshot]);
+
   const handleSaveBackToRecipe = useCallback(async () => {
     if (!appliedRecipeId) return;
     try {
-      await updateRecipe(appliedRecipeId, {
-        processStageCode: stageBindingConfig.processStageCode,
-        processStageName: stageBindingConfig.processStageName,
-        fixtureQrPrefixes: stageBindingConfig.fixtureQrPrefixes,
-        fixtureQrPattern: stageBindingConfig.fixtureQrPattern,
-        cameraId: stageBindingConfig.cameraId,
-        enableKeywordAnalysis,
-        keywords,
-        keywordConfigs,
-        keywordMatchMode,
-        minConfidence,
-        enableBarcodeDetection,
-        barcodeConfigs,
-        ocrEngineModel,
-        detectionConfidence,
-        currentModelId,
-        selectedTargets,
-        autoCapture, captureDelaySeconds, detectionInterval, yoloTimeoutSeconds,
-        yoloDetectionMode, qrDetectIntervalSeconds,
-        imageSaveMode, batchProcessingMode, batchApplyRules,
-        compressionEnabled, compressionConfig, roiWeightRatio,
-      });
-      // Refresh snapshot
-      setAppliedRecipeSnapshot(prev => prev ? {
-        ...prev,
-        processStageCode: stageBindingConfig.processStageCode,
-        processStageName: stageBindingConfig.processStageName,
-        fixtureQrPrefixes: stageBindingConfig.fixtureQrPrefixes,
-        fixtureQrPattern: stageBindingConfig.fixtureQrPattern,
-        cameraId: stageBindingConfig.cameraId,
-        enableKeywordAnalysis,
-        keywords,
-        keywordConfigs: [...keywordConfigs],
-        keywordMatchMode,
-        minConfidence,
-        enableBarcodeDetection,
-        barcodeConfigs: [...barcodeConfigs],
-        ocrEngineModel,
-        detectionConfidence,
-        currentModelId,
-        selectedTargets: [...selectedTargets],
-        nonGridTargets: [...nonGridTargets],
-        targetConfidences: { ...targetConfidences },
-        autoCapture, captureDelaySeconds, detectionInterval, yoloTimeoutSeconds,
-        yoloDetectionMode, qrDetectIntervalSeconds,
-        imageSaveMode, batchProcessingMode, batchApplyRules,
-        compressionEnabled, compressionConfig: { ...compressionConfig },
-        roiWeightRatio: { ...roiWeightRatio },
-      } : null);
-      toast.success(`配方「${appliedRecipeName}」已更新`);
+      // A01：以服务端返回值更新快照（不本地拼装），保证“已应用配方”与实际保存内容一致
+      const updated = await updateRecipe(appliedRecipeId, currentRecipeState);
+      setAppliedRecipe({ id: updated.id, name: updated.name, snapshot: updated });
+      toast.success(`配方「${updated.name}」已更新`);
     } catch (e: any) {
       toast.error(e.message || '保存配方失败');
     }
-  }, [
-    appliedRecipeId, appliedRecipeName, stageBindingConfig,
-    enableKeywordAnalysis, keywords, keywordConfigs, keywordMatchMode, minConfidence,
-    enableBarcodeDetection, barcodeConfigs, ocrEngineModel, detectionConfidence,
-    currentModelId, selectedTargets, nonGridTargets,
-    autoCapture, captureDelaySeconds, detectionInterval, yoloTimeoutSeconds,
-    yoloDetectionMode, qrDetectIntervalSeconds, imageSaveMode, batchProcessingMode,
-    batchApplyRules, compressionEnabled, compressionConfig, roiWeightRatio,
-  ]);
+  }, [appliedRecipeId, currentRecipeState, setAppliedRecipe]);
 
   const { toggleCamera, switchCamera } = useOCRCamera({
     windowId,
@@ -1030,7 +1035,10 @@ const OCRDetectionScreen: React.FC = () => {
   // 10. 全局效应 (Side Effects & Keyboard)
   useKeyboardShortcuts({
     callbacks: {
-      onCapture: handleManualCapture,
+      onCapture: () => {
+        // A08：配方声明了必需设备时，未就绪不得开工
+        if (checkRecipeReadinessRef.current()) handleManualCapture();
+      },
       onToggleRealtime: () => setIsRealtimeActive(!isRealtimeActive),
       onTogglePause: togglePause,
       onToggleFullscreen: toggleFullscreen,
@@ -1085,8 +1093,27 @@ const OCRDetectionScreen: React.FC = () => {
   });
   const { markActivity } = watchdog;
 
+  // A08：开工前置检查 — 配方声明了必需设备类型（requiredDeviceTypes）时，
+  // 开工前校验对应资源是否已连接；未就绪则明确提示并阻止开工，不静默降级。
+  const checkRecipeReadiness = useCallback((): boolean => {
+    const snapshot = appliedRecipeSnapshot as any;
+    const required: string[] = Array.isArray(snapshot?.requiredDeviceTypes) ? snapshot.requiredDeviceTypes : [];
+    if (required.length === 0) return true;
+    const needsSerial = required.some(t => t === 'sensor' || t === 'controller' || t === 'serial');
+    if (needsSerial && !hardwareTriggerRef.current?.isConnected) {
+      toast.error('工位未就绪：配方要求的串口设备未连接，请连接设备后再开工', { duration: 6000 });
+      return false;
+    }
+    return true;
+  }, [appliedRecipeSnapshot]);
+  // 键盘快捷键定义在前，用 ref 读取最新的就绪检查函数，避免循环依赖
+  const checkRecipeReadinessRef = useRef(checkRecipeReadiness);
+  useEffect(() => { checkRecipeReadinessRef.current = checkRecipeReadiness; }, [checkRecipeReadiness]);
+
   const handleHardwareTrigger = useCallback(() => {
     if (!isCameraOn) return;
+    // A08：配方声明了必需设备时，未就绪不得开工
+    if (!checkRecipeReadiness()) return;
     if (turntableEnabled && workflowState === 'idle' && hardwareTriggerRef.current?.sendData) {
       void hardwareTriggerRef.current.sendData(turntableStartCmd);
     }
@@ -1094,7 +1121,7 @@ const OCRDetectionScreen: React.FC = () => {
       handleManualCapture();
     }
     markActivity();
-  }, [isCameraOn, workflowState, isRealtimeActive, handleManualCapture, markActivity, turntableEnabled, turntableStartCmd]);
+  }, [isCameraOn, workflowState, isRealtimeActive, handleManualCapture, markActivity, turntableEnabled, turntableStartCmd, checkRecipeReadiness]);
 
   const hardwareTrigger = useHardwareTrigger({
     callbacks: {
@@ -1338,7 +1365,7 @@ const OCRDetectionScreen: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAppliedRecipeId(null); setAppliedRecipeName(null); setAppliedRecipeSnapshot(null); }}
+                      onClick={() => setAppliedRecipe({ id: null, name: null, snapshot: null })}
                       className="rounded border border-slate-600 bg-slate-800 px-2.5 py-1 text-slate-400 hover:border-slate-500"
                     >
                       仅本次生效
