@@ -21,6 +21,19 @@ import { calculateSharpnessAsync } from '@/lib/imageQuality/sharpnessCalculator'
 import { drawDetections } from '@/lib/ocr/detectionDrawer';
 import type { BestROIData } from '@/hooks/ocr/useROIProcessor';
 
+// 共享抓帧画布：避免每次检测/采帧都新建 canvas 造成 GC 压力。
+// willReadFrequently 提示浏览器走 CPU 内存路径，toDataURL 回读不再触发
+// GPU→CPU 同步等待（OBS 虚拟摄像头预览周期性卡顿的主因之一）。
+const sharedFrameCanvas = document.createElement('canvas');
+const getSharedFrameContext = (
+  width: number,
+  height: number,
+): CanvasRenderingContext2D | null => {
+  if (sharedFrameCanvas.width !== width) sharedFrameCanvas.width = width;
+  if (sharedFrameCanvas.height !== height) sharedFrameCanvas.height = height;
+  return sharedFrameCanvas.getContext('2d', { willReadFrequently: true });
+};
+
 export interface UseRealtimeDetectionLoopOptions {
   // 实时检测状态
   isRealtimeActive: boolean;
@@ -176,6 +189,11 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
   const lastDetectionsRef = useRef<BackendYoloDetection[]>([]);
   const isFrameCollectionActiveRef = useRef<boolean>(false);
 
+  // 检测统计节流：默认 0.1s 检测间隔下，每个 tick 都 setDetectionStats 会让
+  // 整个页面以 10-30Hz 重渲染，是预览卡顿的重要来源。这里限制到 1Hz。
+  const lastStatsSyncRef = useRef(0);
+  const STATS_SYNC_INTERVAL_MS = 1000;
+
   // ========== 帧采集逻辑 ==========
 
   const stopFrameCollection = useCallback(() => {
@@ -192,9 +210,9 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
     if (!videoRef.current || imageSaveMode !== 'roi' || lastDetectionsRef.current.length === 0) return;
 
     isFrameCollectionActiveRef.current = true;
-    console.log('🎬 启动独立帧采集（间隔100ms）');
-
-    const FRAME_COLLECTION_INTERVAL = 100;
+    // 200ms（5fps）足够追踪最清晰 ROI；100ms 的全分辨率截图会把主线程
+    // 打满，导致 OBS 虚拟摄像头预览周期性卡顿。
+    const FRAME_COLLECTION_INTERVAL = 200;
 
     frameCollectionIntervalRef.current = setInterval(() => {
       if (!isFrameCollectionActiveRef.current || !videoRef.current || workflowState !== 'idle') {
@@ -226,13 +244,10 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             
             const img = new Image();
             img.onload = () => {
-              const frameCanvas = document.createElement('canvas');
-              frameCanvas.width = img.width;
-              frameCanvas.height = img.height;
-              const frameCtx = frameCanvas.getContext('2d');
+              const frameCtx = getSharedFrameContext(img.width, img.height);
               if (frameCtx) {
                 frameCtx.drawImage(img, 0, 0);
-                const frameDataUrl = frameCanvas.toDataURL('image/jpeg', 0.95);
+                const frameDataUrl = sharedFrameCanvas.toDataURL('image/jpeg', 0.95);
                 batchExtractROIs(detections, frameDataUrl, validTargets);
               }
               // 关键修复：使用完后必须释放 Blob URL，防止 Jetson 浏览器内存溢出崩溃
@@ -241,15 +256,23 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             img.onerror = () => URL.revokeObjectURL(objectUrl);
             img.src = objectUrl;
           } else {
-            // 传统模式：从前端 video 元素直接截图
-            const frameCanvas = document.createElement('canvas');
-            frameCanvas.width = videoRef.current!.videoWidth;
-            frameCanvas.height = videoRef.current!.videoHeight;
-            const frameCtx = frameCanvas.getContext('2d');
+            // 传统模式：从前端 video 元素直接截图。
+            // 宽度与检测上传帧（MAX_WIDTH=960）保持一致：
+            // 1) 检测框 bbox 是 960 空间的绝对像素坐标，采集帧若用视频原生
+            //    分辨率（OBS 常为 1080p），ROI 裁剪会整体错位；
+            // 2) 960px 截图比 1080p 全分辨率快 4 倍，显著降低主线程阻塞。
+            const MAX_COLLECT_WIDTH = 960;
+            let dstWidth = videoRef.current!.videoWidth;
+            let dstHeight = videoRef.current!.videoHeight;
+            if (dstWidth > MAX_COLLECT_WIDTH) {
+              dstHeight = Math.round(dstHeight * MAX_COLLECT_WIDTH / dstWidth);
+              dstWidth = MAX_COLLECT_WIDTH;
+            }
+            const frameCtx = getSharedFrameContext(dstWidth, dstHeight);
             if (!frameCtx || !videoRef.current) return;
 
-            frameCtx.drawImage(videoRef.current, 0, 0, frameCanvas.width, frameCanvas.height);
-            const frameDataUrl = frameCanvas.toDataURL('image/jpeg', 0.95);
+            frameCtx.drawImage(videoRef.current, 0, 0, dstWidth, dstHeight);
+            const frameDataUrl = sharedFrameCanvas.toDataURL('image/jpeg', 0.95);
             batchExtractROIs(detections, frameDataUrl, validTargets);
           }
         } catch (err) {
@@ -382,8 +405,9 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
               fps: result.fps,
             };
 
-            // 同步更新后端的 FPS 统计
-            if (result.fps) {
+            // 同步更新后端的 FPS 统计（1Hz 节流，避免高频整页重渲染）
+            if (result.fps && Date.now() - lastStatsSyncRef.current >= STATS_SYNC_INTERVAL_MS) {
+              lastStatsSyncRef.current = Date.now();
               // 将后端真实 FPS 更新到统计中
               setDetectionStats((prev: any) => ({
                 ...prev,
@@ -397,7 +421,6 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           // 仅在需要触发并行二维码识别时，按需截图（降低 CPU 消耗）
           if (enableParallelQrDetection && !fixtureQrInputRef.current &&
               (Date.now() - lastQrDetectTimeRef.current >= effectiveQrInterval)) {
-            const qrCanvas = document.createElement('canvas');
             const qrSrcW = videoRef.current.videoWidth;
             const qrSrcH = videoRef.current.videoHeight;
             let qrDstW = qrSrcW;
@@ -406,12 +429,10 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
               qrDstH = Math.round(qrDstH * 960 / qrDstW);
               qrDstW = 960;
             }
-            qrCanvas.width = qrDstW;
-            qrCanvas.height = qrDstH;
-            const qrCtx = qrCanvas.getContext('2d');
+            const qrCtx = getSharedFrameContext(qrDstW, qrDstH);
             if (qrCtx) {
               qrCtx.drawImage(videoRef.current, 0, 0, qrDstW, qrDstH);
-              base64DataForQr = qrCanvas.toDataURL('image/jpeg', 0.80).split(',')[1];
+              base64DataForQr = sharedFrameCanvas.toDataURL('image/jpeg', 0.80).split(',')[1];
             }
           }
 
@@ -431,10 +452,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
             dstWidth = MAX_WIDTH;
           }
 
-          const canvas = document.createElement('canvas');
-          canvas.width = dstWidth;
-          canvas.height = dstHeight;
-          const ctx = canvas.getContext('2d');
+          const ctx = getSharedFrameContext(dstWidth, dstHeight);
 
           if (!ctx) {
             isDetectingRef.current = false;
@@ -443,7 +461,7 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           }
 
           ctx.drawImage(videoRef.current, 0, 0, dstWidth, dstHeight);
-          dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+          dataUrl = sharedFrameCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
           base64Data = dataUrl.split(',')[1];
 
           if (!base64Data) {
@@ -478,16 +496,19 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           validSelectedTargets.includes(d.label) && d.confidence >= detectionConfidence
         );
 
-        // 更新检测统计
-        const personDetections = detections.filter(d => d.label === 'person').length;
-        const equipmentDetections = detections.filter(d => d.label !== 'person').length;
-        setDetectionStats((prev: any) => ({
-          ...prev,
-          totalDetections: detections.length,
-          personDetections,
-          equipmentDetections,
-          lastDetectionTime: Date.now()
-        }));
+        // 更新检测统计（1Hz 节流：检测 tick 高频调用，每次 set 都会触发整页重渲染）
+        if (Date.now() - lastStatsSyncRef.current >= STATS_SYNC_INTERVAL_MS) {
+          lastStatsSyncRef.current = Date.now();
+          const personDetections = detections.filter(d => d.label === 'person').length;
+          const equipmentDetections = detections.filter(d => d.label !== 'person').length;
+          setDetectionStats((prev: any) => ({
+            ...prev,
+            totalDetections: detections.length,
+            personDetections,
+            equipmentDetections,
+            lastDetectionTime: Date.now()
+          }));
+        }
 
         // 绘制检测结果到画布上
         if (detectionCanvasRef.current && videoRef.current) {
@@ -734,7 +755,11 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
         const frameCanvas = document.createElement('canvas');
         frameCanvas.width = videoRef.current.videoWidth;
         frameCanvas.height = videoRef.current.videoHeight;
-        const frameCtx = frameCanvas.getContext('2d');
+        // 延时采帧循环每 200ms 编码一次全分辨率帧；willReadFrequently 避免
+        // toDataURL/getImageData 回读触发 GPU 同步等待。
+        // 注意：这里不能复用 sharedFrameCanvas —— 全画面分支的 getImageData
+        // 在 img.onload 异步回调里执行，复用画布会被下一轮迭代改写。
+        const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
 
         if (!frameCtx || !videoRef.current) { capturedFrames++; continue; }
 
@@ -1257,7 +1282,27 @@ export const useRealtimeDetectionLoop = (options: UseRealtimeDetectionLoopOption
           .catch(e => console.error('卸载时停止后端检测循环失败:', e));
       }
     };
-  }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, detectionConfidence, modelConfig]);
+    // detectionConfidence 故意不放进 deps：置信度只是过滤参数，由下面的
+    // 独立 effect 原地同步到运行中的循环，避免滑块每动一格就 stop→start
+    // 整环重启（含模型 pin/unpin，Jetson 上会卡顿数秒）。
+  }, [isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId, modelConfig]);
+
+  // 置信度原地同步：后端对"已在运行"的循环会走 update_config 分支，
+  // 同 owner 重复 start 是幂等 attach，不会触发重启。
+  const lastSyncedConfidenceRef = useRef(detectionConfidence);
+  useEffect(() => {
+    if (lastSyncedConfidenceRef.current === detectionConfidence) return;
+    lastSyncedConfidenceRef.current = detectionConfidence;
+    if (isLocalOfflineMode() || !streamId) return;
+    if (!isRealtimeActive || !isCameraOn || isPaused) return;
+    const ownerId = backendLoopOwnerRef.current;
+    if (!ownerId) return;
+    startStreamDetectionLoop(streamId, {
+      confThreshold: detectionConfidence,
+      modelId: currentModelId || undefined,
+      ownerId,
+    }).catch(e => console.error('更新检测置信度失败:', e));
+  }, [detectionConfidence, isRealtimeActive, isCameraOn, isPaused, streamId, currentModelId]);
 
   // 实时检测循环
   // 注意：workflowState 故意不放进 deps —— 否则 workflow 状态一变化就 clearInterval，

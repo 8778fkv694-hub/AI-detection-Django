@@ -426,7 +426,12 @@ export const useOCRCamera = ({
   // 获取可用摄像头设备
   const getAvailableDevices = useCallback(async () => {
     try {
-      const devices = await getCameraDevices({ requestPermission: true });
+      // 不传 requestPermission：仅 enumerateDevices 枚举。
+      // requestPermission: true 每次都会 getUserMedia({video:true}) 后立即 stop，
+      // 在既有采集会话上开关第二个会话会让 macOS AVFoundation 重新配置摄像头
+      // （OBS 虚拟摄像头尤其敏感），导致视频周期性闪烁/冻结——即"只有视频卡"
+      // 且界面流畅的根因。权限已在用户点击"开启"时授予，此后标签依旧完整。
+      const devices = await getCameraDevices();
       setAvailableDevices(devices);
 
       // 从URL参数获取首选摄像头

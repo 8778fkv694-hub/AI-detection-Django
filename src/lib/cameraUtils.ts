@@ -39,6 +39,9 @@ export const buildCameraVideoConstraints = (
   const constraints: MediaTrackConstraints = {
     width: { ideal: width },
     height: { ideal: height },
+    // 限制 30fps：OBS 虚拟摄像头可能推 60fps，高帧率只会增加采集/合成负载，
+    // 对检测和预览没有收益，还容易造成周期性卡顿。
+    frameRate: { ideal: 30, max: 30 },
   };
 
   if (deviceId && !syntheticFacingMode) {
